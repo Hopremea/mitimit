@@ -5465,8 +5465,8 @@ function presenceDay(rec) {
   return { worked, pause, arrivee: rec.arrivee, depart: rec.depart, invalid: false };
 }
 function PointageEditor({ ds, rec, onSave, onDelete, onClose }) {
-  const [arrivee, setArrivee] = useState((rec && rec.arrivee) || "09:00");
-  const [depart, setDepart] = useState((rec && rec.depart) || "17:00");
+  const [arrivee, setArrivee] = useState((rec && rec.arrivee) || "10:00");
+  const [depart, setDepart] = useState((rec && rec.depart) || "18:00");
   const [pause, setPause] = useState(rec ? rec.pause !== false : true);
   const [pauseMin, setPauseMin] = useState((rec && rec.pauseMin != null) ? rec.pauseMin : 60);
   const we = isWeekendDs(ds);
