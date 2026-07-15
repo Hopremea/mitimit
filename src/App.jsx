@@ -5385,7 +5385,7 @@ const TABS = [
   // Support
   { id: "sav", group: "Support", label: "SAV", icon: LifeBuoy, title: "Service après-vente", sub: "Incidents et réclamations" },
   // Outils
-  { id: "pointage", group: "Outils", label: "Temps de présence", icon: Clock, title: "Temps de présence au local", sub: "Pointage quotidien, pause méridienne et heures supplémentaires" },
+  { id: "pointage", group: "Outils", label: "RH", icon: Clock, title: "RH", sub: "Temps de présence, pointage et frais kilométriques" },
   { id: "calc", group: "Outils", label: "Calculateur", icon: Calculator, title: "Calculateur", sub: "Coefficients, TVA, change, logistique" },
   { id: "conn", group: "Outils", label: "Intégrations", icon: Plug, title: "Intégrations & paramètres", sub: "Connexions, imports, sauvegarde et préférences" },
 ];
@@ -5580,6 +5580,79 @@ function presenceDay(rec) {
   const pause = rec.pause ? (Number(rec.pauseMin) || 0) : 0;
   const worked = Math.max(0, d - a - pause);
   return { worked, pause, arrivee: rec.arrivee, depart: rec.depart, invalid: false, motif: "presence" };
+}
+// Onglet RH : sous-navigation entre le temps de présence (pointage) et les frais kilométriques.
+function RH({ data, persist }) {
+  const [sub, setSub] = useState("presence");
+  const subs = [{ id: "presence", label: "Temps de présence", icon: Clock }, { id: "frais", label: "Frais kilométriques", icon: Navigation }];
+  return (<div className="fade">
+    <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>{subs.map((x) => { const Ic = x.icon; return <button key={x.id} className={cx("chip", sub === x.id && "on")} onClick={() => setSub(x.id)} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Ic size={14} />{x.label}</button>; })}</div>
+    <div style={{ display: sub === "presence" ? "block" : "none" }}><Pointage data={data} persist={persist} /></div>
+    <div style={{ display: sub === "frais" ? "block" : "none" }}><FraisKm data={data} persist={persist} /></div>
+  </div>);
+}
+// Simulateur de frais kilométriques : trajet quotidien domicile-travail (essence + péage, aller-retour)
+// ou déplacement ponctuel saisi librement. Les montants par défaut sont mémorisables dans les réglages.
+function FraisKm({ data, persist }) {
+  const s = data.settings || {};
+  const [mode, setMode] = useState("domicile");
+  const [essence, setEssence] = useState(s.fraisEssence != null ? s.fraisEssence : 8);
+  const [peage, setPeage] = useState(s.fraisPeage != null ? s.fraisPeage : 3.2);
+  const [ar, setAr] = useState(s.fraisAR !== false);
+  // Jours de trajet par défaut = jours de présence pointés ce mois (motif présence avec horaires).
+  const presDays = useMemo(() => { const pre = new Date().toISOString().slice(0, 7); return Object.entries(data.pointages || {}).filter(([ds, r]) => ds.startsWith(pre) && r && (!r.motif || r.motif === "presence") && r.arrivee && r.depart).length; }, [data.pointages]);
+  const [jours, setJours] = useState(presDays);
+  const [pDest, setPDest] = useState(""); const [pKm, setPKm] = useState(""); const [pEss, setPEss] = useState(0); const [pPea, setPPea] = useState(0); const [pAutre, setPAutre] = useState(0);
+  const e = Number(essence) || 0, p = Number(peage) || 0, mult = ar ? 2 : 1;
+  const coutJour = (e + p) * mult; const totalMois = coutJour * (Number(jours) || 0);
+  const pTotal = (Number(pEss) || 0) + (Number(pPea) || 0) + (Number(pAutre) || 0);
+  const memoriser = () => persist((pp) => ({ ...pp, settings: { ...pp.settings, fraisEssence: e, fraisPeage: p, fraisAR: ar } }));
+  const monthName = new Date().toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+  return (<div>
+    <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+      <button className={cx("chip", mode === "domicile" && "on")} onClick={() => setMode("domicile")} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Home size={14} /> Domicile ↔ Travail</button>
+      <button className={cx("chip", mode === "ponctuel" && "on")} onClick={() => setMode("ponctuel")} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Navigation size={14} /> Déplacement ponctuel</button>
+    </div>
+    {mode === "domicile" ? (
+      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", alignItems: "start" }}>
+        <div className="card"><div className="sec-h"><h3 className="pu-display">Trajet quotidien domicile ↔ travail</h3></div>
+          <div className="row2" style={{ marginBottom: 8 }}><div className="fld"><label>⛽ Essence (€ / trajet)</label><input type="number" step="0.01" value={essence} onChange={(ev) => setEssence(ev.target.value)} /></div><div className="fld"><label>🛣️ Péage (€ / trajet)</label><input type="number" step="0.01" value={peage} onChange={(ev) => setPeage(ev.target.value)} /></div></div>
+          <div className="fld" style={{ marginBottom: 8 }}><label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", fontWeight: 600 }}><input type="checkbox" checked={ar} onChange={(ev) => setAr(ev.target.checked)} style={{ width: 16, height: 16, accentColor: "var(--blue)" }} /> Aller-retour (× 2)</label></div>
+          <div className="fld"><label style={{ textTransform: "capitalize" }}>Nombre de jours de trajet · {monthName}</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="1" min="0" value={jours} onChange={(ev) => setJours(ev.target.value)} /><button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setJours(presDays)} title="Reprendre le nombre de jours de présence pointés ce mois">{presDays} pointé(s)</button></div></div>
+          <div style={{ marginTop: 10 }}><button className="btn btn-g btn-s" onClick={memoriser}><Save size={13} /> Mémoriser ces montants par défaut</button></div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div className="card" style={{ borderTop: "3px solid var(--blue)" }}><div className="sec-h"><h3 className="pu-display">Coût par jour</h3></div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}><span>Essence{ar ? " × 2" : ""}</span><span className="tnum">{eur2(e * mult)}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}><span>Péage{ar ? " × 2" : ""}</span><span className="tnum">{eur2(p * mult)}</span></div>
+            </div>
+            <div className="calc-out" style={{ background: "#eef2fb" }}><span className="l">Coût du trajet quotidien{ar ? " (aller-retour)" : ""}</span><span className="b pu-display tnum">{eur2(coutJour)}</span></div>
+          </div>
+          <div className="card" style={{ borderTop: "3px solid var(--green)" }}><div className="sec-h"><h3 className="pu-display" style={{ textTransform: "capitalize" }}>Total · {monthName}</h3></div>
+            <div className="calc-out" style={{ background: "#e7f7ef" }}><span className="l">{Number(jours) || 0} jour(s) × {eur2(coutJour)}</span><span className="b pu-display tnum" style={{ color: "var(--green)" }}>{eur2(totalMois)}</span></div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8, lineHeight: 1.5 }}>Estimation des frais de trajet domicile-travail sur le mois, basée sur vos jours de présence pointés.</div>
+          </div>
+        </div>
+      </div>
+    ) : (
+      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", alignItems: "start" }}>
+        <div className="card"><div className="sec-h"><h3 className="pu-display">Déplacement ponctuel</h3></div>
+          <div className="fld" style={{ marginBottom: 8 }}><label>Destination / motif (facultatif)</label><input value={pDest} onChange={(ev) => setPDest(ev.target.value)} placeholder="RDV client, salon…" /></div>
+          <div className="row2" style={{ marginBottom: 8 }}><div className="fld"><label>Distance (km, facultatif)</label><input type="number" step="1" value={pKm} onChange={(ev) => setPKm(ev.target.value)} /></div><div className="fld"><label>⛽ Essence (€)</label><input type="number" step="0.01" value={pEss} onChange={(ev) => setPEss(ev.target.value)} /></div></div>
+          <div className="row2"><div className="fld"><label>🛣️ Péage (€)</label><input type="number" step="0.01" value={pPea} onChange={(ev) => setPPea(ev.target.value)} /></div><div className="fld"><label>Autres frais (€)</label><input type="number" step="0.01" value={pAutre} onChange={(ev) => setPAutre(ev.target.value)} /></div></div>
+        </div>
+        <div className="card" style={{ borderTop: "3px solid var(--blue)" }}><div className="sec-h"><h3 className="pu-display">Total du déplacement</h3></div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}><span>Essence</span><span className="tnum">{eur2(Number(pEss) || 0)}</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}><span>Péage</span><span className="tnum">{eur2(Number(pPea) || 0)}</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}><span>Autres frais</span><span className="tnum">{eur2(Number(pAutre) || 0)}</span></div>
+          </div>
+          <div className="calc-out" style={{ background: "#eef2fb" }}><span className="l">Total{pDest ? " · " + pDest : ""}{pKm ? " · " + pKm + " km" : ""}</span><span className="b pu-display tnum">{eur2(pTotal)}</span></div>
+        </div>
+      </div>
+    )}
+  </div>);
 }
 function PointageEditor({ ds, rec, onSave, onDelete, onClose }) {
   const [motif, setMotif] = useState((rec && rec.motif && PRESENCE_MOTIFS[rec.motif]) ? rec.motif : "presence");
@@ -6824,7 +6897,7 @@ export default function App() {
       {tab === "stock" && <Stock key={"stock-" + navKey} data={data} persist={persist} />}
       {tab === "reassort" && <Reassort key={"reassort-" + navKey} data={data} persist={persist} />}
       {tab === "sav" && <Sav key={"sav-" + navKey} data={data} persist={persist} />}
-      {tab === "pointage" && <Pointage key={"pointage-" + navKey} data={data} persist={persist} />}
+      {tab === "pointage" && <RH key={"pointage-" + navKey} data={data} persist={persist} />}
       {tab === "calc" && <Calculateur data={data} persist={persist} />}
       {tab === "conn" && <Connexions key={"conn-" + navKey} data={data} persist={persist} autoBackup={autoBackup} />}
       </div>
