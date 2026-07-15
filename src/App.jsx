@@ -2172,6 +2172,46 @@ function FunnelTile({ accounts, go }) {
     </div>
   </div>);
 }
+// ============== COCKPIT COMMERCIAL GAMIFIÉ ==============
+// Score de jeu à partir de l'activité commerciale réelle : XP (échanges, contacts, devis, ventes,
+// prospects convertis) → niveau + titre, série de jours ouvrés actifs, et 3 quêtes hebdomadaires
+// mesurées sur l'activité de la semaine en cours. Aucune donnée inventée, tout est dérivé de `data`.
+const COMMERCIAL_LEVELS = ["Prospecteur débutant", "Prospecteur", "Chasseur d'affaires", "Négociateur", "Closer", "Ambassadeur PEN'UP", "Légende commerciale"];
+const COMMERCIAL_STEP = 300; // XP par niveau
+function commercialGame(data) {
+  const interactions = data.interactions || [];
+  const deals = data.deals || [];
+  const contacts = data.contacts || [];
+  const prospects = data.prospects || [];
+  const signed = deals.filter(isCaSigne);
+  const devis = deals.filter(isDevisEnAttente);
+  const convertis = prospects.filter((p) => p.statut === "converti" || p.accountId);
+  const xp = interactions.length * 3 + contacts.length * 5 + devis.length * 10 + signed.length * 40 + convertis.length * 25;
+  const level = Math.min(COMMERCIAL_LEVELS.length, Math.floor(xp / COMMERCIAL_STEP) + 1);
+  const levelName = COMMERCIAL_LEVELS[level - 1];
+  const xpPct = level >= COMMERCIAL_LEVELS.length ? 100 : Math.round((xp % COMMERCIAL_STEP) / COMMERCIAL_STEP * 100);
+  const iso = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+  // Série : jours ouvrés (lun-ven) consécutifs avec au moins une action (échange ou devis/commande daté).
+  const active = new Set();
+  interactions.forEach((i) => { if (i.date) active.add(i.date); });
+  deals.forEach((d) => { if (d.date) active.add(d.date); });
+  let streak = 0; const dd = new Date(); dd.setHours(0, 0, 0, 0);
+  if (!active.has(iso(dd))) dd.setDate(dd.getDate() - 1);
+  for (let k = 0; k < 400; k++) { const wd = dd.getDay(); if (wd === 0 || wd === 6) { dd.setDate(dd.getDate() - 1); continue; } if (active.has(iso(dd))) { streak++; dd.setDate(dd.getDate() - 1); } else break; }
+  // Semaine en cours (du lundi à aujourd'hui).
+  const mon = new Date(); mon.setHours(0, 0, 0, 0); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7)); const monIso = iso(mon);
+  const inWeek = (ds) => ds && ds >= monIso;
+  const exWeek = interactions.filter((i) => inWeek(i.date)).length;
+  const dealWeek = deals.filter((x) => inWeek(x.date)).length;
+  const ctWeek = contacts.filter((c) => inWeek(c.createdAt)).length;
+  const quests = [
+    { id: "ex", icon: RefreshCw, color: "#7c5cf0", label: "Journaliser 5 échanges", done: exWeek, target: 5 },
+    { id: "deal", icon: FileText, color: "#F8B133", label: "Créer 2 devis ou commandes", done: dealWeek, target: 2 },
+    { id: "ct", icon: Users, color: "#2bb673", label: "Ajouter 2 contacts", done: ctWeek, target: 2 },
+  ];
+  const questsDone = quests.filter((q) => q.done >= q.target).length;
+  return { xp, level, levelName, xpPct, streak, signed: signed.length, quests, questsDone };
+}
 function Dashboard({ data, go }) {
   const { accounts, deals, products, contacts } = data;
   const [allEx, setAllEx] = useState(false);
@@ -2203,6 +2243,41 @@ function Dashboard({ data, go }) {
     </div>
   );
   return (<div className="fade">
+    {(() => { const g = commercialGame(data); return (
+      <div className="card" style={{ marginBottom: 18, background: "linear-gradient(135deg, rgba(255,90,69,.10), rgba(124,92,240,.10))" }}>
+        <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div className="pu-display" style={{ width: 54, height: 54, borderRadius: 14, background: "var(--red)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 22, boxShadow: "0 6px 16px rgba(255,90,69,.3)", flexShrink: 0 }}>{g.level}</div>
+            <div>
+              <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 800, textTransform: "uppercase", letterSpacing: .4 }}>Niveau {g.level} · Commercial</div>
+              <div className="pu-display" style={{ fontSize: 18 }}>{g.levelName}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+                <div style={{ width: 160, maxWidth: "40vw", height: 8, background: "var(--line)", borderRadius: 6, overflow: "hidden" }}><div style={{ width: g.xpPct + "%", height: "100%", background: "linear-gradient(90deg,#FF5A45,#7c5cf0)", borderRadius: 6, transition: "width .4s" }} /></div>
+                <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }} className="tnum">{num(g.xp)} XP</span>
+              </div>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 22, flexWrap: "wrap" }}>
+            <div style={{ textAlign: "center" }}><div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "center", color: g.streak > 0 ? "#FF5A45" : "var(--muted)" }}><Flame size={20} /><span className="pu-display tnum" style={{ fontSize: 24 }}>{g.streak}</span></div><div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>jours d'activité</div></div>
+            <div style={{ textAlign: "center" }}><div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "center", color: "#2bb673" }}><Trophy size={19} /><span className="pu-display tnum" style={{ fontSize: 24 }}>{g.signed}</span></div><div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>ventes signées</div></div>
+          </div>
+        </div>
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+            <span style={{ fontSize: 12, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3, display: "inline-flex", alignItems: "center", gap: 6 }}><Zap size={13} /> Quêtes de la semaine · {g.questsDone}/{g.quests.length}</span>
+            {g.questsDone === g.quests.length && <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--green)" }}>🎉 Semaine accomplie !</span>}
+          </div>
+          <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
+            {g.quests.map((q) => { const Ic = q.icon; const pct = q.target > 0 ? Math.min(100, Math.round(q.done / q.target * 100)) : 0; const ok = q.done >= q.target; return (
+              <div key={q.id} style={{ border: "1px solid var(--line)", borderRadius: 12, padding: "10px 12px", background: ok ? q.color + "12" : "var(--card)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 700 }}><span style={{ width: 24, height: 24, borderRadius: 7, background: q.color + "1c", color: q.color, display: "grid", placeItems: "center", flexShrink: 0 }}>{ok ? <CheckCircle2 size={14} /> : <Ic size={14} />}</span><span style={{ flex: 1 }}>{q.label}</span><span className="tnum" style={{ color: ok ? q.color : "var(--muted)", fontWeight: 800 }}>{Math.min(q.done, q.target)}/{q.target}</span></div>
+                <div style={{ height: 7, borderRadius: 6, background: "var(--line)", overflow: "hidden", marginTop: 8 }}><div style={{ width: pct + "%", height: "100%", background: q.color, borderRadius: 6, transition: "width .4s" }} /></div>
+              </div>
+            ); })}
+          </div>
+        </div>
+      </div>
+    ); })()}
     <DashSection icon={LayoutDashboard} color="#3F60AA" title="Synthèse" note="indicateurs clés & entonnoir" />
     <div className="grid kpis" style={{ marginBottom: 18 }}>{kpis.map((k, i) => (<div className="card kpi" key={i} style={{ animationDelay: `${i * 80}ms` }}><div className="ic" style={{ background: k.bg, color: k.fg }}>{k.ic}</div><div className="lab">{k.lab}</div><div className="val pu-display tnum">{k.val}</div><div className="sub">{k.sub}</div></div>))}</div>
     <FunnelTile accounts={accounts} go={go} />
