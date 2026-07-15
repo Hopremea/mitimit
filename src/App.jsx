@@ -5467,51 +5467,79 @@ function CalendarExportModal({ data, persist, onClose }) {
 // Base contractuelle 7 h/jour du lundi au vendredi ; décompte des heures supplémentaires.
 const PRESENCE_TARGET = 420; // 7 h en minutes
 const PRESENCE_LEVELS = ["Pointeur débutant", "Assidu", "Régulier", "Confirmé", "Chevronné", "Expert du temps", "Maître des horaires", "Légende du pointage"];
+// Motifs de journée : « presence » = saisie des horaires (arrivée/départ/pause) ; les autres valent
+// un forfait d'heures fixe (7 h = objectif, donc journée neutre) sans avoir à saisir d'horaires.
+const PRESENCE_MOTIFS = {
+  presence:    { label: "Présence au local",     hours: null,           color: "#3F60AA", emoji: "🏢" },
+  cours:       { label: "Journée de cours",      hours: PRESENCE_TARGET, color: "#7c5cf0", emoji: "🎓" },
+  teletravail: { label: "Télétravail",           hours: PRESENCE_TARGET, color: "#3F60AA", emoji: "🏠" },
+  conges:      { label: "Congés",                hours: PRESENCE_TARGET, color: "#2bb673", emoji: "🌴" },
+  rtt:         { label: "RTT",                    hours: PRESENCE_TARGET, color: "#2bb673", emoji: "🗓️" },
+  ferie:       { label: "Jour férié",            hours: PRESENCE_TARGET, color: "#F8B133", emoji: "🎉" },
+  maladie:     { label: "Congé maladie",         hours: PRESENCE_TARGET, color: "#FF5A45", emoji: "🤒" },
+  absence:     { label: "Absence non rémunérée", hours: 0,               color: "#9aa6bd", emoji: "➖" },
+};
+const MOTIF_ORDER = ["presence", "cours", "teletravail", "conges", "rtt", "ferie", "maladie", "absence"];
 const pMin = (t) => { if (!t || !/^\d{1,2}:\d{2}$/.test(t)) return null; const [h, m] = t.split(":").map(Number); return h * 60 + m; };
 const fmtDur = (min, opts = {}) => { const v = Math.round(min || 0); const sign = v < 0 ? "−" : (opts.plus && v > 0 ? "+" : ""); const a = Math.abs(v); const h = Math.floor(a / 60), m = a % 60; return sign + (m ? `${h} h ${String(m).padStart(2, "0")}` : `${h} h`); };
 const isoLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const isWeekendDs = (ds) => { const wd = new Date(ds + "T00:00:00").getDay(); return wd === 0 || wd === 6; };
 // Décompte d'une journée à partir d'un enregistrement { arrivee, depart, pause, pauseMin }.
 function presenceDay(rec) {
-  if (!rec || !rec.arrivee || !rec.depart) return null;
+  if (!rec) return null;
+  const motif = (rec.motif && PRESENCE_MOTIFS[rec.motif]) ? rec.motif : "presence";
+  if (motif !== "presence") {
+    return { worked: PRESENCE_MOTIFS[motif].hours || 0, pause: false, motif, invalid: false };
+  }
+  if (!rec.arrivee || !rec.depart) return null;
   const a = pMin(rec.arrivee), d = pMin(rec.depart);
   if (a == null || d == null) return null;
-  if (d <= a) return { worked: 0, invalid: true, arrivee: rec.arrivee, depart: rec.depart, pause: !!rec.pause };
+  if (d <= a) return { worked: 0, invalid: true, arrivee: rec.arrivee, depart: rec.depart, pause: !!rec.pause, motif: "presence" };
   const pause = rec.pause ? (Number(rec.pauseMin) || 0) : 0;
   const worked = Math.max(0, d - a - pause);
-  return { worked, pause, arrivee: rec.arrivee, depart: rec.depart, invalid: false };
+  return { worked, pause, arrivee: rec.arrivee, depart: rec.depart, invalid: false, motif: "presence" };
 }
 function PointageEditor({ ds, rec, onSave, onDelete, onClose }) {
+  const [motif, setMotif] = useState((rec && rec.motif && PRESENCE_MOTIFS[rec.motif]) ? rec.motif : "presence");
   const [arrivee, setArrivee] = useState((rec && rec.arrivee) || "10:00");
   const [depart, setDepart] = useState((rec && rec.depart) || "17:30");
   const [pause, setPause] = useState(rec ? rec.pause !== false : true);
   const [pauseMin, setPauseMin] = useState((rec && rec.pauseMin != null) ? rec.pauseMin : 30);
   const we = isWeekendDs(ds);
-  const st = presenceDay({ arrivee, depart, pause, pauseMin });
+  const isPresence = motif === "presence";
+  const st = presenceDay(isPresence ? { arrivee, depart, pause, pauseMin } : { motif });
   const target = we ? 0 : PRESENCE_TARGET;
   const over = st && !st.invalid ? st.worked - target : null;
   const dLabel = new Date(ds + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
   const col = over == null ? "var(--muted)" : over >= 0 ? "var(--green)" : "var(--amber)";
+  const save = () => onSave(isPresence ? { arrivee, depart, pause, pauseMin: pause ? (Number(pauseMin) || 0) : 0 } : { motif });
   return (<Modal title={"Pointage — " + dLabel} onClose={onClose}>
-    <div className="row2">
-      <div className="fld"><label>Heure d'arrivée</label><input type="time" value={arrivee} onChange={(e) => setArrivee(e.target.value)} /></div>
-      <div className="fld"><label>Heure de départ</label><input type="time" value={depart} onChange={(e) => setDepart(e.target.value)} /></div>
+    <div className="fld"><label>Type de journée</label>
+      <select value={motif} onChange={(e) => setMotif(e.target.value)}>{MOTIF_ORDER.map((k) => { const m = PRESENCE_MOTIFS[k]; return <option key={k} value={k}>{m.emoji + " " + m.label + (m.hours != null ? " — " + fmtDur(m.hours) : "")}</option>; })}</select>
     </div>
-    <div className="fld" style={{ marginTop: 2, marginBottom: pause ? 8 : 0 }}>
-      <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", fontWeight: 600 }}>
-        <input type="checkbox" checked={pause} onChange={(e) => setPause(e.target.checked)} style={{ width: 16, height: 16, accentColor: "var(--blue)" }} />
-        <Coffee size={15} /> J'ai pris une pause méridienne
-      </label>
-    </div>
-    {pause && <div className="fld"><label>Durée de la pause (minutes)</label><input type="number" min="0" step="5" value={pauseMin} onChange={(e) => setPauseMin(Math.max(0, +e.target.value))} /></div>}
+    {isPresence ? (<>
+      <div className="row2">
+        <div className="fld"><label>Heure d'arrivée</label><input type="time" value={arrivee} onChange={(e) => setArrivee(e.target.value)} /></div>
+        <div className="fld"><label>Heure de départ</label><input type="time" value={depart} onChange={(e) => setDepart(e.target.value)} /></div>
+      </div>
+      <div className="fld" style={{ marginTop: 2, marginBottom: pause ? 8 : 0 }}>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", fontWeight: 600 }}>
+          <input type="checkbox" checked={pause} onChange={(e) => setPause(e.target.checked)} style={{ width: 16, height: 16, accentColor: "var(--blue)" }} />
+          <Coffee size={15} /> J'ai pris une pause méridienne
+        </label>
+      </div>
+      {pause && <div className="fld"><label>Durée de la pause (minutes)</label><input type="number" min="0" step="5" value={pauseMin} onChange={(e) => setPauseMin(Math.max(0, +e.target.value))} /></div>}
+    </>) : (
+      <div style={{ fontSize: 12.5, color: "var(--muted)", margin: "2px 0 4px", lineHeight: 1.5 }}>Journée « {PRESENCE_MOTIFS[motif].label} » : comptée forfaitairement {fmtDur(PRESENCE_MOTIFS[motif].hours)}{PRESENCE_MOTIFS[motif].hours === PRESENCE_TARGET ? " (objectif atteint, journée neutre)" : ""}. Pas d'horaires à saisir.</div>
+    )}
     <div className="calc-out" style={{ marginTop: 10, background: (over == null ? "#9aa6bd" : over >= 0 ? "#2bb673" : "#F8B133") + "18" }}>
-      <span className="l">Temps travaillé{we ? " (week-end)" : " · objectif " + fmtDur(target)}</span>
+      <span className="l">Temps compté{we ? " (week-end)" : " · objectif " + fmtDur(target)}</span>
       <span className="b pu-display tnum" style={{ color: col }}>{st && !st.invalid ? fmtDur(st.worked) : "—"}{over != null && over !== 0 ? "  (" + fmtDur(over, { plus: true }) + ")" : ""}</span>
     </div>
     {st && st.invalid && <div style={{ color: "var(--red)", fontSize: 12, marginTop: 8 }}>L'heure de départ doit être postérieure à l'heure d'arrivée.</div>}
     <div style={{ display: "flex", justifyContent: "space-between", marginTop: 14, gap: 8 }}>
       <button className="btn btn-d btn-s" onClick={onDelete} disabled={!rec}><Trash2 size={14} /> Effacer</button>
-      <button className="btn btn-p" onClick={() => onSave({ arrivee, depart, pause, pauseMin: pause ? (Number(pauseMin) || 0) : 0 })} disabled={!st || st.invalid}><CheckCircle2 size={15} /> Enregistrer</button>
+      <button className="btn btn-p" onClick={save} disabled={!st || st.invalid}><CheckCircle2 size={15} /> Enregistrer</button>
     </div>
   </Modal>);
 }
@@ -5636,25 +5664,30 @@ function Pointage({ data, persist }) {
           const st = presenceDay(pointages[ds]);
           const isToday = ds === todayStr;
           const we = isWeekendDs(ds);
+          const mot = st && !st.invalid && st.motif && st.motif !== "presence" ? PRESENCE_MOTIFS[st.motif] : null;
           const over = st && !st.invalid ? st.worked - targetOf(ds) : null;
           const col = over == null ? null : (over >= 0 ? "#2bb673" : "#F8B133");
+          const dot = mot ? mot.color : col;
           return (
-            <div key={i} className={cx("cal-cell", c.out && "cal-out", isToday && "cal-today")} onClick={() => setEditDs(ds)} style={{ cursor: "pointer", background: we ? "var(--bg)" : undefined }} title={we ? "Week-end — saisie possible (heures comptées en supplément)" : "Cliquer pour saisir les heures"}>
+            <div key={i} className={cx("cal-cell", c.out && "cal-out", isToday && "cal-today")} onClick={() => setEditDs(ds)} style={{ cursor: "pointer", background: we ? "var(--bg)" : undefined }} title={we ? "Week-end — saisie possible (heures comptées en supplément)" : "Cliquer pour saisir la journée"}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div className="cal-num">{c.day}</div>
-                {st && !st.invalid && <span style={{ width: 8, height: 8, borderRadius: "50%", background: col }} />}
+                {st && !st.invalid && <span style={{ width: 8, height: 8, borderRadius: "50%", background: dot }} />}
                 {st && st.invalid && <AlertTriangle size={12} style={{ color: "var(--red)" }} />}
               </div>
-              {st && !st.invalid ? (<>
+              {st && !st.invalid ? (mot ? (<>
+                <div style={{ fontSize: 11.5, fontWeight: 800, color: mot.color, lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{mot.emoji} {mot.label}</div>
+                <div className="tnum" style={{ fontSize: 11, color: "var(--muted)" }}>{fmtDur(st.worked)}</div>
+              </>) : (<>
                 <div className="pu-display tnum" style={{ fontSize: 15, lineHeight: 1.05 }}>{fmtDur(st.worked)}</div>
                 <div style={{ fontSize: 10, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{st.arrivee}–{st.depart}{st.pause ? " · 🍽" : ""}</div>
                 {over !== 0 && <span style={{ alignSelf: "flex-start", fontSize: 10, fontWeight: 800, color: col, background: col + "22", borderRadius: 6, padding: "1px 5px" }}>{fmtDur(over, { plus: true })}</span>}
-              </>) : (!we && !c.out && <div style={{ fontSize: 10, color: "var(--muted)", opacity: .7 }}>à saisir</div>)}
+              </>)) : (!we && !c.out && <div style={{ fontSize: 10, color: "var(--muted)", opacity: .7 }}>à saisir</div>)}
             </div>
           );
         })}
       </div>
-      <div style={{ marginTop: 10, fontSize: 11, color: "var(--muted)", textAlign: "center" }}>Base 7 h/jour du lundi au vendredi. Cliquez un jour pour saisir arrivée, départ et pause méridienne. Le point vert signale une journée en heures sup, l'orange un jour en deçà de l'objectif.</div>
+      <div style={{ marginTop: 10, fontSize: 11, color: "var(--muted)", textAlign: "center" }}>Base 7 h/jour du lundi au vendredi. Cliquez un jour pour saisir vos horaires, ou choisir un motif (journée de cours, congés, télétravail… comptés forfaitairement 7 h). Point vert = heures sup, orange = en deçà de l'objectif.</div>
     </div>
 
     {/* Décompte du mois */}
