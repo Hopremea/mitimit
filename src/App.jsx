@@ -35,6 +35,15 @@ async function claudeHeaders() {
   try { if (typeof window !== "undefined" && window.__getClerkToken) { const t = await window.__getClerkToken(); if (t) h["Authorization"] = "Bearer " + t; } } catch (e) {}
   return h;
 }
+// Construit un message d'erreur lisible à partir d'une réponse en échec du relais /api/claude :
+// remonte le vrai motif (401 non authentifié, 500 clé manquante, erreur/credits Anthropic…) au lieu
+// d'un message générique, pour pouvoir diagnostiquer côté production.
+async function claudeErrorText(res) {
+  let detail = "";
+  try { const j = await res.json(); detail = (j && j.error && (j.error.message || j.error)) || (j && j.message) || ""; } catch (e) {}
+  if (typeof detail !== "string") { try { detail = JSON.stringify(detail); } catch (e) { detail = ""; } }
+  return "HTTP " + res.status + (detail ? " — " + detail : "");
+}
 
 // Lecture du stock Shopify via le relais serveur /api/shopify (token Admin protege cote serveur).
 // action « test » : verifie la connexion. action « sync » : renvoie les variantes (SKU + quantite).
@@ -2740,7 +2749,7 @@ function AccountDetail({ account, data, persist, go, onBack, onEdit, onAddContac
 // Reformulation IA d'une note libre en compte rendu clair et professionnel (sans inventer de faits).
 async function aiRephrase(text, persistUsage) {
   const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 500, system: "Tu reformules des notes de compte rendu commercial B2B en français : style clair, professionnel et concis. Tu conserves TOUS les faits, dates, chiffres, noms et décisions sans rien inventer ni ajouter. Tu renvoies UNIQUEMENT le texte reformulé, sans préambule, sans guillemets, sans Markdown.", messages: [{ role: "user", content: text }] }) });
-  if (!res.ok) throw new Error("API " + res.status);
+  if (!res.ok) throw new Error(await claudeErrorText(res));
   const dt = await res.json();
   if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
   return (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
@@ -2748,7 +2757,7 @@ async function aiRephrase(text, persistUsage) {
 // Génération de texte par l'IA (e-mail, message LinkedIn, suggestion d'action…).
 async function aiGenerate(system, user, persistUsage, maxTokens = 800) {
   const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] }) });
-  if (!res.ok) throw new Error("API " + res.status);
+  if (!res.ok) throw new Error(await claudeErrorText(res));
   const dt = await res.json();
   if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
   return (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
@@ -2757,7 +2766,7 @@ async function aiGenerate(system, user, persistUsage, maxTokens = 800) {
 // prompt système porteur du contexte. Réutilise le relais /api/claude (jeton Clerk, clé jamais exposée).
 async function aiChat(system, messages, persistUsage, maxTokens = 700) {
   const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: maxTokens, system, messages }) });
-  if (!res.ok) throw new Error("API " + res.status);
+  if (!res.ok) throw new Error(await claudeErrorText(res));
   const dt = await res.json();
   if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
   return (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
@@ -2817,7 +2826,7 @@ function ResumeField({ value, onChange, onUsage, rows = 3, baseDate, onPlan }) {
     if (!value || !value.trim()) { note("Écrivez ou dictez d'abord quelques mots à reformuler."); return; }
     setBusy(true); setMsg(null);
     try { const out = await aiRephrase(value, onUsage); if (out) onChange(out); else note("Reformulation vide, texte conservé."); }
-    catch (e) { setMsg({ kind: "err", t: "Reformulation IA indisponible ici (fonctionne dans l'app Claude)." }); }
+    catch (e) { setMsg({ kind: "err", t: "Reformulation IA indisponible : " + (e && e.message ? e.message : "erreur inconnue") + ". (Vérifiez la clé Anthropic et les crédits côté serveur.)" }); }
     finally { setBusy(false); }
   };
   const dicter = () => {
@@ -2835,7 +2844,7 @@ function ResumeField({ value, onChange, onUsage, rows = 3, baseDate, onPlan }) {
     if (!value || !value.trim()) { note("Écrivez ou dictez d'abord le compte rendu."); return; }
     setBusy(true); setMsg(null);
     try { const evs = await aiExtractEvents(value, baseDate || TODAY(), onUsage); if (evs.length && onPlan) { onPlan(evs); setMsg({ kind: "ok", t: (evs.length > 1 ? evs.length + " événements planifiés" : "Événement planifié") + " et ajouté(s) au calendrier : " + evs.map((e) => (e.titre + " — " + relDate(e.date))).join(", ") + "." }); } else note("Aucune suite à planifier détectée dans le compte rendu."); }
-    catch (e) { setMsg({ kind: "err", t: "Analyse IA indisponible ici (fonctionne dans l'app Claude)." }); }
+    catch (e) { setMsg({ kind: "err", t: "Analyse IA indisponible : " + (e && e.message ? e.message : "erreur inconnue") + ". (Vérifiez la clé Anthropic et les crédits côté serveur.)" }); }
     finally { setBusy(false); }
   };
   return (<div className="fld">
