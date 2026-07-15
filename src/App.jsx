@@ -9,6 +9,7 @@ import {
   LifeBuoy, Repeat, Zap, Map as MapIcon, Send, ExternalLink, Link2,
   Layers, ShoppingCart, Navigation, Copy, Sparkles, Camera, Image as ImageIcon, Palette, Mic, MessageSquare, Video, Archive, ArchiveRestore,
   Download, Paperclip, Moon, Sun, ChevronRight, CalendarDays,
+  Clock, Flame, Trophy, Award, Coffee,
   GitBranch, Save, FileDown, ArrowDown, ArrowUp, Undo2,
   Globe, Facebook, Instagram, Menu, Home,
   Filter as FunnelIcon, PieChart as PieIcon
@@ -617,7 +618,7 @@ function buildSeed() { return { products: seedProducts(), accounts: seedAccounts
 // Etat de depart REEL : tout vide, et toutes les migrations de demo neutralisees
 // (drapeaux a true) pour ne jamais reinjecter de donnees fictives. Le seed n'est
 // charge que volontairement via le bouton "Demo".
-function emptyData() { return { products: [], accounts: [], contacts: [], interactions: [], deals: [], tickets: [], sites: [], prospects: [], attachments: {}, events: [], rotations: {}, savedCalcs: [], claudeUsage: { calls: 0, inputTokens: 0, outputTokens: 0 }, settings: { ...SETTINGS, coefBasisTTC: true, _tarif2026: true, _kind: true, _pdvMono: true, _migrated_sourire: true, _migrated_jer: true, _unifyOrphans: true, _fresh: true }, _imported: "" }; }
+function emptyData() { return { products: [], accounts: [], contacts: [], interactions: [], deals: [], tickets: [], sites: [], prospects: [], attachments: {}, events: [], rotations: {}, savedCalcs: [], pointages: {}, claudeUsage: { calls: 0, inputTokens: 0, outputTokens: 0 }, settings: { ...SETTINGS, coefBasisTTC: true, _tarif2026: true, _kind: true, _pdvMono: true, _migrated_sourire: true, _migrated_jer: true, _unifyOrphans: true, _fresh: true }, _imported: "" }; }
 // Étape déduite automatiquement de l'avancement de la relation avec un compte, d'après les signaux
 // réellement enregistrés (échanges, RDV/visio, bons de commande). Sert de plancher : on ne fait
 // qu'avancer un compte vers le haut de l'entonnoir, jamais reculer (les données saisies priment).
@@ -5285,6 +5286,7 @@ const TABS = [
   // Support
   { id: "sav", group: "Support", label: "SAV", icon: LifeBuoy, title: "Service après-vente", sub: "Incidents et réclamations" },
   // Outils
+  { id: "pointage", group: "Outils", label: "Temps de présence", icon: Clock, title: "Temps de présence au local", sub: "Pointage quotidien, pause méridienne et heures supplémentaires" },
   { id: "calc", group: "Outils", label: "Calculateur", icon: Calculator, title: "Calculateur", sub: "Coefficients, TVA, change, logistique" },
   { id: "conn", group: "Outils", label: "Intégrations", icon: Plug, title: "Intégrations & paramètres", sub: "Connexions, imports, sauvegarde et préférences" },
 ];
@@ -5443,6 +5445,228 @@ function CalendarExportModal({ data, persist, onClose }) {
 }
 
 // ============== AGENDA / CALENDRIER ==============
+// ============== TEMPS DE PRÉSENCE / POINTAGE (gamifié) ==============
+// Suivi quotidien des heures au local : arrivée, départ, pause méridienne.
+// Base contractuelle 7 h/jour du lundi au vendredi ; décompte des heures supplémentaires.
+const PRESENCE_TARGET = 420; // 7 h en minutes
+const PRESENCE_LEVELS = ["Pointeur débutant", "Assidu", "Régulier", "Confirmé", "Chevronné", "Expert du temps", "Maître des horaires", "Légende du pointage"];
+const pMin = (t) => { if (!t || !/^\d{1,2}:\d{2}$/.test(t)) return null; const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+const fmtDur = (min, opts = {}) => { const v = Math.round(min || 0); const sign = v < 0 ? "−" : (opts.plus && v > 0 ? "+" : ""); const a = Math.abs(v); const h = Math.floor(a / 60), m = a % 60; return sign + (m ? `${h} h ${String(m).padStart(2, "0")}` : `${h} h`); };
+const isoLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const isWeekendDs = (ds) => { const wd = new Date(ds + "T00:00:00").getDay(); return wd === 0 || wd === 6; };
+// Décompte d'une journée à partir d'un enregistrement { arrivee, depart, pause, pauseMin }.
+function presenceDay(rec) {
+  if (!rec || !rec.arrivee || !rec.depart) return null;
+  const a = pMin(rec.arrivee), d = pMin(rec.depart);
+  if (a == null || d == null) return null;
+  if (d <= a) return { worked: 0, invalid: true, arrivee: rec.arrivee, depart: rec.depart, pause: !!rec.pause };
+  const pause = rec.pause ? (Number(rec.pauseMin) || 0) : 0;
+  const worked = Math.max(0, d - a - pause);
+  return { worked, pause, arrivee: rec.arrivee, depart: rec.depart, invalid: false };
+}
+function PointageEditor({ ds, rec, onSave, onDelete, onClose }) {
+  const [arrivee, setArrivee] = useState((rec && rec.arrivee) || "09:00");
+  const [depart, setDepart] = useState((rec && rec.depart) || "17:00");
+  const [pause, setPause] = useState(rec ? rec.pause !== false : true);
+  const [pauseMin, setPauseMin] = useState((rec && rec.pauseMin != null) ? rec.pauseMin : 60);
+  const we = isWeekendDs(ds);
+  const st = presenceDay({ arrivee, depart, pause, pauseMin });
+  const target = we ? 0 : PRESENCE_TARGET;
+  const over = st && !st.invalid ? st.worked - target : null;
+  const dLabel = new Date(ds + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  const col = over == null ? "var(--muted)" : over >= 0 ? "var(--green)" : "var(--amber)";
+  return (<Modal title={"Pointage — " + dLabel} onClose={onClose}>
+    <div className="row2">
+      <div className="fld"><label>Heure d'arrivée</label><input type="time" value={arrivee} onChange={(e) => setArrivee(e.target.value)} /></div>
+      <div className="fld"><label>Heure de départ</label><input type="time" value={depart} onChange={(e) => setDepart(e.target.value)} /></div>
+    </div>
+    <div className="fld" style={{ marginTop: 2, marginBottom: pause ? 8 : 0 }}>
+      <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", fontWeight: 600 }}>
+        <input type="checkbox" checked={pause} onChange={(e) => setPause(e.target.checked)} style={{ width: 16, height: 16, accentColor: "var(--blue)" }} />
+        <Coffee size={15} /> J'ai pris une pause méridienne
+      </label>
+    </div>
+    {pause && <div className="fld"><label>Durée de la pause (minutes)</label><input type="number" min="0" step="5" value={pauseMin} onChange={(e) => setPauseMin(Math.max(0, +e.target.value))} /></div>}
+    <div className="calc-out" style={{ marginTop: 10, background: (over == null ? "#9aa6bd" : over >= 0 ? "#2bb673" : "#F8B133") + "18" }}>
+      <span className="l">Temps travaillé{we ? " (week-end)" : " · objectif " + fmtDur(target)}</span>
+      <span className="b pu-display tnum" style={{ color: col }}>{st && !st.invalid ? fmtDur(st.worked) : "—"}{over != null && over !== 0 ? "  (" + fmtDur(over, { plus: true }) + ")" : ""}</span>
+    </div>
+    {st && st.invalid && <div style={{ color: "var(--red)", fontSize: 12, marginTop: 8 }}>L'heure de départ doit être postérieure à l'heure d'arrivée.</div>}
+    <div style={{ display: "flex", justifyContent: "space-between", marginTop: 14, gap: 8 }}>
+      <button className="btn btn-d btn-s" onClick={onDelete} disabled={!rec}><Trash2 size={14} /> Effacer</button>
+      <button className="btn btn-p" onClick={() => onSave({ arrivee, depart, pause, pauseMin: pause ? (Number(pauseMin) || 0) : 0 })} disabled={!st || st.invalid}><CheckCircle2 size={15} /> Enregistrer</button>
+    </div>
+  </Modal>);
+}
+function Pointage({ data, persist }) {
+  const pointages = data.pointages || {};
+  const [cursor, setCursor] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
+  const [editDs, setEditDs] = useState(null);
+  const todayStr = isoLocal(new Date());
+  const save = (ds, rec) => persist((p) => ({ ...p, pointages: { ...(p.pointages || {}), [ds]: rec } }));
+  const remove = (ds) => persist((p) => { const np = { ...(p.pointages || {}) }; delete np[ds]; return { ...p, pointages: np }; });
+  const targetOf = (ds) => isWeekendDs(ds) ? 0 : PRESENCE_TARGET;
+
+  // ---- Statistiques globales (tous mois confondus) pour la gamification ----
+  const allEntries = useMemo(() => Object.entries(pointages).map(([ds, rec]) => ({ ds, rec, st: presenceDay(rec) })).filter((x) => x.st && !x.st.invalid), [pointages]);
+  const daysLogged = allEntries.length;
+  const supAllTime = allEntries.reduce((s, x) => s + Math.max(0, x.st.worked - targetOf(x.ds)), 0);
+  const xp = daysLogged * 12 + Math.round(supAllTime / 60) * 8;
+  const level = Math.min(PRESENCE_LEVELS.length, Math.floor(xp / 100) + 1);
+  const levelName = PRESENCE_LEVELS[level - 1];
+  const xpInLevel = level >= PRESENCE_LEVELS.length ? 100 : xp % 100;
+
+  const streak = useMemo(() => {
+    const ok = (ds) => { const s = presenceDay(pointages[ds]); return s && !s.invalid && s.worked > 0; };
+    let n = 0; const d = new Date(); d.setHours(0, 0, 0, 0);
+    if (!ok(isoLocal(d))) d.setDate(d.getDate() - 1); // tolérance : aujourd'hui pas encore saisi
+    for (let i = 0; i < 366; i++) {
+      const wd = d.getDay();
+      if (wd === 0 || wd === 6) { d.setDate(d.getDate() - 1); continue; } // le week-end ne casse pas la série
+      if (ok(isoLocal(d))) { n++; d.setDate(d.getDate() - 1); } else break;
+    }
+    return n;
+  }, [pointages]);
+
+  const badges = useMemo(() => {
+    const anyEarly = allEntries.some((x) => pMin(x.st.arrivee) <= 8 * 60 + 30);
+    const anyMarathon = allEntries.some((x) => x.st.worked >= 9 * 60);
+    const byWeek = {};
+    allEntries.forEach((x) => { if (isWeekendDs(x.ds)) return; const d = new Date(x.ds + "T00:00:00"); const mon = new Date(d); mon.setDate(d.getDate() - ((d.getDay() + 6) % 7)); const key = isoLocal(mon); (byWeek[key] = byWeek[key] || new Set()).add(x.ds); });
+    const perfectWeek = Object.values(byWeek).some((set) => set.size >= 5);
+    return [
+      { id: "first", label: "Premier pointage", icon: CheckCircle2, color: "#3F60AA", got: daysLogged >= 1, desc: "Enregistrer une première journée." },
+      { id: "streak5", label: "Assiduité", icon: Flame, color: "#FF5A45", got: streak >= 5, desc: "5 jours ouvrés d'affilée." },
+      { id: "perfect", label: "Semaine parfaite", icon: Award, color: "#7c5cf0", got: perfectWeek, desc: "Une semaine complète (lun-ven) pointée." },
+      { id: "early", label: "Lève-tôt", icon: Sun, color: "#F8B133", got: anyEarly, desc: "Arriver à 8 h 30 ou avant." },
+      { id: "marathon", label: "Marathonien", icon: Zap, color: "#2bb673", got: anyMarathon, desc: "Une journée de 9 h ou plus." },
+      { id: "sup10", label: "+10 h sup.", icon: Trophy, color: "#F8B133", got: supAllTime >= 600, desc: "Cumuler 10 h supplémentaires." },
+    ];
+  }, [allEntries, streak, daysLogged, supAllTime]);
+  const gotBadges = badges.filter((b) => b.got).length;
+
+  // ---- Calendrier du mois affiché ----
+  const monthName = new Date(cursor.y, cursor.m, 1).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+  const first = new Date(cursor.y, cursor.m, 1);
+  const offset = (first.getDay() + 6) % 7; // lundi = 0
+  const daysInMonth = new Date(cursor.y, cursor.m + 1, 0).getDate();
+  const daysPrev = new Date(cursor.y, cursor.m, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < offset; i++) cells.push({ day: daysPrev - offset + 1 + i, out: true, y: cursor.m === 0 ? cursor.y - 1 : cursor.y, m: cursor.m === 0 ? 11 : cursor.m - 1 });
+  for (let i = 1; i <= daysInMonth; i++) cells.push({ day: i, out: false, y: cursor.y, m: cursor.m });
+  while (cells.length % 7 !== 0 || cells.length < 42) { const next = cells.length - offset - daysInMonth + 1; cells.push({ day: next, out: true, y: cursor.m === 11 ? cursor.y + 1 : cursor.y, m: cursor.m === 11 ? 0 : cursor.m + 1 }); if (cells.length >= 42) break; }
+  const fmtDate = (y, m, d) => `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+
+  // ---- Décompte du mois affiché ----
+  const monthPrefix = `${cursor.y}-${String(cursor.m + 1).padStart(2, "0")}`;
+  const monthEntries = allEntries.filter((x) => x.ds.startsWith(monthPrefix));
+  const mWorked = monthEntries.reduce((s, x) => s + x.st.worked, 0);
+  const mTarget = monthEntries.reduce((s, x) => s + targetOf(x.ds), 0);
+  const mSup = monthEntries.reduce((s, x) => s + Math.max(0, x.st.worked - targetOf(x.ds)), 0);
+  const mDef = monthEntries.reduce((s, x) => s + Math.max(0, targetOf(x.ds) - x.st.worked), 0);
+  const mBalance = mWorked - mTarget;
+  const mDays = monthEntries.length;
+  const weeks = useMemo(() => {
+    const map = {};
+    monthEntries.forEach((x) => { const d = new Date(x.ds + "T00:00:00"); const mon = new Date(d); mon.setDate(d.getDate() - ((d.getDay() + 6) % 7)); const key = isoLocal(mon); const w = map[key] || (map[key] = { start: key, worked: 0, target: 0, days: 0 }); w.worked += x.st.worked; w.target += targetOf(x.ds); w.days++; });
+    return Object.values(map).sort((a, b) => a.start.localeCompare(b.start));
+  }, [monthEntries]);
+
+  return (<div className="fade">
+    {/* Bandeau gamifié : niveau, XP, série, badges */}
+    <div className="card" style={{ marginBottom: 14, background: "linear-gradient(135deg, rgba(63,96,170,.10), rgba(124,92,240,.10))" }}>
+      <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div className="pu-display" style={{ width: 54, height: 54, borderRadius: 14, background: "var(--blue)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 22, boxShadow: "0 6px 16px rgba(63,96,170,.3)", flexShrink: 0 }}>{level}</div>
+          <div>
+            <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 800, textTransform: "uppercase", letterSpacing: .4 }}>Niveau {level}</div>
+            <div className="pu-display" style={{ fontSize: 18 }}>{levelName}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+              <div style={{ width: 160, maxWidth: "40vw", height: 8, background: "var(--line)", borderRadius: 6, overflow: "hidden" }}><div style={{ width: xpInLevel + "%", height: "100%", background: "linear-gradient(90deg,#3F60AA,#7c5cf0)", borderRadius: 6, transition: "width .4s" }} /></div>
+              <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>{xpInLevel}/100 XP</span>
+            </div>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 22, flexWrap: "wrap" }}>
+          <div style={{ textAlign: "center" }}><div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "center", color: streak > 0 ? "#FF5A45" : "var(--muted)" }}><Flame size={20} /><span className="pu-display tnum" style={{ fontSize: 24 }}>{streak}</span></div><div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>jours d'affilée</div></div>
+          <div style={{ textAlign: "center" }}><div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "center", color: "#2bb673" }}><Trophy size={19} /><span className="pu-display tnum" style={{ fontSize: 24 }}>{fmtDur(supAllTime)}</span></div><div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>heures sup. cumulées</div></div>
+          <div style={{ textAlign: "center" }}><div className="pu-display tnum" style={{ fontSize: 24 }}>{daysLogged}</div><div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>jours pointés</div></div>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line)", alignItems: "center" }}>
+        <span style={{ fontSize: 12, fontWeight: 800, color: "var(--muted)", marginRight: 2 }}>Badges {gotBadges}/{badges.length}</span>
+        {badges.map((b) => { const Ic = b.icon; return (<div key={b.id} title={b.desc + (b.got ? " — débloqué" : " — à débloquer")} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 20, fontSize: 12, fontWeight: 700, border: "1px solid", borderColor: b.got ? b.color : "var(--line)", color: b.got ? "#fff" : "var(--muted)", background: b.got ? b.color : "transparent", opacity: b.got ? 1 : .5 }}><Ic size={13} />{b.label}</div>); })}
+      </div>
+    </div>
+
+    {/* Navigation mois */}
+    <div className="card" style={{ marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <button className="btn btn-ghost btn-s" onClick={() => setCursor((c) => ({ y: c.m === 0 ? c.y - 1 : c.y, m: c.m === 0 ? 11 : c.m - 1 }))}><ChevronLeft size={15} /></button>
+        <h3 className="pu-display cal-month" style={{ margin: 0, textTransform: "capitalize" }}>{monthName}</h3>
+        <button className="btn btn-ghost btn-s" onClick={() => setCursor((c) => ({ y: c.m === 11 ? c.y + 1 : c.y, m: c.m === 11 ? 0 : c.m + 1 }))}><ChevronRight size={15} /></button>
+        <button className="btn btn-ghost btn-s" onClick={() => { const d = new Date(); setCursor({ y: d.getFullYear(), m: d.getMonth() }); }}>Aujourd'hui</button>
+      </div>
+      <button className="btn btn-p btn-s" onClick={() => setEditDs(todayStr)}><Clock size={14} /> Pointer aujourd'hui</button>
+    </div>
+
+    {/* Calendrier */}
+    <div className="card">
+      <div className="cal-grid">
+        {["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map((d) => <div key={d} className="cal-head">{d}</div>)}
+        {cells.map((c, i) => {
+          const ds = fmtDate(c.y, c.m, c.day);
+          const st = presenceDay(pointages[ds]);
+          const isToday = ds === todayStr;
+          const we = isWeekendDs(ds);
+          const over = st && !st.invalid ? st.worked - targetOf(ds) : null;
+          const col = over == null ? null : (over >= 0 ? "#2bb673" : "#F8B133");
+          return (
+            <div key={i} className={cx("cal-cell", c.out && "cal-out", isToday && "cal-today")} onClick={() => setEditDs(ds)} style={{ cursor: "pointer", background: we ? "var(--bg)" : undefined }} title={we ? "Week-end — saisie possible (heures comptées en supplément)" : "Cliquer pour saisir les heures"}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div className="cal-num">{c.day}</div>
+                {st && !st.invalid && <span style={{ width: 8, height: 8, borderRadius: "50%", background: col }} />}
+                {st && st.invalid && <AlertTriangle size={12} style={{ color: "var(--red)" }} />}
+              </div>
+              {st && !st.invalid ? (<>
+                <div className="pu-display tnum" style={{ fontSize: 15, lineHeight: 1.05 }}>{fmtDur(st.worked)}</div>
+                <div style={{ fontSize: 10, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{st.arrivee}–{st.depart}{st.pause ? " · 🍽" : ""}</div>
+                {over !== 0 && <span style={{ alignSelf: "flex-start", fontSize: 10, fontWeight: 800, color: col, background: col + "22", borderRadius: 6, padding: "1px 5px" }}>{fmtDur(over, { plus: true })}</span>}
+              </>) : (!we && !c.out && <div style={{ fontSize: 10, color: "var(--muted)", opacity: .7 }}>à saisir</div>)}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ marginTop: 10, fontSize: 11, color: "var(--muted)", textAlign: "center" }}>Base 7 h/jour du lundi au vendredi. Cliquez un jour pour saisir arrivée, départ et pause méridienne. Le point vert signale une journée en heures sup, l'orange un jour en deçà de l'objectif.</div>
+    </div>
+
+    {/* Décompte du mois */}
+    <div className="card" style={{ marginTop: 14 }}>
+      <div className="sec-h"><h3 className="pu-display" style={{ textTransform: "capitalize" }}>Décompte — {monthName}</h3></div>
+      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12 }}>
+        <div className="calc-out"><span className="l">Jours pointés</span><span className="b pu-display tnum">{mDays}</span></div>
+        <div className="calc-out"><span className="l">Total travaillé</span><span className="b pu-display tnum">{fmtDur(mWorked)}</span></div>
+        <div className="calc-out"><span className="l">Objectif (7 h × {mDays})</span><span className="b pu-display tnum">{fmtDur(mTarget)}</span></div>
+        <div className="calc-out" style={{ background: (mSup > 0 ? "#2bb673" : "#9aa6bd") + "18" }}><span className="l">Heures supplémentaires</span><span className="b pu-display tnum" style={{ color: "var(--green)" }}>{fmtDur(mSup)}</span></div>
+        <div className="calc-out" style={{ background: (mBalance >= 0 ? "#2bb673" : "#FF5A45") + "18" }}><span className="l">Solde du mois</span><span className="b pu-display tnum" style={{ color: mBalance >= 0 ? "var(--green)" : "var(--red)" }}>{fmtDur(mBalance, { plus: true })}</span></div>
+      </div>
+      {mDef > 0 && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 8 }}>Dont {fmtDur(mDef)} en deçà de l'objectif sur certains jours (déduits du solde).</div>}
+      {weeks.length > 0 && <div style={{ marginTop: 16 }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: "var(--muted)", marginBottom: 8 }}>Par semaine (objectif 35 h)</div>
+        {weeks.map((w) => { const pct = w.target > 0 ? w.worked / w.target * 100 : (w.worked > 0 ? 100 : 0); const bal = w.worked - w.target; const wEnd = new Date(new Date(w.start + "T00:00:00").getTime() + 4 * 86400000); const lbl = new Date(w.start + "T00:00:00").toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }) + " – " + wEnd.toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }); return (
+          <div key={w.start} style={{ display: "flex", alignItems: "center", gap: 12, padding: "6px 0" }}>
+            <div style={{ width: 128, fontSize: 12, color: "var(--muted)", fontWeight: 700, flexShrink: 0 }}>{lbl}</div>
+            <div style={{ flex: 1, height: 12, background: "var(--line)", borderRadius: 7, overflow: "hidden", minWidth: 60 }}><div style={{ width: Math.min(100, pct) + "%", height: "100%", background: bal >= 0 ? "linear-gradient(90deg,#2bb673,#3F60AA)" : "var(--amber)", borderRadius: 7 }} /></div>
+            <div className="tnum" style={{ width: 84, textAlign: "right", fontSize: 12.5, fontWeight: 700, flexShrink: 0 }}>{fmtDur(w.worked)}</div>
+            <div className="tnum" style={{ width: 66, textAlign: "right", fontSize: 12, fontWeight: 800, color: bal >= 0 ? "var(--green)" : "var(--amber)", flexShrink: 0 }}>{fmtDur(bal, { plus: true })}</div>
+          </div>
+        ); })}
+      </div>}
+    </div>
+
+    {editDs && <PointageEditor ds={editDs} rec={pointages[editDs]} onClose={() => setEditDs(null)} onSave={(rec) => { save(editDs, rec); setEditDs(null); }} onDelete={() => { remove(editDs); setEditDs(null); }} />}
+  </div>);
+}
 function Agenda({ data, persist, go }) {
   const [cursor, setCursor] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
   const [edit, setEdit] = useState(null);
@@ -6467,6 +6691,7 @@ export default function App() {
       {tab === "stock" && <Stock key={"stock-" + navKey} data={data} persist={persist} />}
       {tab === "reassort" && <Reassort key={"reassort-" + navKey} data={data} persist={persist} />}
       {tab === "sav" && <Sav key={"sav-" + navKey} data={data} persist={persist} />}
+      {tab === "pointage" && <Pointage key={"pointage-" + navKey} data={data} persist={persist} />}
       {tab === "calc" && <Calculateur data={data} persist={persist} />}
       {tab === "conn" && <Connexions key={"conn-" + navKey} data={data} persist={persist} autoBackup={autoBackup} />}
       </div>
