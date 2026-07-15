@@ -618,7 +618,7 @@ function buildSeed() { return { products: seedProducts(), accounts: seedAccounts
 // Etat de depart REEL : tout vide, et toutes les migrations de demo neutralisees
 // (drapeaux a true) pour ne jamais reinjecter de donnees fictives. Le seed n'est
 // charge que volontairement via le bouton "Demo".
-function emptyData() { return { products: [], accounts: [], contacts: [], interactions: [], deals: [], tickets: [], sites: [], prospects: [], attachments: {}, events: [], rotations: {}, savedCalcs: [], pointages: {}, claudeUsage: { calls: 0, inputTokens: 0, outputTokens: 0 }, settings: { ...SETTINGS, coefBasisTTC: true, _tarif2026: true, _kind: true, _pdvMono: true, _migrated_sourire: true, _migrated_jer: true, _unifyOrphans: true, _fresh: true }, _imported: "" }; }
+function emptyData() { return { products: [], accounts: [], contacts: [], interactions: [], deals: [], tickets: [], sites: [], prospects: [], attachments: {}, events: [], rotations: {}, savedCalcs: [], pointages: {}, claudeUsage: { calls: 0, inputTokens: 0, outputTokens: 0 }, settings: { ...SETTINGS, coefBasisTTC: true, _tarif2026: true, _kind: true, _pdvMono: true, _migrated_sourire: true, _migrated_jer: true, _unifyOrphans: true, _pause30: true, _fresh: true }, _imported: "" }; }
 // Étape déduite automatiquement de l'avancement de la relation avec un compte, d'après les signaux
 // réellement enregistrés (échanges, RDV/visio, bons de commande). Sert de plancher : on ne fait
 // qu'avancer un compte vers le haut de l'entonnoir, jamais reculer (les données saisies priment).
@@ -802,6 +802,14 @@ function normalize(d) {
       seenSig.add(sig); out.push(e);
     }
     d.events = out;
+  }
+  // Pointage : la pause méridienne par principe est de 30 min. Les journées saisies avec l'ancien
+  // défaut de 60 min sont ramenées à 30 min (une seule fois). Le temps travaillé est recalculé à la volée.
+  if (!d.settings._pause30) {
+    if (d.pointages && typeof d.pointages === "object") {
+      Object.keys(d.pointages).forEach((k) => { const r = d.pointages[k]; if (r && r.pause && Number(r.pauseMin) === 60) d.pointages[k] = { ...r, pauseMin: 30 }; });
+    }
+    d.settings._pause30 = true;
   }
   d.accounts = autoClassifyStages(d);
   return d;
@@ -5466,9 +5474,9 @@ function presenceDay(rec) {
 }
 function PointageEditor({ ds, rec, onSave, onDelete, onClose }) {
   const [arrivee, setArrivee] = useState((rec && rec.arrivee) || "10:00");
-  const [depart, setDepart] = useState((rec && rec.depart) || "18:00");
+  const [depart, setDepart] = useState((rec && rec.depart) || "17:30");
   const [pause, setPause] = useState(rec ? rec.pause !== false : true);
-  const [pauseMin, setPauseMin] = useState((rec && rec.pauseMin != null) ? rec.pauseMin : 60);
+  const [pauseMin, setPauseMin] = useState((rec && rec.pauseMin != null) ? rec.pauseMin : 30);
   const we = isWeekendDs(ds);
   const st = presenceDay({ arrivee, depart, pause, pauseMin });
   const target = we ? 0 : PRESENCE_TARGET;
