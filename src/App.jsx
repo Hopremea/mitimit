@@ -419,7 +419,7 @@ async function gmailSyncAll(data, persist) {
     const ex = byId.get(m.id);
     if (ex) { if (resume && resume.length > (ex.resume || "").length + 5) updates.set(m.id, resume); return; }
     byId.set(m.id, true);
-    toAdd.push({ id: "gm_" + m.id, gmailId: m.id, accountId: ent.accountId || "", contactId: ent.contactId || "", siteId: ent.siteId || "", type: "email", direction: m.direction === "entrant" ? "entrant" : "sortant", date: m.date || TODAY(), sujet: m.subject || "(sans objet)", resume, source: "gmail", sourced: true });
+    toAdd.push({ id: "gm_" + m.id, gmailId: m.id, accountId: ent.accountId || "", contactId: ent.contactId || "", siteId: ent.siteId || "", type: "email", direction: m.direction === "entrant" ? "entrant" : "sortant", date: m.date || TODAY(), heure: m.heure || "", sujet: m.subject || "(sans objet)", resume, email: m.address || "", source: "gmail", sourced: true });
   });
   let added = 0, updated = 0;
   persist((p) => {
@@ -2567,6 +2567,7 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
           {(s.type === "pdv" || s.type === "decision") && (() => { const groups = data.accounts.filter((x) => isGroupe(x)); const cur = (grp && acc) ? acc.id : "indep"; const onChange = (val) => { if (val === cur) return; if (val === "indep") { if (grp) persist((p) => detachSiteToIndependent(p, s.id)); } else if (indep && acc) persist((p) => attachAccountToGroup(p, acc.id, val)); else if (grp) persist((p) => moveSiteToGroup(p, s.id, val)); }; return (<div style={{ marginTop: 9, display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}><span style={{ fontSize: 12, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 4 }}><Link2 size={13} /> Rattachement</span><select value={cur} onChange={(e) => onChange(e.target.value)} style={{ padding: "5px 9px", border: "1px solid var(--line)", borderRadius: 8, fontFamily: "inherit", fontSize: 12.5, background: "#fff" }}><option value="indep">— Indépendant (aucun groupe) —</option>{groups.map((g) => <option key={g.id} value={g.id}>{g.enseigne}</option>)}</select></div>); })()}
           {s.adresse && <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 8, display: "inline-flex", alignItems: "center", gap: 6 }}><MapPin size={14} />{s.adresse}</div>}
           {s.telFixe && <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 6 }}><Phone size={14} /><a href={"tel:" + s.telFixe.replace(/\s/g, "")} style={{ color: "inherit" }} title="Téléphone fixe du magasin">{s.telFixe}</a></div>}
+          {s.email && <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 6 }}><Mail size={14} /><a href={"mailto:" + s.email} style={{ color: "inherit" }} title="Écrire à cet établissement">{s.email}</a></div>}
           {s.site && <div style={{ fontSize: 13, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 6 }}><Globe size={14} style={{ color: "var(--muted)" }} /><a className="lnk" href={ensureHttp(s.site)} target="_blank" rel="noreferrer" title="Site internet de l'établissement">{cleanDomain(s.site) || s.site}</a></div>}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9, alignItems: "center" }}>{s.typeSurface && <Badge color="#3F60AA">{s.typeSurface}</Badge>}{s.siret && <span className="tnum" style={{ fontSize: 12, color: "var(--muted)" }}>SIRET {s.siret}</span>}{!s.lat && <Badge color="#c0392b">à géolocaliser</Badge>}</div>
         </div>
@@ -3184,13 +3185,14 @@ function PreviewCard({ x, y, data }) {
 }
 function AccountInteractionForm({ contactId, accountId, contacts, onCancel, onSave, interaction, onUsage, onPlanEvents }) {
   const initCt = (contacts || []).find((c) => c.id === (interaction ? interaction.contactId : contactId));
-  const [f, setF] = useState(interaction ? { ...interaction } : { id: "i_" + Date.now(), accountId, contactId: contactId || "", siteId: (initCt && initCt.siteId) || "", type: "appel", direction: "sortant", date: new Date().toISOString().slice(0, 10), sujet: "", resume: "" });
+  const [f, setF] = useState(interaction ? { ...interaction } : { id: "i_" + Date.now(), accountId, contactId: contactId || "", siteId: (initCt && initCt.siteId) || "", type: "appel", direction: "sortant", date: new Date().toISOString().slice(0, 10), heure: "", sujet: "", resume: "" });
   const up = (k, v) => setF((p) => ({ ...p, [k]: v }));
   // Choisir un contact rattache l'échange à son établissement (site) : il apparaîtra sur la fiche
   // de l'établissement, et sur celle du groupe si l'établissement en fait partie.
   const onContact = (cid) => setF((p) => { const ct = (contacts || []).find((c) => c.id === cid); return { ...p, contactId: cid, siteId: ct && ct.siteId ? ct.siteId : (p.siteId || "") }; });
   return (<>
     <div className="row2"><div className="fld"><label>Type</label><select value={f.type} onChange={(e) => up("type", e.target.value)}>{Object.entries(INT_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div></div>
+    <div className="row2"><div className="fld"><label>Heure</label><input type="time" value={f.heure || ""} onChange={(e) => up("heure", e.target.value)} /></div><div className="fld" /></div>
     <div className="row2"><div className="fld"><label>Sens</label><select value={f.direction} onChange={(e) => up("direction", e.target.value)}><option value="sortant">Sortant</option><option value="entrant">Entrant</option><option value="sortant_rejete">Sortant (rejeté)</option></select></div><div className="fld"><label>Contact</label><select value={f.contactId} onChange={(e) => onContact(e.target.value)}><option value="">Aucun précis</option>{contacts.map((c) => <option key={c.id} value={c.id}>{fullName(c)}</option>)}</select></div></div>
     <div className="fld"><label>Sujet</label><Combo value={f.sujet} onChange={(v) => up("sujet", v)} options={SUJET_PRESETS} placeholder="Choisir ou saisir l'objet de l'échange" /></div>
     <ResumeField value={f.resume} onChange={(v) => up("resume", v)} onUsage={onUsage} rows={3} baseDate={f.date} onPlan={onPlanEvents ? (evs) => onPlanEvents(evs, f) : undefined} />
@@ -3338,7 +3340,7 @@ function Fiche({ c, account, data, myEmail, settings, deals, interactions, onBac
       if (!res.ok) throw new Error(dt && dt.error ? dt.error : "Erreur " + res.status);
       const arr = Array.isArray(dt.messages) ? dt.messages : [];
       const existing = new Set(interactions.map((i) => (i.date || "") + "|" + i.sujet));
-      const toAdd = arr.filter((x) => x && x.sujet && !existing.has((x.date || "") + "|" + x.sujet)).map((x, i) => ({ id: "g_" + Date.now() + "_" + i, accountId: c.accountId, contactId: c.id, type: "email", direction: x.direction === "entrant" ? "entrant" : "sortant", date: x.date || TODAY(), sujet: x.sujet, resume: x.resume || "", source: "gmail" }));
+      const toAdd = arr.filter((x) => x && x.sujet && !existing.has((x.date || "") + "|" + x.sujet)).map((x, i) => ({ id: "g_" + Date.now() + "_" + i, accountId: c.accountId, contactId: c.id, type: "email", direction: x.direction === "entrant" ? "entrant" : "sortant", date: x.date || TODAY(), heure: x.heure || "", sujet: x.sujet, resume: x.resume || "", email: x.email || c.email || "", source: "gmail" }));
       if (toAdd.length) persist((p) => ({ ...p, interactions: [...p.interactions, ...toAdd] }));
       setSyncMsg(toAdd.length ? (toAdd.length + " courriel(s) importé(s).") : "Aucun nouveau courriel pour cette adresse.");
     } catch (e) { setSyncMsg("Synchro Gmail indisponible : " + (e && e.message ? e.message : "erreur") + " — vérifiez que vous êtes connecté avec Google (autorisation Gmail)."); }
@@ -3396,11 +3398,11 @@ function Fiche({ c, account, data, myEmail, settings, deals, interactions, onBac
   </div>);
 }
 function InteractionForm({ accountId, contactId, siteId, onSave, interaction, onUsage, onPlanEvents }) {
-  const [f, setF] = useState(interaction ? { siteId: siteId || "", ...interaction } : { id: "i_" + Date.now(), accountId, contactId, siteId: siteId || "", type: "email", direction: "sortant", date: TODAY(), sujet: "", resume: "" });
+  const [f, setF] = useState(interaction ? { siteId: siteId || "", ...interaction } : { id: "i_" + Date.now(), accountId, contactId, siteId: siteId || "", type: "email", direction: "sortant", date: TODAY(), heure: "", sujet: "", resume: "" });
   const up = (k, v) => setF((p) => ({ ...p, [k]: v })); const showDir = f.type === "email" || f.type === "appel";
   return (<>
-    <div className="row2"><div className="fld"><label>Type</label><select value={f.type} onChange={(e) => up("type", e.target.value)}>{Object.entries(INT_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div>{showDir ? <div className="fld"><label>Sens</label><select value={f.direction} onChange={(e) => up("direction", e.target.value)}><option value="sortant">Sortant</option><option value="entrant">Entrant</option><option value="sortant_rejete">Sortant (rejeté)</option></select></div> : <div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div>}</div>
-    {showDir && <div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div>}
+    <div className="row2"><div className="fld"><label>Type</label><select value={f.type} onChange={(e) => up("type", e.target.value)}>{Object.entries(INT_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div>{showDir && <div className="fld"><label>Sens</label><select value={f.direction} onChange={(e) => up("direction", e.target.value)}><option value="sortant">Sortant</option><option value="entrant">Entrant</option><option value="sortant_rejete">Sortant (rejeté)</option></select></div>}</div>
+    <div className="row2"><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div><div className="fld"><label>Heure</label><input type="time" value={f.heure || ""} onChange={(e) => up("heure", e.target.value)} /></div></div>
     <div className="fld"><label>Sujet</label><Combo value={f.sujet} onChange={(v) => up("sujet", v)} options={SUJET_PRESETS} placeholder="Choisir ou saisir l'objet de l'échange" /></div>
     <ResumeField value={f.resume} onChange={(v) => up("resume", v)} onUsage={onUsage} rows={4} baseDate={f.date} onPlan={onPlanEvents ? (evs) => onPlanEvents(evs, f) : undefined} />
     <div style={{ display: "flex", justifyContent: "flex-end" }}><button className="btn btn-p" onClick={() => onSave(f)} disabled={!f.sujet}>Enregistrer</button></div>
@@ -4152,7 +4154,7 @@ function Carte({ data, persist, go, focus }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <div className="card">{!s ? <div className="empty">Cliquez un point sur la carte.</div> : (<><div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ flexShrink: 0 }}><svg width="22" height="22" viewBox="-12 -16 24 26"><path d={shapePath(tmeta.shape)} fill={siteColor(s, sAcc)} stroke="#fff" strokeWidth={1.5} /></svg></span><h3 className="pu-display" style={{ margin: 0, fontSize: 17 }}>{s.label}</h3></div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "10px 0" }}><Badge color={siteColor(s, sAcc)}>{tmeta.label}</Badge>{s.typeSurface && <Badge color="#3F60AA">{s.typeSurface}</Badge>}{sAcc && <Badge color={enseigneColor(sAcc)}>{sAcc.enseigne}</Badge>}</div>
-          <KV icon={<MapPin size={13} />} k="Adresse" v={s.adresse} />{s.siret && <KV icon={<Building2 size={13} />} k="SIRET" v={s.siret} />}{s.telFixe && <KV icon={<Phone size={13} />} k="Tél. magasin" v={s.telFixe} />}<KV icon={<Navigation size={13} />} k="Coord." v={s.lat ? s.lat.toFixed(4) + ", " + s.lng.toFixed(4) : ""} />
+          <KV icon={<MapPin size={13} />} k="Adresse" v={s.adresse} />{s.siret && <KV icon={<Building2 size={13} />} k="SIRET" v={s.siret} />}{s.telFixe && <KV icon={<Phone size={13} />} k="Tél. magasin" v={s.telFixe} />}{s.email && <KV icon={<Mail size={13} />} k="E-mail" v={<a href={"mailto:" + s.email} style={{ color: "inherit" }}>{s.email}</a>} />}<KV icon={<Navigation size={13} />} k="Coord." v={s.lat ? s.lat.toFixed(4) + ", " + s.lng.toFixed(4) : ""} />
           {(() => { const martelet = sites.find((x) => x.type === "entrepot"); if (!martelet || !s.lat || !martelet.lat || s.type === "entrepot" || s.type === "penup") return null; const dk = distanceKm(martelet.lat, martelet.lng, s.lat, s.lng); return dk == null ? null : <KV icon={<Truck size={13} />} k="Distance depuis l'entrepôt" v={num(dk) + " km à vol d'oiseau"} last />; })()}
           {!(s.lat && sites.find((x) => x.type === "entrepot")) && <div style={{ height: 1 }} />}
           {(() => { const lc = resolveSiteContact(s, data.contacts); const nm = lc ? fullName(lc) : [s.contactPrenom, s.contactNom].filter(Boolean).join(" "); const tel = lc ? (lc.mobile || lc.fixe || "") : (s.contactTel || ""); const mail = lc ? (lc.email || "") : (s.contactMail || ""); if (!nm && !tel && !mail) return null; return <div style={{ marginTop: 4, padding: "9px 11px", background: "var(--bg)", borderRadius: 10 }}><div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 5 }}>Interlocuteur sur place{lc ? " · lié au répertoire" : ""}</div>{nm && <div style={{ fontWeight: 700, fontSize: 13.5 }}>{lc ? <span className="lnk" onClick={() => go("repertoire", lc.id)}>{nm}</span> : nm}{lc && lc.fonction ? <span style={{ fontWeight: 500, color: "var(--muted)" }}> · {lc.fonction}</span> : null}</div>}{tel && <div style={{ fontSize: 12.5, color: "var(--muted)", display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}><Phone size={12} /><a href={"tel:" + tel} style={{ color: "inherit" }}>{tel}</a></div>}{mail && <div style={{ fontSize: 12.5, color: "var(--muted)", display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}><Mail size={12} /><a href={"mailto:" + mail} style={{ color: "inherit" }}>{mail}</a></div>}</div>; })()}
@@ -4225,6 +4227,7 @@ function SiteForm({ site, accounts, onSave, known = [], contacts = [], onOpenCon
     {msg && <div style={{ fontSize: 12, color: "var(--muted)" }}>{msg}</div>}
     <div className="row2"><div className="fld"><label>Latitude</label><input type="number" step="0.0001" value={f.lat ?? ""} onChange={(e) => up("lat", e.target.value === "" ? null : +e.target.value)} /></div><div className="fld"><label>Longitude</label><input type="number" step="0.0001" value={f.lng ?? ""} onChange={(e) => up("lng", e.target.value === "" ? null : +e.target.value)} /></div></div>
     <div className="fld"><label>Téléphone fixe du magasin</label><input value={f.telFixe || ""} onChange={(e) => up("telFixe", e.target.value)} placeholder="05 ..." /><span style={{ fontSize: 11, color: "var(--muted)" }}>Ligne fixe / standard de l'établissement (accueil du magasin), distincte du portable d'un interlocuteur.</span></div>
+    <div className="fld"><label>Adresse e-mail de l'établissement</label><div style={{ display: "flex", gap: 6 }}><input type="email" value={f.email || ""} onChange={(e) => up("email", e.target.value)} placeholder="contact@magasin.fr" />{f.email ? <a className="btn btn-g btn-s" href={"mailto:" + f.email} title="Écrire à cet établissement"><Mail size={14} /></a> : null}</div><span style={{ fontSize: 11, color: "var(--muted)" }}>Adresse générique du magasin (accueil, commande), distincte de celle d'un interlocuteur. Sert aussi à retrouver les courriels échangés lors de la synchro Gmail.</span></div>
     <div className="fld"><label>Site web de l'établissement</label><div style={{ display: "flex", gap: 6 }}><input value={f.site || ""} onChange={(e) => up("site", e.target.value)} placeholder="https://www.exemple.fr" />{f.site ? <a className="btn btn-g btn-s" href={ensureHttp(f.site)} target="_blank" rel="noreferrer" title="Ouvrir le site"><ExternalLink size={14} /></a> : null}</div><span style={{ fontSize: 11, color: "var(--muted)" }}>Site internet de l'établissement ou de son enseigne. Le bouton « Compléter avec l'IA » peut le retrouver.</span></div>
     <div style={{ borderTop: "1px solid var(--line)", margin: "4px 0 2px", paddingTop: 10, fontSize: 11.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".05em" }}>Interlocuteur sur place (facultatif)</div>
     <div className="fld"><label>Contact rattaché</label><select value={f.contactId || ""} onChange={(e) => up("contactId", e.target.value)} disabled={!f.accountId}><option value="">— saisie libre (non liée) —</option>{enseigneContacts.map((c) => <option key={c.id} value={c.id}>{fullName(c)}{c.fonction ? " · " + c.fonction : ""}</option>)}</select>
@@ -5877,8 +5880,9 @@ function InteractionView({ interaction: it, data, go, onClose, onEdit }) {
       <span className="badge" style={{ background: badgeColor + "18", color: darkenHex(badgeColor) }}><BIc size={12} />{m.label}</span>
       {dm && !rejected && <span style={{ fontSize: 12, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 4 }}><DIc size={13} color={dm.color} />{dm.label}</span>}
       {it.source === "gmail" && <span className="gtag">Gmail</span>}{it.sourced && <span className="srctag" title="Importé automatiquement depuis la boîte Gmail connectée (trace fidèle)">sourcé</span>}
-      <span className="tnum" style={{ fontSize: 12, color: "var(--muted)", marginLeft: "auto", textTransform: "capitalize" }}>{dt}</span>
+      <span className="tnum" style={{ fontSize: 12, color: "var(--muted)", marginLeft: "auto", textTransform: "capitalize" }}>{dt}{it.heure ? " · " + it.heure : ""}</span>
     </div>
+    {it.email && <div style={{ fontSize: 12.5, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 5, marginTop: -6 }}><Mail size={13} /> {it.email}</div>}
     <div style={{ background: "#f5f7fb", border: "1px solid var(--line)", borderRadius: 16, borderTopLeftRadius: 5, padding: "14px 16px" }}>
       <div style={{ fontWeight: 800, fontSize: 15 }}>{(it.source === "gmail" ? decodeEntities(it.sujet) : it.sujet) || "Échange"}</div>
       {it.resume ? <div style={{ fontSize: 13.5, lineHeight: 1.6, marginTop: 8, whiteSpace: "pre-wrap", maxHeight: 360, overflowY: "auto" }}>{it.source === "gmail" ? decodeEntities(it.resume) : it.resume}</div> : <div className="empty" style={{ padding: 14 }}>Aucun compte rendu saisi.</div>}
@@ -5894,9 +5898,8 @@ function InteractionView({ interaction: it, data, go, onClose, onEdit }) {
 // Liste d'échanges présentée comme un fil de discussion (entrant à gauche, sortant à droite), avec Voir / Modifier / Supprimer.
 function InteractionThread({ interactions, data, onView, onEdit, onDelete, showContact }) {
   if (!interactions || interactions.length === 0) return <div className="empty">Aucun échange.</div>;
-  // Sens d'affichage inversé par rapport au tri reçu (qui place le plus récent en premier) :
-  // le fil se lit du plus ancien (en haut) au plus récent (en bas), comme une discussion.
-  const ordered = interactions.slice().reverse();
+  // Fil trié du plus RÉCENT (en haut) au plus ancien (en bas), en tenant compte de l'heure.
+  const ordered = interactions.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.heure || "").localeCompare(a.heure || ""));
   return (<div className="thread">{ordered.map((it) => {
     const m = INT_META[it.type] || INT_META.note;
     const ct = showContact && it.contactId ? (data.contacts || []).find((c) => c.id === it.contactId) : null;
@@ -5911,8 +5914,9 @@ function InteractionThread({ interactions, data, onView, onEdit, onDelete, showC
           <span title={rejected ? "Appel sortant rejeté / sans réponse" : undefined} style={{ fontWeight: 700, color: typeColor, display: "inline-flex", alignItems: "center", gap: 4 }}><Ic size={12} />{m.label}</span>
           {!rejected && (inbound ? <ArrowDownLeft size={12} color="var(--green)" /> : <ArrowUpRight size={12} color="var(--blue)" />)}
           {it.source === "gmail" && <span className="gtag">Gmail</span>}{it.sourced && <span className="srctag" title="Importé automatiquement depuis la boîte Gmail connectée (trace fidèle)">sourcé</span>}
-          <span className="tnum" style={{ color: "var(--muted)" }}>{it.date}</span>
+          <span className="tnum" style={{ color: "var(--muted)" }}>{it.date}{it.heure ? " · " + it.heure : ""}</span>
           {ct && <span style={{ color: "var(--muted)" }}>· {fullName(ct)}</span>}
+          {it.email && <span className="crow-email" style={{ color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 3, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={it.email}><Mail size={11} style={{ flexShrink: 0 }} />{it.email}</span>}
           <span className="msg-actions">
             <button className="iconbtn" onClick={() => onView(it)} title="Voir l'échange"><Eye size={13} /></button>
             <button className="iconbtn" onClick={() => onEdit(it)} title="Modifier l'échange"><Pencil size={12} /></button>

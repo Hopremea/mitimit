@@ -87,7 +87,7 @@ export default async function handler(req, res) {
     // 2) Metadonnees de chaque message (sujet, date, expediteur).
     const messages = [];
     for (const id of ids) {
-      const mUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=From`;
+      const mUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=From&metadataHeaders=To`;
       const mRes = await fetch(mUrl, { headers: gAuth });
       if (!mRes.ok) continue;
       const m = await mRes.json();
@@ -95,12 +95,20 @@ export default async function handler(req, res) {
       const h = (name) => { const x = headers.find((y) => (y.name || "").toLowerCase() === name); return x ? x.value : ""; };
       const subject = h("subject") || "(sans objet)";
       const from = h("from");
+      const to = h("to");
       const rawDate = h("date");
       let date = "";
       try { const d = new Date(rawDate); if (!isNaN(d)) date = d.toISOString().slice(0, 10); } catch (e) {}
+      // Heure telle qu'affichee dans l'en-tete (fuseau de l'expediteur), au format HH:MM.
+      let heure = "";
+      const hm = String(rawDate).match(/(\d{1,2}):(\d{2})/);
+      if (hm) heure = String(hm[1]).padStart(2, "0") + ":" + hm[2];
       // entrant = le contact nous a ecrit ; sortant = nous lui avons ecrit.
       const direction = from.toLowerCase().includes(email.toLowerCase()) ? "entrant" : "sortant";
-      messages.push({ date, sujet: subject, direction, resume: m.snippet || "" });
+      // Adresse e-mail du correspondant (expediteur si entrant, destinataire si sortant), sans le nom.
+      const addrOf = (s) => { const mm = String(s).match(/<([^>]+)>/); return (mm ? mm[1] : String(s)).trim(); };
+      const addr = direction === "entrant" ? addrOf(from) : (addrOf(to) || email);
+      messages.push({ date, heure, sujet: subject, direction, resume: m.snippet || "", email: addr });
     }
 
     res.status(200).json({ messages });
