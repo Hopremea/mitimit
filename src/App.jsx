@@ -3743,9 +3743,12 @@ function DevisPreview({ deal, account, settings, products = [], data = {}, onClo
   const titre = deal.type === "Facture" ? "FACTURE" : deal.type === "Commande" ? "BON DE COMMANDE" : "DEVIS";
   // Coordonnées du magasin pour l'encart « Client » : établissement rattaché en priorité, sinon contact
   // principal du compte, sinon le compte. La note interne du devis n'est jamais imprimée.
-  const site = deal.siteId ? (data.sites || []).find((s) => s.id === deal.siteId) : (deal.livraisonSiteId ? (data.sites || []).find((s) => s.id === deal.livraisonSiteId) : null);
+  const findSite = (id) => id ? (data.sites || []).find((s) => s.id === id) : null;
+  // Établissement de référence : celui du document (siteId / livraison), sinon un établissement du
+  // compte qui porte une adresse ou des coordonnées — utile quand le compte n'a pas d'adresse propre.
+  const site = findSite(deal.siteId) || findSite(deal.livraisonSiteId) || (account && (data.sites || []).find((s) => s.accountId === account.id && (s.adresse || s.telFixe || s.email))) || null;
   const princ = (data.contacts || []).find((c) => c.accountId === (account && account.id) && c.principal) || (data.contacts || []).find((c) => c.accountId === (account && account.id));
-  const clientAdresse = (site && site.adresse) || (account && (account.adressePostale || account.adresseLivraison)) || "";
+  const clientAdresse = (account && (account.adressePostale || account.adresseLivraison)) || (site && site.adresse) || "";
   const clientTel = (site && site.telFixe) || (princ && (princ.mobile || princ.fixe)) || "";
   const clientMail = (site && site.email) || (princ && princ.email) || (account && account.email) || "";
   return createPortal(<div className="ov print-doc-overlay" onClick={onClose}><div className="doc" onClick={(e) => e.stopPropagation()}>
