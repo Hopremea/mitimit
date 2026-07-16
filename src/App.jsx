@@ -5491,6 +5491,44 @@ function Statistiques({ data }) {
         <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>⚠️ = dernier réassort il y a plus de 4 mois. CA signé = commandes et devis acceptés.</div>
       </div>);
     })()}
+    {(() => {
+      // Couverture par département (secteur géographique) : nb de points de vente et taux de pénétration
+      // (clients actifs / PDV connus), pour repérer les zones sous-couvertes. Département déduit du CP.
+      const byDept = {};
+      (data.sites || []).filter((s) => s.type === "pdv" || s.type === "decision").forEach((s) => {
+        const m = String(s.adresse || "").match(/\b(\d{2})\d{3}\b/); if (!m) return;
+        const dep = m[1]; const acc = A.find((a) => a.id === s.accountId);
+        const actif = acc && (acc.stage === "actif" || acc.stage === "referencement");
+        const e = byDept[dep] = byDept[dep] || { dep, pdv: 0, actifs: 0 };
+        e.pdv++; if (actif) e.actifs++;
+      });
+      const rows = Object.values(byDept).sort((a, b) => b.pdv - a.pdv);
+      if (!rows.length) return null;
+      return (<div className="card"><div className="sec-h"><h3 className="pu-display">Couverture par département</h3><span>{rows.length} départements</span></div>
+        <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Département</th><th style={{ textAlign: "right" }}>PDV</th><th style={{ textAlign: "right" }}>Clients actifs</th><th style={{ textAlign: "right" }}>Pénétration</th></tr></thead><tbody>
+          {rows.map((r) => { const pen = r.pdv ? Math.round(r.actifs / r.pdv * 100) : 0; const c = pen >= 50 ? "var(--green)" : pen > 0 ? "var(--amber)" : "var(--muted)"; return (<tr key={r.dep}><td style={{ fontWeight: 700 }}>{r.dep}{DEPT_ZONES[r.dep] ? " · " + DEPT_ZONES[r.dep] : ""}</td><td style={{ textAlign: "right" }} className="tnum">{r.pdv}</td><td style={{ textAlign: "right" }} className="tnum">{r.actifs}</td><td style={{ textAlign: "right", fontWeight: 700, color: c }} className="tnum">{pen}%</td></tr>); })}
+        </tbody></table></div>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>Pénétration = clients actifs / points de vente connus dans le département. Les zones à faible % sont des gisements à démarcher.</div>
+      </div>);
+    })()}
+    {(() => {
+      // Cohortes de référencement : comptes regroupés par mois de 1re commande signée, avec la part
+      // encore active (réassort < 4 mois) — mesure si les enseignes fraîchement référencées recommandent.
+      const first = {};
+      A.filter((a) => !a.archived).forEach((a) => {
+        const dates = D.filter((d) => d.accountId === a.id && isCaSigne(d) && d.date).map((d) => d.date).sort();
+        if (dates.length) first[a.id] = { first: dates[0], last: dates[dates.length - 1] };
+      });
+      const coh = {};
+      Object.values(first).forEach(({ first: f, last }) => { const mois = f.slice(0, 7); const active = (Date.now() - new Date(last).getTime()) / 86400000 <= 120; const e = coh[mois] = coh[mois] || { mois, n: 0, actifs: 0 }; e.n++; if (active) e.actifs++; });
+      const rows = Object.values(coh).sort((a, b) => b.mois.localeCompare(a.mois)).slice(0, 12);
+      if (!rows.length) return null;
+      return (<div className="card"><div className="sec-h"><h3 className="pu-display">Cohortes de référencement</h3><span>rétention · réassort &lt; 4 mois</span></div>
+        <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Mois de 1re commande</th><th style={{ textAlign: "right" }}>Comptes</th><th style={{ textAlign: "right" }}>Encore actifs</th><th style={{ textAlign: "right" }}>Rétention</th></tr></thead><tbody>
+          {rows.map((r) => { const ret = r.n ? Math.round(r.actifs / r.n * 100) : 0; const c = ret >= 66 ? "var(--green)" : ret >= 33 ? "var(--amber)" : "var(--red)"; return (<tr key={r.mois}><td style={{ fontWeight: 700 }} className="tnum">{r.mois}</td><td style={{ textAlign: "right" }} className="tnum">{r.n}</td><td style={{ textAlign: "right" }} className="tnum">{r.actifs}</td><td style={{ textAlign: "right", fontWeight: 700, color: c }} className="tnum">{ret}%</td></tr>); })}
+        </tbody></table></div>
+      </div>);
+    })()}
     <p style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.5 }}>Statistiques descriptives basées sur vos données. Pour les indicateurs de marge et de performance commerciale, voyez l'onglet Performance.</p>
   </div>);
 }
