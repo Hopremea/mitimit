@@ -5460,6 +5460,27 @@ function Statistiques({ data }) {
         <li>Couverture tarifaire : <strong>{deptArr.length} départements</strong></li>
       </ul>
     </div>
+    {(() => {
+      // Comparatif par enseigne / groupe : agrège l'activité commerciale (PDV, commandes, CA signé,
+      // panier moyen, dernier réassort) par compte, pour arbitrer où concentrer l'effort commercial.
+      const rows = A.filter((a) => !a.archived).map((a) => {
+        const signed = D.filter((d) => d.accountId === a.id && isCaSigne(d));
+        const ca = sumMontant(signed);
+        const cmds = signed.filter((d) => d.type === "Commande");
+        const panier = cmds.length ? ca / cmds.length : 0;
+        const lastDate = signed.map((d) => d.date).filter(Boolean).sort().pop() || "";
+        const pdv = (data.sites || []).filter((s) => s.accountId === a.id && (s.type === "pdv" || s.type === "decision")).length || (isGroupe(a) ? 0 : 1);
+        return { a, ca, nbCmd: cmds.length, panier, lastDate, pdv };
+      }).filter((r) => r.ca > 0 || r.nbCmd > 0).sort((x, y) => y.ca - x.ca).slice(0, 25);
+      if (rows.length === 0) return null;
+      const stale = (d) => { if (!d) return false; return (Date.now() - new Date(d).getTime()) / 86400000 > 120; };
+      return (<div className="card"><div className="sec-h"><h3 className="pu-display">Comparatif par enseigne / groupe</h3><span>activité commerciale · top {rows.length}</span></div>
+        <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Enseigne / compte</th><th style={{ textAlign: "right" }}>PDV</th><th style={{ textAlign: "right" }}>Commandes</th><th style={{ textAlign: "right" }}>CA HT signé</th><th style={{ textAlign: "right" }}>Panier moyen</th><th>Dernier réassort</th></tr></thead><tbody>
+          {rows.map((r) => (<tr key={r.a.id}><td style={{ fontWeight: 700 }}>{r.a.enseigne || "Sans nom"}</td><td style={{ textAlign: "right" }} className="tnum">{r.pdv || "—"}</td><td style={{ textAlign: "right" }} className="tnum">{r.nbCmd}</td><td style={{ textAlign: "right", fontWeight: 700 }} className="tnum">{eur(Math.round(r.ca))}</td><td style={{ textAlign: "right" }} className="tnum">{r.panier > 0 ? eur(Math.round(r.panier)) : "—"}</td><td className="tnum" style={{ color: stale(r.lastDate) ? "var(--amber)" : "var(--muted)" }}>{r.lastDate || "—"}{stale(r.lastDate) ? " ⚠️" : ""}</td></tr>))}
+        </tbody></table></div>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>⚠️ = dernier réassort il y a plus de 4 mois. CA signé = commandes et devis acceptés.</div>
+      </div>);
+    })()}
     <p style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.5 }}>Statistiques descriptives basées sur vos données. Pour les indicateurs de marge et de performance commerciale, voyez l'onglet Performance.</p>
   </div>);
 }
