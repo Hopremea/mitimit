@@ -5854,9 +5854,17 @@ const SAL_BASE_HOURS = 151.67;      // heures mensuelles contractuelles (35 h/se
 const SAL_COTIS_EXCESS = 0.125;     // taux moyen de cotisations salariales sur la part > 79 % du SMIC
 const SAL_MUTUELLE = 22.63;         // mutuelle santé salariale (fixe)
 const SAL_PART = 78;                // rémunération apprenti = 78 % du SMIC (base)
-function estimateSalaire({ tauxBase, tauxHS, nbHS, prime, part = SAL_PART, mutuelle = SAL_MUTUELLE }) {
-  const base = (Number(tauxBase) || 0) * SAL_BASE_HOURS;
-  const hs = (Number(tauxHS) || 0) * (Number(nbHS) || 0);
+// Majoration légale des heures supplémentaires : les 8 premières heures sup. de la SEMAINE
+// (36ᵉ→43ᵉ h) sont payées +25 %, au-delà (44ᵉ h et plus) +50 %. Le taux HS 25 % = taux de base × 1,25
+// (vérifié : 9,6018 × 1,25 = 12,0023, exactement le taux du bulletin de juin).
+const SAL_MAJ_25 = 1.25, SAL_MAJ_50 = 1.5, SAL_SEUIL_50_MIN = 480; // 8 h/semaine = 480 min à +25 % avant +50 %
+function estimateSalaire({ tauxBase, h25, h50, prime, part = SAL_PART, mutuelle = SAL_MUTUELLE }) {
+  const tb = Number(tauxBase) || 0;
+  const base = tb * SAL_BASE_HOURS;
+  const t25 = tb * SAL_MAJ_25, t50 = tb * SAL_MAJ_50;
+  const hs25 = (Number(h25) || 0) * t25;
+  const hs50 = (Number(h50) || 0) * t50;
+  const hs = hs25 + hs50;
   const pr = Number(prime) || 0;
   const brut = base + hs + pr;
   const seuil = part > 0 ? base * (79 / part) : base; // 79 % du SMIC (la base vaut « part » % du SMIC)
@@ -5864,58 +5872,67 @@ function estimateSalaire({ tauxBase, tauxHS, nbHS, prime, part = SAL_PART, mutue
   const cotisVar = SAL_COTIS_EXCESS * excess;
   const mut = Number(mutuelle) || 0;
   const cotis = mut + cotisVar;
-  return { base, hs, prime: pr, brut, seuil, excess, mutuelle: mut, cotisVar, cotis, net: brut - cotis };
+  return { base, t25, t50, hs25, hs50, hs, prime: pr, brut, seuil, excess, mutuelle: mut, cotisVar, cotis, net: brut - cotis };
 }
 // Estimateur de salaire de fin de mois : taux horaire (base + heures sup.), heures sup. reprises du
 // pointage, indemnités kilométriques du mois versées en prime. Tout reste ajustable manuellement.
 function SalaireRH({ data, persist }) {
   const s = data.settings || {};
   const [tauxBase, setTauxBase] = useState(s.salaireTauxBase != null ? s.salaireTauxBase : 9.6018);
-  const [tauxHS, setTauxHS] = useState(s.salaireTauxHS != null ? s.salaireTauxHS : 12.0023);
   const part = s.salairePart != null ? s.salairePart : SAL_PART;
   const mutuelle = s.salaireMutuelle != null ? s.salaireMutuelle : SAL_MUTUELLE;
   const monthPrefix = new Date().toISOString().slice(0, 7);
   const monthName = new Date().toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
-  // Heures supplémentaires pointées ce mois (au-delà de 7 h/jour ouvré), en heures.
-  const autoHS = useMemo(() => {
-    const min = Object.entries(data.pointages || {}).filter(([ds]) => ds.startsWith(monthPrefix)).reduce((acc, [ds, rec]) => {
-      const st = presenceDay(rec); if (!st || st.invalid) return acc;
-      return acc + Math.max(0, st.worked - (isWeekendDs(ds) ? 0 : PRESENCE_TARGET));
-    }, 0);
-    return Math.round((min / 60) * 100) / 100;
+  // Heures supplémentaires pointées ce mois, réparties par SEMAINE : 8 premières h/semaine à +25 %,
+  // au-delà à +50 % (règle légale). On regroupe l'excédent quotidien (> 7 h/jour ouvré) par semaine.
+  const autoOT = useMemo(() => {
+    const byWeek = {};
+    Object.entries(data.pointages || {}).filter(([ds]) => ds.startsWith(monthPrefix)).forEach(([ds, rec]) => {
+      const st = presenceDay(rec); if (!st || st.invalid) return;
+      const ot = Math.max(0, st.worked - (isWeekendDs(ds) ? 0 : PRESENCE_TARGET)); if (ot <= 0) return;
+      const d = new Date(ds + "T00:00:00"); const mo = new Date(d); mo.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+      const k = isoLocal(mo); byWeek[k] = (byWeek[k] || 0) + ot;
+    });
+    let m25 = 0, m50 = 0;
+    Object.values(byWeek).forEach((min) => { m25 += Math.min(min, SAL_SEUIL_50_MIN); m50 += Math.max(0, min - SAL_SEUIL_50_MIN); });
+    return { h25: Math.round((m25 / 60) * 100) / 100, h50: Math.round((m50 / 60) * 100) / 100 };
   }, [data.pointages, monthPrefix]);
   // Indemnités kilométriques du mois (= total frais domicile-travail) versées en prime.
   const coutJour = (Number(s.fraisEssence != null ? s.fraisEssence : 8) + Number(s.fraisPeage != null ? s.fraisPeage : 3.2)) * (s.fraisAR !== false ? 2 : 1);
   const presDays = useMemo(() => Object.entries(data.pointages || {}).filter(([ds, r]) => ds.startsWith(monthPrefix) && r && (!r.motif || r.motif === "presence") && r.arrivee && r.depart).length, [data.pointages, monthPrefix]);
   const autoKm = Math.round(coutJour * presDays * 100) / 100;
-  const [nbHS, setNbHS] = useState(autoHS);
+  const [h25, setH25] = useState(autoOT.h25);
+  const [h50, setH50] = useState(autoOT.h50);
   const [prime, setPrime] = useState(autoKm);
-  const r = estimateSalaire({ tauxBase, tauxHS, nbHS, prime, part, mutuelle });
-  const memoriser = () => persist((p) => ({ ...p, settings: { ...p.settings, salaireTauxBase: Number(tauxBase) || 0, salaireTauxHS: Number(tauxHS) || 0 } }));
+  const r = estimateSalaire({ tauxBase, h25, h50, prime, part, mutuelle });
+  const memoriser = () => persist((p) => ({ ...p, settings: { ...p.settings, salaireTauxBase: Number(tauxBase) || 0 } }));
   const Line = ({ l, v, strong, color, sub }) => (<div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: strong ? 13.5 : 12.5, fontWeight: strong ? 800 : 500, color: color || "inherit", padding: "3px 0" }}><span>{l}{sub && <span style={{ color: "var(--muted)", fontWeight: 500 }}> {sub}</span>}</span><span className="tnum">{v}</span></div>);
+  const totHS = (Number(h25) || 0) + (Number(h50) || 0);
   return (<div>
     <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--blue)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
       <div>
         <div style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3 }}>Estimation du net à payer · <span style={{ textTransform: "capitalize" }}>{monthName}</span></div>
-        <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3, lineHeight: 1.5 }}>Salaire de base {SAL_BASE_HOURS} h + {nbHS} h sup. + prime (indemnités km) {eur2(prime)}, cotisations apprenti déduites.</div>
+        <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3, lineHeight: 1.5 }}>Base {SAL_BASE_HOURS} h + {totHS} h sup. ({h25} h à +25 % · {h50} h à +50 %) + prime (indemnités km) {eur2(prime)}, cotisations apprenti déduites.</div>
       </div>
       <div className="pu-display tnum" style={{ fontSize: 34, color: "var(--blue)", fontWeight: 900 }}>{eur2(r.net)}</div>
     </div>
     <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", alignItems: "start" }}>
       <div className="card"><div className="sec-h"><h3 className="pu-display">Paramètres de paie</h3></div>
+        <div className="fld" style={{ marginBottom: 8 }}><label>Taux horaire de base (€ / h)</label><input type="number" step="0.0001" value={tauxBase} onChange={(e) => setTauxBase(e.target.value)} /></div>
+        <div style={{ fontSize: 11.5, color: "var(--muted)", margin: "0 0 10px", lineHeight: 1.5, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 8, padding: "7px 9px" }}>Majoration heures sup. : <strong>+25 %</strong> = {eur2(r.t25)}/h (8 premières h/semaine) · <strong>+50 %</strong> = {eur2(r.t50)}/h (au-delà de 8 h/semaine).</div>
         <div className="row2" style={{ marginBottom: 8 }}>
-          <div className="fld"><label>Taux horaire de base (€ / h)</label><input type="number" step="0.0001" value={tauxBase} onChange={(e) => setTauxBase(e.target.value)} /></div>
-          <div className="fld"><label>Taux horaire heures sup. (€ / h)</label><input type="number" step="0.0001" value={tauxHS} onChange={(e) => setTauxHS(e.target.value)} /></div>
+          <div className="fld"><label>H. sup. à +25 % (h)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.25" min="0" value={h25} onChange={(e) => setH25(e.target.value)} /><button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setH25(autoOT.h25)} title="Reprendre depuis le pointage">{autoOT.h25} h</button></div></div>
+          <div className="fld"><label>H. sup. à +50 % (h)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.25" min="0" value={h50} onChange={(e) => setH50(e.target.value)} /><button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setH50(autoOT.h50)} title="Reprendre depuis le pointage">{autoOT.h50} h</button></div></div>
         </div>
-        <div className="fld" style={{ marginBottom: 8 }}><label style={{ textTransform: "capitalize" }}>Heures supplémentaires · {monthName}</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.25" min="0" value={nbHS} onChange={(e) => setNbHS(e.target.value)} /><button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setNbHS(autoHS)} title="Reprendre les heures supplémentaires pointées ce mois">{autoHS} h pointée(s)</button></div></div>
         <div className="fld"><label style={{ textTransform: "capitalize" }}>Prime — indemnités kilométriques · {monthName} (€)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.01" min="0" value={prime} onChange={(e) => setPrime(e.target.value)} /><button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setPrime(autoKm)} title="Reprendre le total des frais kilométriques du mois">{eur2(autoKm)}</button></div></div>
-        <div style={{ marginTop: 10 }}><button className="btn btn-g btn-s" onClick={memoriser}><Save size={13} /> Mémoriser mes taux horaires</button></div>
-        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 10, lineHeight: 1.5 }}>Statut apprenti : rémunération à {part} % du SMIC, exonération de cotisations salariales jusqu'à 79 % du SMIC, mutuelle {eur2(mutuelle)}. Modèle calibré sur vos bulletins récents ; l'estimation approche le net réel à ~1 € près.</div>
+        <div style={{ marginTop: 10 }}><button className="btn btn-g btn-s" onClick={memoriser}><Save size={13} /> Mémoriser mon taux horaire</button></div>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 10, lineHeight: 1.5 }}>Statut apprenti : rémunération à {part} % du SMIC, exonération de cotisations salariales jusqu'à 79 % du SMIC, mutuelle {eur2(mutuelle)}. Les heures sup. sont reprises du pointage et réparties par semaine (8 h à +25 %, au-delà à +50 %). Estimation calibrée sur vos bulletins (~1 € près).</div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <div className="card" style={{ borderTop: "3px solid var(--blue)" }}><div className="sec-h"><h3 className="pu-display">Détail du bulletin estimé</h3></div>
           <Line l="Salaire de base" sub={"(" + SAL_BASE_HOURS + " h × " + eur2(Number(tauxBase) || 0) + ")"} v={eur2(r.base)} />
-          <Line l="Heures supplémentaires" sub={"(" + nbHS + " h × " + eur2(Number(tauxHS) || 0) + ")"} v={eur2(r.hs)} />
+          <Line l="Heures sup. +25 %" sub={"(" + h25 + " h × " + eur2(r.t25) + ")"} v={eur2(r.hs25)} />
+          <Line l="Heures sup. +50 %" sub={"(" + h50 + " h × " + eur2(r.t50) + ")"} v={eur2(r.hs50)} />
           <Line l="Prime (indemnités km)" v={eur2(r.prime)} />
           <div style={{ borderTop: "1px solid var(--line)", margin: "6px 0" }} />
           <Line l="Salaire brut" v={eur2(r.brut)} strong />
