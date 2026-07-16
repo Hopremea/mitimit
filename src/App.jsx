@@ -1806,6 +1806,105 @@ function Modal({ title, onClose, children, wide, xl, guard = true }) {
   return (<div className="ov no-print" onClick={() => closeRef.current()}><div className="modal" ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={typeof title === "string" ? title : undefined} style={{ width: w, outline: "none" }} onClick={(e) => e.stopPropagation()}><div className="modal-h"><h3 className="pu-display">{title}</h3><button className="iconbtn" onClick={() => closeRef.current()} aria-label="Fermer"><X size={18} /></button></div><div className="modal-b">{children}</div></div></div>);
 }
 
+// ===== Horaires d'ouverture : parsing du texte libre + affichage vertical façon Google =====
+// Le champ `horaires` est saisi en texte libre (ex. « Lun-Sam 10h-19h, Dim fermé »). On tente d'en
+// déduire une grille jour par jour pour afficher, comme Google, un voyant Ouvert / Fermé calculé en
+// temps réel. Si l'analyse échoue, on retombe simplement sur le texte brut d'origine.
+const JOURS_LONG = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
+const _DAY_IDX = { lundi: 0, mardi: 1, mercredi: 2, jeudi: 3, vendredi: 4, samedi: 5, dimanche: 6, lun: 0, mar: 1, mer: 2, jeu: 3, ven: 4, sam: 5, dim: 6 };
+// getDay() : 0 = dimanche → on ramène à un index 0 = lundi … 6 = dimanche.
+const todayJourIdx = () => (new Date().getDay() + 6) % 7;
+const _fmtHM = (mins) => { const h = Math.floor(mins / 60), m = mins % 60; return h + "h" + (m ? String(m).padStart(2, "0") : ""); };
+// Plages horaires trouvées dans un fragment de texte : « 10h-19h », « 10h00 – 19h30 », « 9h à 12h30 ».
+function _parseRanges(txt) {
+  const re = /(\d{1,2})\s*[h:]\s*(\d{0,2})\s*(?:-|–|—|à)\s*(\d{1,2})\s*[h:]?\s*(\d{0,2})/g;
+  const out = []; let m;
+  while ((m = re.exec(txt))) {
+    const s = (+m[1]) * 60 + (m[2] ? +m[2] : 0);
+    const e = (+m[3]) * 60 + (m[4] ? +m[4] : 0);
+    if (e > s) out.push([s, e]);
+  }
+  return out;
+}
+// Jours mentionnés dans un fragment (avec expansion des plages « lun-sam », « du lundi au samedi »).
+function _parseDays(seg) {
+  const low = seg.toLowerCase();
+  const re = /(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|lun|mar|mer|jeu|ven|sam|dim)/g;
+  const found = []; let m;
+  while ((m = re.exec(low))) found.push({ i: _DAY_IDX[m[1]], s: m.index, e: re.lastIndex });
+  if (!found.length) return [];
+  if (found.length === 2) {
+    const gap = low.slice(found[0].e, found[1].s);
+    if (/-|–|—|au|à/.test(gap) && !/\d/.test(gap)) {
+      let a = found[0].i, b = found[1].i; const out = [];
+      if (a <= b) { for (let d = a; d <= b; d++) out.push(d); }
+      else { for (let d = a; d <= 6; d++) out.push(d); for (let d = 0; d <= b; d++) out.push(d); }
+      return out;
+    }
+  }
+  return found.map((f) => f.i);
+}
+// Rend une grille de 7 jours (index 0 = lundi) : chaque entrée = { closed:true } ou { ranges:[[s,e]…] }.
+// Renvoie null si le texte n'a pu être interprété (aucune plage ni « fermé » détecté).
+function parseHoraires(txt) {
+  if (!txt || !String(txt).trim()) return null;
+  const segs = String(txt).split(/[;,\n]/).map((x) => x.trim()).filter(Boolean);
+  const grid = new Array(7).fill(null);
+  let touched = false;
+  segs.forEach((seg) => {
+    const days = _parseDays(seg);
+    const closed = /ferm/i.test(seg);
+    const ranges = _parseRanges(seg);
+    if (!ranges.length && !closed) return;
+    const targets = days.length ? days : (segs.length === 1 ? [0, 1, 2, 3, 4, 5, 6] : []);
+    targets.forEach((d) => { grid[d] = closed && !ranges.length ? { closed: true } : { ranges }; touched = true; });
+  });
+  if (!touched) return null;
+  // Jour non mentionné = considéré fermé (comportement Google).
+  for (let d = 0; d < 7; d++) if (!grid[d]) grid[d] = { closed: true };
+  return grid;
+}
+// Voyant + liste verticale des horaires. Aujourd'hui est mis en gras ; le statut Ouvert/Fermé est
+// calculé sur l'heure courante. Repli sur le texte brut si l'analyse échoue.
+function HorairesJours({ txt }) {
+  const grid = parseHoraires(txt);
+  if (!grid) return (<div style={{ color: "var(--muted)", fontSize: 13, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 6 }}><Clock size={14} />{txt}</div>);
+  const today = todayJourIdx();
+  const now = new Date(); const nowMin = now.getHours() * 60 + now.getMinutes();
+  const te = grid[today];
+  let open = false, hint = "";
+  if (te && te.ranges && te.ranges.length) {
+    const cur = te.ranges.find((r) => nowMin >= r[0] && nowMin < r[1]);
+    if (cur) { open = true; hint = "Ferme à " + _fmtHM(cur[1]); }
+    else { const next = te.ranges.find((r) => nowMin < r[0]); if (next) hint = "Ouvre à " + _fmtHM(next[0]); }
+  }
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+        <Clock size={14} style={{ color: "var(--muted)" }} />
+        <span style={{ width: 9, height: 9, borderRadius: "50%", background: open ? "#2bb673" : "#c0392b", display: "inline-block", flexShrink: 0 }} />
+        <strong style={{ color: open ? "#1f8f5b" : "#c0392b" }}>{open ? "Ouvert" : "Fermé"}</strong>
+        {hint && <span style={{ color: "var(--muted)" }}>· {hint}</span>}
+      </div>
+      <table style={{ marginTop: 7, borderCollapse: "collapse", fontSize: 13, lineHeight: 1.5 }}>
+        <tbody>
+          {JOURS_LONG.map((nom, i) => {
+            const e = grid[i]; const isToday = i === today;
+            const label = e && e.ranges && e.ranges.length ? e.ranges.map((r) => _fmtHM(r[0]) + " – " + _fmtHM(r[1])).join(", ") : "Fermé";
+            const ferme = !(e && e.ranges && e.ranges.length);
+            return (
+              <tr key={i} style={{ fontWeight: isToday ? 700 : 400 }}>
+                <td style={{ padding: "1px 18px 1px 0", color: isToday ? "var(--text)" : "var(--muted)" }}>{nom}</td>
+                <td style={{ padding: "1px 0", color: ferme ? "#c0392b" : (isToday ? "var(--text)" : "var(--muted)") }}>{label}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // Popup intégrant la fiche Google (carte interactive) d'un établissement, sans quitter le logiciel.
 // query = ce qu'on cherche sur Google Maps (enseigne + ville, ou adresse) ; externalUrl = lien complet
 // pour rouvrir la fiche dans un onglet Google Maps (avis, horaires, photos détaillés).
@@ -2660,7 +2759,7 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
           {s.adresse && <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 8, display: "inline-flex", alignItems: "center", gap: 6 }}><MapPin size={14} />{s.adresse}</div>}
           {s.telFixe && <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 6 }}><Phone size={14} /><a href={"tel:" + s.telFixe.replace(/\s/g, "")} style={{ color: "inherit" }} title="Téléphone fixe du magasin">{s.telFixe}</a></div>}
           {s.email && <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 6 }}><Mail size={14} /><a href={"mailto:" + s.email} style={{ color: "inherit" }} title="Écrire à cet établissement">{s.email}</a></div>}
-          {s.horaires && <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 6 }}><Clock size={14} />{s.horaires}</div>}
+          {s.horaires && <HorairesJours txt={s.horaires} />}
           {s.site && <div style={{ fontSize: 13, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 6 }}><Globe size={14} style={{ color: "var(--muted)" }} /><a className="lnk" href={ensureHttp(s.site)} target="_blank" rel="noreferrer" title="Site internet de l'établissement">{cleanDomain(s.site) || s.site}</a></div>}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9, alignItems: "center" }}>{s.typeSurface && <Badge color="#3F60AA">{s.typeSurface}</Badge>}{s.siret && <span className="tnum" style={{ fontSize: 12, color: "var(--muted)" }}>SIRET {s.siret}</span>}{!s.lat && <Badge color="#c0392b">à géolocaliser</Badge>}</div>
         </div>
