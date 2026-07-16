@@ -5811,9 +5811,9 @@ function Pointage({ data, persist }) {
     const L = [];
     L.push("### Temps de présence & trajets — " + monthName);
     L.push("");
-    L.push("| Date | Jour | Type | Arrivée | Départ | Pause | Heures | Trajet A/R | Frais |");
-    L.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
-    let totMin = 0, totFrais = 0, totAR = 0;
+    L.push("| Date | Jour | Type | Arrivée | Départ | Pause | Heures | Heures sup. | Trajet A/R | Frais |");
+    L.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    let totMin = 0, totSup = 0, totFrais = 0, totAR = 0;
     rows.forEach((ds) => {
       const st = presenceDay(pointages[ds]); if (!st || st.invalid) return;
       const d = new Date(ds + "T00:00:00");
@@ -5822,10 +5822,11 @@ function Pointage({ data, persist }) {
       const mot = st.motif && st.motif !== "presence" ? PRESENCE_MOTIFS[st.motif] : null;
       const ar = !mot;
       const frais = ar ? coutJour : 0;
-      totMin += st.worked; if (ar) { totFrais += frais; totAR++; }
-      L.push("| " + [dateFr, jour, mot ? mot.label : "Présence", mot ? "" : st.arrivee, mot ? "" : st.depart, mot ? "" : ((st.pause || 0) + " min"), hd(st.worked), ar ? "A/R" : "—", ar ? eur2(frais) : "—"].join(" | ") + " |");
+      const sup = Math.max(0, st.worked - targetOf(ds));
+      totMin += st.worked; totSup += sup; if (ar) { totFrais += frais; totAR++; }
+      L.push("| " + [dateFr, jour, mot ? mot.label : "Présence", mot ? "" : st.arrivee, mot ? "" : st.depart, mot ? "" : ((st.pause || 0) + " min"), hd(st.worked), hd(sup), ar ? "A/R" : "—", ar ? eur2(frais) : "—"].join(" | ") + " |");
     });
-    L.push("| **Total** |  |  |  |  |  | **" + hd(totMin) + "** | **" + totAR + " A/R** | **" + eur2(totFrais) + "** |");
+    L.push("| **Total** |  |  |  |  |  | **" + hd(totMin) + "** | **" + hd(totSup) + "** | **" + totAR + " A/R** | **" + eur2(totFrais) + "** |");
     return L.join("\n");
   };
 
