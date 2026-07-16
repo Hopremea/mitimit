@@ -2900,6 +2900,22 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
         {deals.length === 0 ? <div className="empty">Aucun document propre à cet établissement. Créez un devis ou une commande pour ce point de vente.</div> : <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Réf.</th><th>Type</th><th>Date</th><th>Statut</th><th style={{ textAlign: "right" }}>Montant</th><th></th></tr></thead><tbody>{deals.map((d) => { const ds = DEAL_STATUS[d.statut] || DEAL_STATUS.brouillon; return (<tr key={d.id} style={{ cursor: "pointer" }} onClick={() => setDealEdit(d)}><td style={{ fontWeight: 700 }}>{docRef(d, acc)}</td><td>{d.type}</td><td className="tnum">{d.date}</td><td><Badge color={ds.color}>{ds.label}</Badge></td><td style={{ textAlign: "right", fontWeight: 700 }} className="tnum">{eur(d.montant)}</td><td style={{ textAlign: "right" }}><button className="iconbtn" title="Aperçu" onClick={(e) => { e.stopPropagation(); setPreview(d); }}><Eye size={15} /></button></td></tr>); })}</tbody></table></div>}
       </div>
     </div>
+    {(() => {
+      // Cross-sell : coloris de bobines Fil'Up jamais commandés par ce point de vente → opportunité
+      // d'extension de gamme. On compare les références PU3D-FIL-* déjà commandées à la gamme complète.
+      if (deals.length === 0) return null;
+      const ordered = new Set();
+      deals.forEach((d) => (d.lines || []).forEach((l) => { if (/^PU3D-FIL-/.test(l.code || "")) ordered.add(l.code); }));
+      if (ordered.size === 0) return null;
+      const missing = (data.products || []).filter((p) => /^PU3D-FIL-/.test(p.code || "") && !ordered.has(p.code));
+      if (missing.length === 0) return null;
+      const proposer = () => setDealEdit({ ...newDeal("Devis"), note: "Extension de gamme — coloris complémentaires", lines: missing.map((p) => L(p.code, p.designation, 6, p.cessionHT != null ? p.cessionHT : p.pvc)) });
+      return (<div className="card" style={{ marginTop: 16, borderLeft: "4px solid var(--yellow-d)" }}>
+        <div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 5, margin: 0 }}><Sparkles size={15} />Cross-sell — coloris à proposer <span style={{ color: "var(--muted)", fontWeight: 600 }}>({missing.length})</span></h3><button className="btn btn-y btn-s" onClick={proposer} title="Créer un devis d'extension de gamme avec les coloris manquants"><Plus size={14} /> Devis extension gamme</button></div>
+        <div style={{ fontSize: 12.5, color: "var(--muted)", marginBottom: 8, lineHeight: 1.5 }}>Ce point de vente commande déjà {ordered.size} coloris Fil'Up. Coloris de la gamme jamais commandés ici :</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{missing.map((p) => <span key={p.code} style={{ fontSize: 12, fontWeight: 600, border: "1px solid var(--line)", borderRadius: 20, padding: "3px 10px", background: "var(--bg)" }}>{p.designation}</span>)}</div>
+      </div>);
+    })()}
     <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", alignItems: "start", marginTop: 16 }}>
       <div className="card"><div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 5, margin: 0 }}><MessageSquare size={15} />Fil des échanges</h3><div style={{ display: "flex", gap: 6 }}><button className="btn btn-g btn-s" onClick={() => setComposerOpen(true)} title="Rédiger un e-mail, message LinkedIn ou SMS avec l'IA (canal et ton au choix)"><MessageSquare size={14} /> Message IA</button><button className="btn btn-y btn-s" onClick={() => setAddInt(true)}><Plus size={14} /> Ajouter</button></div></div>
         <InteractionThread interactions={ints} data={data} onView={(it) => setIntView(it)} onEdit={(it) => setIntEdit(it)} onDelete={delInteraction} showContact />
