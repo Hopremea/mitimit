@@ -1388,7 +1388,7 @@ ${ACCENT_CSS}
 .btn:disabled{opacity:.5;cursor:not-allowed;}
 .btn-p{background:linear-gradient(135deg,var(--blue),var(--blue-d));color:#fff;box-shadow:0 0 0 1.5px rgba(255,255,255,.55),0 6px 16px rgba(63,96,170,.3);}.btn-p:hover{transform:translateY(-1px);box-shadow:0 0 0 1.5px rgba(255,255,255,.55),0 9px 22px rgba(63,96,170,.4);}
 .btn-y{background:var(--yellow);color:#5a3d00;box-shadow:0 0 0 1.5px rgba(255,255,255,.55),0 6px 16px rgba(248,187,32,.35);}.btn-y:hover{transform:translateY(-1px);background:var(--yellow-d);}
-.btn-g{background:#fff;color:var(--ink);border:1px solid var(--line);}.btn-g:hover{border-color:var(--blue);color:var(--blue);}
+.btn-g{background:rgba(255,255,255,.5);-webkit-backdrop-filter:blur(12px) saturate(155%);backdrop-filter:blur(12px) saturate(155%);color:var(--ink);border:1px solid rgba(255,255,255,.6);box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 2px 8px rgba(20,32,58,.06);}.btn-g:hover{border-color:var(--blue);color:var(--blue);background:rgba(255,255,255,.66);}
 .btn-ai{background:linear-gradient(120deg,var(--blue),var(--orange));color:#fff;border:0;font-weight:800;box-shadow:0 0 0 1.5px rgba(255,255,255,.55),0 5px 16px rgba(248,177,51,.34);text-shadow:0 1px 2px rgba(22,32,58,.32);}.btn-ai:hover{transform:translateY(-1px);filter:brightness(1.05);box-shadow:0 0 0 1.5px rgba(255,255,255,.55),0 8px 22px rgba(248,177,51,.44);}
 .btn-d{background:#fff;color:var(--red);border:1px solid #f3d2d6;}.btn-d:hover{background:#FFE9E5;}
 .btn-s{padding:7px 11px;font-size:12.5px;}
@@ -1400,11 +1400,17 @@ ${ACCENT_CSS}
 .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px;box-shadow:0 1px 2px rgba(20,32,58,.04);}
 /* Effet « liquid glass » (verre dépoli façon Apple) : fond translucide, flou d'arrière-plan, reflet de bord.
    Le motif/décor derrière transparaît en flou, tout en gardant le contenu parfaitement lisible. */
-.glass{background:rgba(255,255,255,.55)!important;-webkit-backdrop-filter:blur(18px) saturate(180%);backdrop-filter:blur(18px) saturate(180%);border:1px solid rgba(255,255,255,.55);box-shadow:0 8px 30px rgba(20,32,58,.12),inset 0 1px 0 rgba(255,255,255,.6);}
+.glass{background:rgba(255,255,255,.5)!important;-webkit-backdrop-filter:blur(22px) saturate(185%);backdrop-filter:blur(22px) saturate(185%);border:1px solid rgba(255,255,255,.6);box-shadow:0 8px 30px rgba(20,32,58,.12),inset 0 1px 0 rgba(255,255,255,.72),inset 0 -1px 1px rgba(255,255,255,.18);}
 .glass-tint{position:relative;overflow:hidden;}
 .glass-tint::before{content:"";position:absolute;inset:0;background:var(--glass-tint,transparent);opacity:.9;pointer-events:none;z-index:0;}
-.glass-tint>*{position:relative;z-index:1;}
-.pu-root.dark .glass{background:rgba(23,31,51,.5)!important;border-color:rgba(255,255,255,.10);box-shadow:0 8px 30px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.07);}
+/* Reflet spéculaire léger en haut de la surface (aspect « liquid glass »). */
+.glass::after{content:"";position:absolute;inset:0 0 auto 0;height:42%;background:linear-gradient(180deg,rgba(255,255,255,.5),rgba(255,255,255,0));pointer-events:none;opacity:.55;z-index:0;border-radius:inherit;}
+.glass{position:relative;}
+.glass-tint>*,.glass>*{position:relative;z-index:1;}
+.pu-root.dark .glass{background:rgba(23,31,51,.5)!important;border-color:rgba(255,255,255,.12);box-shadow:0 8px 30px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.09);}
+.pu-root.dark .glass::after{background:linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,0));opacity:.6;}
+/* Verre liquide sur les contrôles interactifs (boutons secondaires, chips, boutons icône) et les tuiles. */
+.glass-ctl{-webkit-backdrop-filter:blur(12px) saturate(155%);backdrop-filter:blur(12px) saturate(155%);}
 .kpi{position:relative;overflow:hidden;opacity:0;transform:translateY(10px);animation:rise .5s forwards;}
 .kpi .ic{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;margin-bottom:12px;}
 .kpi .lab{color:var(--muted);font-size:12px;font-weight:600;}.kpi .val{font-size:24px;margin-top:2px;}.kpi .sub{font-size:11.5px;color:var(--muted);margin-top:4px;display:flex;align-items:center;gap:5px;}
@@ -1430,7 +1436,7 @@ ${ACCENT_CSS}
 .acc-card{background:#fff;border:1px solid var(--line);border-radius:13px;padding:12px;margin-bottom:9px;cursor:pointer;transition:.16s;border-left:4px solid var(--blue);}
 .acc-card:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(20,32,58,.1);}
 /* Tuile cliquable : réagit au survol (légère élévation + ombre) comme les boutons. */
-.tile{cursor:pointer;transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease;}
+.tile{cursor:pointer;background:rgba(255,255,255,.52);-webkit-backdrop-filter:blur(16px) saturate(170%);backdrop-filter:blur(16px) saturate(170%);box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 4px 16px rgba(20,32,58,.06);transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease;}
 .tile:hover{transform:translateY(-3px);box-shadow:0 12px 26px rgba(20,32,58,.14);border-color:#cfdcf3;}
 .tile:active{transform:translateY(-1px);box-shadow:0 6px 14px rgba(20,32,58,.12);}
 .pu-root.dark .tile:hover{box-shadow:0 12px 26px rgba(0,0,0,.45);border-color:#33415a;}
@@ -1444,11 +1450,11 @@ ${ACCENT_CSS}
 .fld input,.fld select,.fld textarea{border:1px solid var(--line);border-radius:10px;padding:9px 11px;font-family:inherit;font-size:13.5px;width:100%;background:#fff;}
 .fld input:focus,.fld select:focus,.fld textarea:focus{outline:0;border-color:var(--blue);}
 .row2{display:flex;gap:12px;}.row2>*{flex:1;min-width:0;}
-.iconbtn{border:0;background:#f2f4f9;width:32px;height:32px;border-radius:9px;display:grid;place-items:center;cursor:pointer;color:var(--muted);}.iconbtn:hover{background:#e7ebf4;color:var(--ink);}.iconbtn:disabled{opacity:.4;cursor:not-allowed;}
+.iconbtn{border:1px solid rgba(255,255,255,.5);background:rgba(242,244,249,.55);-webkit-backdrop-filter:blur(12px) saturate(155%);backdrop-filter:blur(12px) saturate(155%);width:32px;height:32px;border-radius:9px;display:grid;place-items:center;cursor:pointer;color:var(--muted);}.iconbtn:hover{background:rgba(231,235,244,.8);color:var(--ink);}.iconbtn:disabled{opacity:.4;cursor:not-allowed;}
 .conn{display:flex;align-items:center;gap:14px;padding:16px;border:1px solid var(--line);border-radius:15px;background:#fff;}.conn .logo{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;font-weight:800;color:#fff;}
 .drop{border:2px dashed var(--line);border-radius:15px;padding:22px;text-align:center;color:var(--muted);cursor:pointer;transition:.18s;}.drop:hover{border-color:var(--blue);background:var(--blue-l);color:var(--blue);}
 .empty{color:var(--muted);text-align:center;padding:30px;font-size:13px;}
-.chip{border:1px solid var(--line);background:#fff;border-radius:20px;padding:7px 13px;font-size:12.5px;font-weight:600;color:var(--muted);cursor:pointer;transition:.15s;}.chip:hover{border-color:var(--blue);}.chip.on{background:var(--blue);color:#fff;border-color:var(--blue);}
+.chip{border:1px solid rgba(255,255,255,.6);background:rgba(255,255,255,.48);-webkit-backdrop-filter:blur(12px) saturate(155%);backdrop-filter:blur(12px) saturate(155%);box-shadow:inset 0 1px 0 rgba(255,255,255,.6);border-radius:20px;padding:7px 13px;font-size:12.5px;font-weight:600;color:var(--muted);cursor:pointer;transition:.15s;}.chip:hover{border-color:var(--blue);background:rgba(255,255,255,.64);}.chip.on{background:var(--blue);color:#fff;border-color:var(--blue);-webkit-backdrop-filter:none;backdrop-filter:none;}
 .chip-all{display:inline-flex;align-items:center;gap:5px;border:1px dashed var(--blue);background:var(--blue-l);border-radius:9px;padding:7px 12px;font-size:12.5px;font-weight:700;color:var(--ink);cursor:pointer;transition:.15s;}
 .chip-all:hover{border-color:var(--ink);}
 .chip-all.on{background:var(--blue);color:#fff;border:1px solid var(--blue);}
@@ -1580,7 +1586,7 @@ ${ACCENT_CSS}
 /* Boutons supplémentaires (red) */
 .btn-r{background:linear-gradient(135deg,var(--red),var(--red-d));color:#fff;box-shadow:0 0 0 1.5px rgba(255,255,255,.55),0 6px 16px rgba(255,90,69,.32);}
 .btn-r:hover{filter:brightness(1.07);transform:translateY(-1px);box-shadow:0 0 0 1.5px rgba(255,255,255,.55),0 9px 22px rgba(255,90,69,.42);}
-.btn-ghost{background:transparent;color:var(--ink);border:1px solid var(--line);}
+.btn-ghost{background:rgba(255,255,255,.4);-webkit-backdrop-filter:blur(12px) saturate(150%);backdrop-filter:blur(12px) saturate(150%);color:var(--ink);border:1px solid rgba(255,255,255,.55);}.btn-ghost:hover{background:rgba(255,255,255,.6);}
 .btn-ghost:hover{background:var(--blue-l);border-color:var(--blue);}
 
 /* Mode sombre */
@@ -1603,6 +1609,9 @@ ${ACCENT_CSS}
 .pu-root.dark .msg-out .msg-bubble{background:#1d2945;}
 .pu-root.dark .btn-g,.pu-root.dark .conn,.pu-root.dark .crow,.pu-root.dark .zbtn,.pu-root.dark .pin-pop,.pu-root.dark .iconbtn{background:var(--card);color:var(--ink);}
 .pu-root.dark .iconbtn{background:#1d2945;}
+/* Verre liquide (thème sombre) sur contrôles et tuiles : translucide + flou, override des fonds pleins ci-dessus. */
+.pu-root.dark .btn-g,.pu-root.dark .btn-ghost,.pu-root.dark .chip:not(.on),.pu-root.dark .iconbtn,.pu-root.dark .tile{background:rgba(38,50,74,.42);-webkit-backdrop-filter:blur(13px) saturate(150%);backdrop-filter:blur(13px) saturate(150%);border-color:rgba(255,255,255,.10);box-shadow:inset 0 1px 0 rgba(255,255,255,.06);}
+.pu-root.dark .btn-g:hover,.pu-root.dark .chip:not(.on):hover,.pu-root.dark .btn-ghost:hover,.pu-root.dark .iconbtn:hover{background:rgba(52,66,96,.55);}
 .pu-root.dark .tbl tr:hover td{background:#1d2945;}
 /* Accessibilité : anneau de focus clavier visible (sans gêner la souris). */
 .nav button:focus-visible,.btn:focus-visible,.btn-save:focus-visible,.chip:focus-visible,.chip-all:focus-visible,.iconbtn:focus-visible,.zbtn:focus-visible,.star:focus-visible,.back:focus-visible,a:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:8px;}
@@ -2738,7 +2747,7 @@ function Accounts({ data, persist, go, focus }) {
     {logosOpen && <LogosBulk data={data} persist={persist} onClose={() => setLogosOpen(false)} />}
     {horairesOpen && <HorairesBulk data={data} persist={persist} onClose={() => setHorairesOpen(false)} />}
     {dupOpen && <DoublonsModal data={data} persist={persist} onClose={() => setDupOpen(false)} />}
-    {(() => { const groupList = accounts.filter((a) => isMulti(a) && !a.archived).slice().sort((a, b) => (a.enseigne || "").localeCompare(b.enseigne || "")); return groupList.length === 0 ? <div className="empty">Aucun groupe. Créez un groupe (Cultura, King Jouet…) pour y rattacher des établissements.</div> : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(238px, 1fr))", gap: 10 }}>{groupList.map((a) => { const pc = principal(a.id); const sm = stageMeta(a.stage); const seg = networkSeg(a.magasins); return (<button key={a.id} className="tile" onClick={() => go("accounts", a.id)} style={{ textAlign: "left", border: "1px solid var(--line)", borderLeft: "3px solid #3F60AA", borderRadius: 12, padding: "11px 13px", background: "#fff", display: "flex", flexDirection: "column", gap: 5, fontFamily: "inherit" }}><div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>{a.logo ? <img src={a.logo} alt="" style={{ width: 24, height: 24, borderRadius: 6, objectFit: "contain", background: "#fff", border: "1px solid var(--line)", flexShrink: 0 }} /> : <Building2 size={16} color="#3F60AA" style={{ flexShrink: 0 }} />}<span style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.2 }}>{a.enseigne || "Sans nom"}</span>{a.code && <span style={{ fontWeight: 800, fontSize: 10.5, letterSpacing: ".03em", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 6, padding: "1px 6px", color: "var(--muted)" }} className="tnum">{a.code}</span>}</div>{pc && <div className="meta"><User size={12} />{pc}</div>}<div className="meta"><Store size={12} />{magasinLabel(a.magasins)}</div><div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 5, marginTop: 2 }}><Badge color={seg.color}>{seg.label}</Badge><StageTag stage={sm} /></div>{(() => { const att = sumMontant((data.deals || []).filter((d) => d.accountId === a.id && isDevisEnAttente(d))); return att > 0 ? <div style={{ marginTop: 4, fontWeight: 700, color: "var(--blue)", fontSize: 13 }} className="tnum" title="CA HT en attente (devis non validés)">{eur(att)}</div> : null; })()}</button>); })}</div>; })()}
+    {(() => { const groupList = accounts.filter((a) => isMulti(a) && !a.archived).slice().sort((a, b) => (a.enseigne || "").localeCompare(b.enseigne || "")); return groupList.length === 0 ? <div className="empty">Aucun groupe. Créez un groupe (Cultura, King Jouet…) pour y rattacher des établissements.</div> : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(238px, 1fr))", gap: 10 }}>{groupList.map((a) => { const pc = principal(a.id); const sm = stageMeta(a.stage); const seg = networkSeg(a.magasins); return (<button key={a.id} className="tile" onClick={() => go("accounts", a.id)} style={{ textAlign: "left", border: "1px solid var(--line)", borderLeft: "3px solid #3F60AA", borderRadius: 12, padding: "11px 13px", display: "flex", flexDirection: "column", gap: 5, fontFamily: "inherit" }}><div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>{a.logo ? <img src={a.logo} alt="" style={{ width: 24, height: 24, borderRadius: 6, objectFit: "contain", background: "#fff", border: "1px solid var(--line)", flexShrink: 0 }} /> : <Building2 size={16} color="#3F60AA" style={{ flexShrink: 0 }} />}<span style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.2 }}>{a.enseigne || "Sans nom"}</span>{a.code && <span style={{ fontWeight: 800, fontSize: 10.5, letterSpacing: ".03em", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 6, padding: "1px 6px", color: "var(--muted)" }} className="tnum">{a.code}</span>}</div>{pc && <div className="meta"><User size={12} />{pc}</div>}<div className="meta"><Store size={12} />{magasinLabel(a.magasins)}</div><div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 5, marginTop: 2 }}><Badge color={seg.color}>{seg.label}</Badge><StageTag stage={sm} /></div>{(() => { const att = sumMontant((data.deals || []).filter((d) => d.accountId === a.id && isDevisEnAttente(d))); return att > 0 ? <div style={{ marginTop: 4, fontWeight: 700, color: "var(--blue)", fontSize: 13 }} className="tnum" title="CA HT en attente (devis non validés)">{eur(att)}</div> : null; })()}</button>); })}</div>; })()}
     <div style={{ marginTop: 22 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
         <h3 className="pu-display" style={{ margin: 0, fontSize: 16 }}>Tous les établissements <span style={{ color: "var(--muted)", fontWeight: 600 }}>({visibleRows.length}{nq && visibleRows.length !== pdvRows.length ? " / " + pdvRows.length : ""})</span></h3>
@@ -2750,7 +2759,7 @@ function Accounts({ data, persist, go, focus }) {
         <select value={sortPdv} onChange={(e) => setSortPdv(e.target.value)} style={{ padding: "7px 10px", border: "1px solid var(--line)", borderRadius: 9, fontSize: 13, fontFamily: "inherit", background: "#fff" }} title="Trier les établissements"><option value="nom">Tri : nom</option><option value="enseigne">Tri : groupe / établissement</option><option value="ville">Tri : ville / adresse</option><option value="etape">Tri : étape</option></select>
       </div>
       {pdvRows.length === 0 ? <div className="empty">Aucun point de vente enregistré.</div> : visibleRows.length === 0 ? <div className="empty">Aucun établissement ne correspond à la recherche.</div> : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(238px, 1fr))", gap: 10 }}>{visibleRows.map((r) => { const acc = r.acc; const st = acc ? stageMeta(acc.stage) : null; const adr = r.kind === "site" ? (r.site.adresse || "") : (acc && (acc.ville || acc.adressePostale) || ""); const surf = r.kind === "site" ? r.site.typeSurface : (acc && acc.typeSurface); const ens = r.kind === "site" && acc ? acc.enseigne : ""; return (
-        <button key={r.key} className="tile" onClick={() => openStore(r)} style={{ textAlign: "left", border: "1px solid var(--line)", borderRadius: 12, padding: "10px 12px", background: "#fff", display: "flex", flexDirection: "column", gap: 4, fontFamily: "inherit" }}>
+        <button key={r.key} className="tile" onClick={() => openStore(r)} style={{ textAlign: "left", border: "1px solid var(--line)", borderRadius: 12, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4, fontFamily: "inherit" }}>
           {(() => { const img = r.kind === "site" ? (r.site.photo || (acc && acc.logo)) : (acc && acc.logo); return (<div style={{ display: "flex", alignItems: "center", gap: 7 }}>{img ? <img src={img} alt="" style={{ width: 22, height: 22, borderRadius: 6, objectFit: "contain", background: "#fff", border: "1px solid var(--line)", flexShrink: 0 }} /> : <Store size={15} color="var(--blue)" style={{ flexShrink: 0 }} />}<span style={{ fontWeight: 800, fontSize: 13.5, lineHeight: 1.2 }}>{storeName(r)}</span></div>); })()}
           {ens && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{ens}</div>}
           {adr && <div style={{ fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{adr}</div>}
