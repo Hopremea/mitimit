@@ -5844,14 +5844,101 @@ function TimeSelect({ value, onChange }) {
     </select>
   </div>);
 }
-// Onglet RH : sous-navigation entre le temps de présence (pointage) et les frais kilométriques.
+// ===== Estimation du salaire (apprenti) =====
+// Modèle calibré sur 3 bulletins de paie réels (avril/mai/juin 2026). L'apprenti est exonéré de
+// cotisations salariales sur la part de rémunération ≤ 79 % du SMIC ; au-delà, ~12,5 % de cotisations
+// s'appliquent. S'ajoute la mutuelle santé (montant fixe : 4005 € PMSS × 0,565 % = 22,63 €). La base
+// mensuelle est de 151,67 h. Les indemnités kilométriques sont versées en prime (soumise au même calcul).
+// Vérif : avril net 1513,85 / mai 1550,95 / juin 1678,88 — le modèle recolle à moins d'1 € près.
+const SAL_BASE_HOURS = 151.67;      // heures mensuelles contractuelles (35 h/semaine)
+const SAL_COTIS_EXCESS = 0.125;     // taux moyen de cotisations salariales sur la part > 79 % du SMIC
+const SAL_MUTUELLE = 22.63;         // mutuelle santé salariale (fixe)
+const SAL_PART = 78;                // rémunération apprenti = 78 % du SMIC (base)
+function estimateSalaire({ tauxBase, tauxHS, nbHS, prime, part = SAL_PART, mutuelle = SAL_MUTUELLE }) {
+  const base = (Number(tauxBase) || 0) * SAL_BASE_HOURS;
+  const hs = (Number(tauxHS) || 0) * (Number(nbHS) || 0);
+  const pr = Number(prime) || 0;
+  const brut = base + hs + pr;
+  const seuil = part > 0 ? base * (79 / part) : base; // 79 % du SMIC (la base vaut « part » % du SMIC)
+  const excess = Math.max(0, brut - seuil);
+  const cotisVar = SAL_COTIS_EXCESS * excess;
+  const mut = Number(mutuelle) || 0;
+  const cotis = mut + cotisVar;
+  return { base, hs, prime: pr, brut, seuil, excess, mutuelle: mut, cotisVar, cotis, net: brut - cotis };
+}
+// Estimateur de salaire de fin de mois : taux horaire (base + heures sup.), heures sup. reprises du
+// pointage, indemnités kilométriques du mois versées en prime. Tout reste ajustable manuellement.
+function SalaireRH({ data, persist }) {
+  const s = data.settings || {};
+  const [tauxBase, setTauxBase] = useState(s.salaireTauxBase != null ? s.salaireTauxBase : 9.6018);
+  const [tauxHS, setTauxHS] = useState(s.salaireTauxHS != null ? s.salaireTauxHS : 12.0023);
+  const part = s.salairePart != null ? s.salairePart : SAL_PART;
+  const mutuelle = s.salaireMutuelle != null ? s.salaireMutuelle : SAL_MUTUELLE;
+  const monthPrefix = new Date().toISOString().slice(0, 7);
+  const monthName = new Date().toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+  // Heures supplémentaires pointées ce mois (au-delà de 7 h/jour ouvré), en heures.
+  const autoHS = useMemo(() => {
+    const min = Object.entries(data.pointages || {}).filter(([ds]) => ds.startsWith(monthPrefix)).reduce((acc, [ds, rec]) => {
+      const st = presenceDay(rec); if (!st || st.invalid) return acc;
+      return acc + Math.max(0, st.worked - (isWeekendDs(ds) ? 0 : PRESENCE_TARGET));
+    }, 0);
+    return Math.round((min / 60) * 100) / 100;
+  }, [data.pointages, monthPrefix]);
+  // Indemnités kilométriques du mois (= total frais domicile-travail) versées en prime.
+  const coutJour = (Number(s.fraisEssence != null ? s.fraisEssence : 8) + Number(s.fraisPeage != null ? s.fraisPeage : 3.2)) * (s.fraisAR !== false ? 2 : 1);
+  const presDays = useMemo(() => Object.entries(data.pointages || {}).filter(([ds, r]) => ds.startsWith(monthPrefix) && r && (!r.motif || r.motif === "presence") && r.arrivee && r.depart).length, [data.pointages, monthPrefix]);
+  const autoKm = Math.round(coutJour * presDays * 100) / 100;
+  const [nbHS, setNbHS] = useState(autoHS);
+  const [prime, setPrime] = useState(autoKm);
+  const r = estimateSalaire({ tauxBase, tauxHS, nbHS, prime, part, mutuelle });
+  const memoriser = () => persist((p) => ({ ...p, settings: { ...p.settings, salaireTauxBase: Number(tauxBase) || 0, salaireTauxHS: Number(tauxHS) || 0 } }));
+  const Line = ({ l, v, strong, color, sub }) => (<div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: strong ? 13.5 : 12.5, fontWeight: strong ? 800 : 500, color: color || "inherit", padding: "3px 0" }}><span>{l}{sub && <span style={{ color: "var(--muted)", fontWeight: 500 }}> {sub}</span>}</span><span className="tnum">{v}</span></div>);
+  return (<div>
+    <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--blue)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+      <div>
+        <div style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3 }}>Estimation du net à payer · <span style={{ textTransform: "capitalize" }}>{monthName}</span></div>
+        <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3, lineHeight: 1.5 }}>Salaire de base {SAL_BASE_HOURS} h + {nbHS} h sup. + prime (indemnités km) {eur2(prime)}, cotisations apprenti déduites.</div>
+      </div>
+      <div className="pu-display tnum" style={{ fontSize: 34, color: "var(--blue)", fontWeight: 900 }}>{eur2(r.net)}</div>
+    </div>
+    <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", alignItems: "start" }}>
+      <div className="card"><div className="sec-h"><h3 className="pu-display">Paramètres de paie</h3></div>
+        <div className="row2" style={{ marginBottom: 8 }}>
+          <div className="fld"><label>Taux horaire de base (€ / h)</label><input type="number" step="0.0001" value={tauxBase} onChange={(e) => setTauxBase(e.target.value)} /></div>
+          <div className="fld"><label>Taux horaire heures sup. (€ / h)</label><input type="number" step="0.0001" value={tauxHS} onChange={(e) => setTauxHS(e.target.value)} /></div>
+        </div>
+        <div className="fld" style={{ marginBottom: 8 }}><label style={{ textTransform: "capitalize" }}>Heures supplémentaires · {monthName}</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.25" min="0" value={nbHS} onChange={(e) => setNbHS(e.target.value)} /><button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setNbHS(autoHS)} title="Reprendre les heures supplémentaires pointées ce mois">{autoHS} h pointée(s)</button></div></div>
+        <div className="fld"><label style={{ textTransform: "capitalize" }}>Prime — indemnités kilométriques · {monthName} (€)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.01" min="0" value={prime} onChange={(e) => setPrime(e.target.value)} /><button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setPrime(autoKm)} title="Reprendre le total des frais kilométriques du mois">{eur2(autoKm)}</button></div></div>
+        <div style={{ marginTop: 10 }}><button className="btn btn-g btn-s" onClick={memoriser}><Save size={13} /> Mémoriser mes taux horaires</button></div>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 10, lineHeight: 1.5 }}>Statut apprenti : rémunération à {part} % du SMIC, exonération de cotisations salariales jusqu'à 79 % du SMIC, mutuelle {eur2(mutuelle)}. Modèle calibré sur vos bulletins récents ; l'estimation approche le net réel à ~1 € près.</div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div className="card" style={{ borderTop: "3px solid var(--blue)" }}><div className="sec-h"><h3 className="pu-display">Détail du bulletin estimé</h3></div>
+          <Line l="Salaire de base" sub={"(" + SAL_BASE_HOURS + " h × " + eur2(Number(tauxBase) || 0) + ")"} v={eur2(r.base)} />
+          <Line l="Heures supplémentaires" sub={"(" + nbHS + " h × " + eur2(Number(tauxHS) || 0) + ")"} v={eur2(r.hs)} />
+          <Line l="Prime (indemnités km)" v={eur2(r.prime)} />
+          <div style={{ borderTop: "1px solid var(--line)", margin: "6px 0" }} />
+          <Line l="Salaire brut" v={eur2(r.brut)} strong />
+          <Line l="Mutuelle santé" v={"− " + eur2(r.mutuelle)} color="var(--muted)" />
+          <Line l="Cotisations salariales" sub={r.excess > 0 ? "(sur part > 79 % SMIC)" : ""} v={"− " + eur2(r.cotisVar)} color="var(--muted)" />
+        </div>
+        <div className="card" style={{ borderTop: "3px solid var(--blue)" }}>
+          <div className="calc-out" style={{ background: "#eef2fb" }}><span className="l">Net à payer estimé</span><span className="b pu-display tnum" style={{ color: "var(--blue)" }}>{eur2(r.net)}</span></div>
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8, lineHeight: 1.5 }}>Avant impôt sur le revenu (prélèvement à la source à 0 % pour un apprenti sous le seuil) et hors acomptes déjà versés.</div>
+        </div>
+      </div>
+    </div>
+  </div>);
+}
+// Onglet RH : sous-navigation entre le temps de présence (pointage), les frais kilométriques et le salaire.
 function RH({ data, persist }) {
   const [sub, setSub] = useState("presence");
-  const subs = [{ id: "presence", label: "Temps de présence", icon: Clock }, { id: "frais", label: "Frais kilométriques", icon: Navigation }];
+  const subs = [{ id: "presence", label: "Temps de présence", icon: Clock }, { id: "frais", label: "Frais kilométriques", icon: Navigation }, { id: "salaire", label: "Salaire estimé", icon: Calculator }];
   return (<div className="fade">
     <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>{subs.map((x) => { const Ic = x.icon; return <button key={x.id} className={cx("chip", sub === x.id && "on")} onClick={() => setSub(x.id)} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Ic size={14} />{x.label}</button>; })}</div>
     <div style={{ display: sub === "presence" ? "block" : "none" }}><Pointage data={data} persist={persist} /></div>
     <div style={{ display: sub === "frais" ? "block" : "none" }}><FraisKm data={data} persist={persist} /></div>
+    <div style={{ display: sub === "salaire" ? "block" : "none" }}><SalaireRH data={data} persist={persist} /></div>
   </div>);
 }
 // Simulateur de frais kilométriques : trajet quotidien domicile-travail (essence + péage, aller-retour)
