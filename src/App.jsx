@@ -5731,7 +5731,10 @@ function Pointage({ data, persist }) {
   const pointages = data.pointages || {};
   const [cursor, setCursor] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
   const [editDs, setEditDs] = useState(null);
+  const [exportOpen, setExportOpen] = useState(false); const [copied, setCopied] = useState(false);
   const todayStr = isoLocal(new Date());
+  // Coût d'un aller-retour domicile-travail (mêmes réglages que l'outil Frais kilométriques).
+  const _s = data.settings || {}; const coutJour = (Number(_s.fraisEssence != null ? _s.fraisEssence : 8) + Number(_s.fraisPeage != null ? _s.fraisPeage : 3.2)) * (_s.fraisAR !== false ? 2 : 1);
   const save = (ds, rec) => persist((p) => ({ ...p, pointages: { ...(p.pointages || {}), [ds]: rec } }));
   const remove = (ds) => persist((p) => { const np = { ...(p.pointages || {}) }; delete np[ds]; return { ...p, pointages: np }; });
   const targetOf = (ds) => isWeekendDs(ds) ? 0 : PRESENCE_TARGET;
@@ -5801,6 +5804,31 @@ function Pointage({ data, persist }) {
     return Object.values(map).sort((a, b) => a.start.localeCompare(b.start));
   }, [monthEntries]);
 
+  // Export « jour après jour » (tableau Markdown collable dans Notion) : heures et trajet domicile-travail.
+  const buildExport = () => {
+    const rows = Object.keys(pointages).filter((ds) => ds.startsWith(monthPrefix)).sort();
+    const hd = (min) => (min / 60).toFixed(2).replace(".", ",");
+    const L = [];
+    L.push("### Temps de présence & trajets — " + monthName);
+    L.push("");
+    L.push("| Date | Jour | Type | Arrivée | Départ | Pause | Heures | Trajet A/R | Frais |");
+    L.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    let totMin = 0, totFrais = 0, totAR = 0;
+    rows.forEach((ds) => {
+      const st = presenceDay(pointages[ds]); if (!st || st.invalid) return;
+      const d = new Date(ds + "T00:00:00");
+      const jour = d.toLocaleDateString("fr-FR", { weekday: "short" });
+      const dateFr = d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
+      const mot = st.motif && st.motif !== "presence" ? PRESENCE_MOTIFS[st.motif] : null;
+      const ar = !mot;
+      const frais = ar ? coutJour : 0;
+      totMin += st.worked; if (ar) { totFrais += frais; totAR++; }
+      L.push("| " + [dateFr, jour, mot ? mot.label : "Présence", mot ? "" : st.arrivee, mot ? "" : st.depart, mot ? "" : ((st.pause || 0) + " min"), hd(st.worked), ar ? "A/R" : "—", ar ? eur2(frais) : "—"].join(" | ") + " |");
+    });
+    L.push("| **Total** |  |  |  |  |  | **" + hd(totMin) + "** | **" + totAR + " A/R** | **" + eur2(totFrais) + "** |");
+    return L.join("\n");
+  };
+
   return (<div className="fade">
     {/* Bandeau gamifié : niveau, XP, série, badges */}
     <div className="card" style={{ marginBottom: 14, background: "linear-gradient(135deg, rgba(63,96,170,.10), rgba(124,92,240,.10))" }}>
@@ -5836,7 +5864,10 @@ function Pointage({ data, persist }) {
         <button className="btn btn-ghost btn-s" onClick={() => setCursor((c) => ({ y: c.m === 11 ? c.y + 1 : c.y, m: c.m === 11 ? 0 : c.m + 1 }))}><ChevronRight size={15} /></button>
         <button className="btn btn-ghost btn-s" onClick={() => { const d = new Date(); setCursor({ y: d.getFullYear(), m: d.getMonth() }); }}>Aujourd'hui</button>
       </div>
-      <button className="btn btn-p btn-s" onClick={() => setEditDs(todayStr)}><Clock size={14} /> Pointer aujourd'hui</button>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <button className="btn btn-g btn-s" onClick={() => { setCopied(false); setExportOpen(true); }} title="Exporter les heures et trajets du mois (à coller dans Notion)"><FileDown size={14} /> Exporter</button>
+        <button className="btn btn-p btn-s" onClick={() => setEditDs(todayStr)}><Clock size={14} /> Pointer aujourd'hui</button>
+      </div>
     </div>
 
     {/* Calendrier */}
@@ -5899,6 +5930,11 @@ function Pointage({ data, persist }) {
     </div>
 
     {editDs && <PointageEditor ds={editDs} rec={pointages[editDs]} onClose={() => setEditDs(null)} onSave={(rec) => { save(editDs, rec); setEditDs(null); }} onDelete={() => { remove(editDs); setEditDs(null); }} />}
+    {exportOpen && (() => { const txt = buildExport(); const copy = async () => { try { await navigator.clipboard.writeText(txt); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch (e) { const ta = document.getElementById("pointage-export-ta"); if (ta) { ta.focus(); ta.select(); try { document.execCommand("copy"); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch (e2) {} } } }; return (<Modal title={"Exporter — " + monthName} onClose={() => setExportOpen(false)}>
+      <div style={{ fontSize: 12.5, color: "var(--muted)", marginBottom: 10, lineHeight: 1.5 }}>Une ligne par jour pointé du mois (heures travaillées + trajet domicile-travail). Cliquez sur <strong>Copier</strong>, puis collez dans Notion : le tableau se convertit automatiquement.</div>
+      <textarea id="pointage-export-ta" readOnly value={txt} onFocus={(e) => e.target.select()} rows={Math.min(22, txt.split("\n").length + 1)} style={{ width: "100%", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, lineHeight: 1.5, whiteSpace: "pre", overflowX: "auto" }} />
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}><button className="btn btn-p" onClick={copy}>{copied ? <><CheckCircle2 size={15} /> Copié !</> : <><Copy size={15} /> Copier</>}</button></div>
+    </Modal>); })()}
   </div>);
 }
 function Agenda({ data, persist, go }) {
