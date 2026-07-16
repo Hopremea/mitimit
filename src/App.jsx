@@ -3268,7 +3268,7 @@ function AccountInteractionForm({ contactId, accountId, contacts, onCancel, onSa
   const onContact = (cid) => setF((p) => { const ct = (contacts || []).find((c) => c.id === cid); return { ...p, contactId: cid, siteId: ct && ct.siteId ? ct.siteId : (p.siteId || "") }; });
   return (<>
     <div className="row2"><div className="fld"><label>Type</label><select value={f.type} onChange={(e) => up("type", e.target.value)}>{Object.entries(INT_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div></div>
-    <div className="row2"><div className="fld"><label>Heure</label><input type="time" value={f.heure || ""} onChange={(e) => up("heure", e.target.value)} /></div><div className="fld" /></div>
+    <div className="row2"><div className="fld"><label>Heure</label><input type="time" step="300" value={f.heure || ""} onChange={(e) => up("heure", e.target.value)} /></div><div className="fld" /></div>
     <div className="row2"><div className="fld"><label>Sens</label><select value={f.direction} onChange={(e) => up("direction", e.target.value)}><option value="sortant">Sortant</option><option value="entrant">Entrant</option><option value="sortant_rejete">Sortant (rejeté)</option></select></div><div className="fld"><label>Contact</label><select value={f.contactId} onChange={(e) => onContact(e.target.value)}><option value="">Aucun précis</option>{contacts.map((c) => <option key={c.id} value={c.id}>{fullName(c)}</option>)}</select></div></div>
     <div className="fld"><label>Sujet</label><Combo value={f.sujet} onChange={(v) => up("sujet", v)} options={SUJET_PRESETS} placeholder="Choisir ou saisir l'objet de l'échange" /></div>
     <ResumeField value={f.resume} onChange={(v) => up("resume", v)} onUsage={onUsage} rows={3} baseDate={f.date} onPlan={onPlanEvents ? (evs) => onPlanEvents(evs, f) : undefined} />
@@ -3478,7 +3478,7 @@ function InteractionForm({ accountId, contactId, siteId, onSave, interaction, on
   const up = (k, v) => setF((p) => ({ ...p, [k]: v })); const showDir = f.type === "email" || f.type === "appel";
   return (<>
     <div className="row2"><div className="fld"><label>Type</label><select value={f.type} onChange={(e) => up("type", e.target.value)}>{Object.entries(INT_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div>{showDir && <div className="fld"><label>Sens</label><select value={f.direction} onChange={(e) => up("direction", e.target.value)}><option value="sortant">Sortant</option><option value="entrant">Entrant</option><option value="sortant_rejete">Sortant (rejeté)</option></select></div>}</div>
-    <div className="row2"><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div><div className="fld"><label>Heure</label><input type="time" value={f.heure || ""} onChange={(e) => up("heure", e.target.value)} /></div></div>
+    <div className="row2"><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div><div className="fld"><label>Heure</label><input type="time" step="300" value={f.heure || ""} onChange={(e) => up("heure", e.target.value)} /></div></div>
     <div className="fld"><label>Sujet</label><Combo value={f.sujet} onChange={(v) => up("sujet", v)} options={SUJET_PRESETS} placeholder="Choisir ou saisir l'objet de l'échange" /></div>
     <ResumeField value={f.resume} onChange={(v) => up("resume", v)} onUsage={onUsage} rows={4} baseDate={f.date} onPlan={onPlanEvents ? (evs) => onPlanEvents(evs, f) : undefined} />
     <div style={{ display: "flex", justifyContent: "flex-end" }}><button className="btn btn-p" onClick={() => onSave(f)} disabled={!f.sujet}>Enregistrer</button></div>
@@ -5609,6 +5609,14 @@ function FraisKm({ data, persist }) {
   const memoriser = () => persist((pp) => ({ ...pp, settings: { ...pp.settings, fraisEssence: e, fraisPeage: p, fraisAR: ar } }));
   const monthName = new Date().toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
   return (<div>
+    {/* Synthèse liée au pointage : chaque journée de présence pointée = 1 aller-retour domicile-travail. */}
+    <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--green)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+      <div>
+        <div style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3 }}>Frais domicile-travail · <span style={{ textTransform: "capitalize" }}>{monthName}</span></div>
+        <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3, lineHeight: 1.5 }}>{presDays} journée(s) de présence pointée(s) × {eur2(coutJour)}{ar ? " (aller-retour)" : ""} — chaque jour travaillé sur place compte 1 aller-retour.</div>
+      </div>
+      <div className="pu-display tnum" style={{ fontSize: 30, color: "var(--green)", fontWeight: 900 }}>{eur2(coutJour * presDays)}</div>
+    </div>
     <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
       <button className={cx("chip", mode === "domicile" && "on")} onClick={() => setMode("domicile")} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Home size={14} /> Domicile ↔ Travail</button>
       <button className={cx("chip", mode === "ponctuel" && "on")} onClick={() => setMode("ponctuel")} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Navigation size={14} /> Déplacement ponctuel</button>
@@ -5674,8 +5682,8 @@ function PointageEditor({ ds, rec, onSave, onDelete, onClose }) {
     </div>
     {isPresence ? (<>
       <div className="row2">
-        <div className="fld"><label>Heure d'arrivée</label><input type="time" value={arrivee} onChange={(e) => setArrivee(e.target.value)} /></div>
-        <div className="fld"><label>Heure de départ</label><input type="time" value={depart} onChange={(e) => setDepart(e.target.value)} /></div>
+        <div className="fld"><label>Heure d'arrivée</label><input type="time" step="300" value={arrivee} onChange={(e) => setArrivee(e.target.value)} /></div>
+        <div className="fld"><label>Heure de départ</label><input type="time" step="300" value={depart} onChange={(e) => setDepart(e.target.value)} /></div>
       </div>
       <div className="fld" style={{ marginTop: 2, marginBottom: pause ? 8 : 0 }}>
         <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", fontWeight: 600 }}>
