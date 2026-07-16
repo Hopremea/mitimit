@@ -1398,6 +1398,13 @@ ${ACCENT_CSS}
 .save-bar{border:1.5px dashed var(--blue) !important;background:linear-gradient(180deg,#ffffff 0%,var(--blue-l) 130%) !important;}
 .grid{display:grid;gap:16px;}.kpis{grid-template-columns:repeat(auto-fit,minmax(180px,1fr));}
 .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px;box-shadow:0 1px 2px rgba(20,32,58,.04);}
+/* Effet « liquid glass » (verre dépoli façon Apple) : fond translucide, flou d'arrière-plan, reflet de bord.
+   Le motif/décor derrière transparaît en flou, tout en gardant le contenu parfaitement lisible. */
+.glass{background:rgba(255,255,255,.55)!important;-webkit-backdrop-filter:blur(18px) saturate(180%);backdrop-filter:blur(18px) saturate(180%);border:1px solid rgba(255,255,255,.55);box-shadow:0 8px 30px rgba(20,32,58,.12),inset 0 1px 0 rgba(255,255,255,.6);}
+.glass-tint{position:relative;overflow:hidden;}
+.glass-tint::before{content:"";position:absolute;inset:0;background:var(--glass-tint,transparent);opacity:.9;pointer-events:none;z-index:0;}
+.glass-tint>*{position:relative;z-index:1;}
+.pu-root.dark .glass{background:rgba(23,31,51,.5)!important;border-color:rgba(255,255,255,.10);box-shadow:0 8px 30px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.07);}
 .kpi{position:relative;overflow:hidden;opacity:0;transform:translateY(10px);animation:rise .5s forwards;}
 .kpi .ic{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;margin-bottom:12px;}
 .kpi .lab{color:var(--muted);font-size:12px;font-weight:600;}.kpi .val{font-size:24px;margin-top:2px;}.kpi .sub{font-size:11.5px;color:var(--muted);margin-top:4px;display:flex;align-items:center;gap:5px;}
@@ -1418,7 +1425,7 @@ ${ACCENT_CSS}
 .tbl td{padding:11px 10px;border-bottom:1px solid #f0f3f9;}.tbl tr:hover td{background:#fafbfe;}
 .inp{width:64px;border:1px solid var(--line);border-radius:8px;padding:5px 7px;font-family:inherit;font-size:13px;text-align:right;}.inp:focus{outline:0;border-color:var(--blue);}
 .kan{display:grid;grid-template-columns:repeat(5,1fr);gap:13px;}
-.col{background:rgba(255,255,255,.6);border:1px solid var(--line);border-radius:16px;padding:11px;min-height:120px;}
+.col{background:rgba(255,255,255,.5);-webkit-backdrop-filter:blur(14px) saturate(160%);backdrop-filter:blur(14px) saturate(160%);border:1px solid rgba(255,255,255,.55);border-radius:16px;padding:11px;min-height:120px;box-shadow:0 6px 22px rgba(20,32,58,.08);}
 .col-h{display:flex;align-items:center;gap:7px;font-weight:700;font-size:12.5px;margin-bottom:10px;}.col-h .cnt{margin-left:auto;color:var(--muted);font-weight:600;}
 .acc-card{background:#fff;border:1px solid var(--line);border-radius:13px;padding:12px;margin-bottom:9px;cursor:pointer;transition:.16s;border-left:4px solid var(--blue);}
 .acc-card:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(20,32,58,.1);}
@@ -1585,7 +1592,7 @@ ${ACCENT_CSS}
 .pu-root.dark .chip,.pu-root.dark .btn-ghost{background:transparent;color:var(--ink);}
 .pu-root.dark .topbar h2{color:var(--ink);}
 .pu-root.dark .acc-card,.pu-root.dark .deal-card,.pu-root.dark .col,.pu-root.dark .cal-cell{background:#171f33;}
-.pu-root.dark .col{background:rgba(23,31,51,.6);}
+.pu-root.dark .col{background:rgba(23,31,51,.45);border-color:rgba(255,255,255,.10);}
 .pu-root.dark .cal-ev{background:#1d2945;color:var(--ink);}
 .pu-root.dark .attach-row{background:#10172a;}
 .pu-root.dark .dup-warn{background:#3a2f12;color:#f8d68b;}
@@ -2228,11 +2235,11 @@ function ActivityChart({ deals }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}><div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>{metrics.map((m) => <button key={m.id} className={cx("chip", metric === m.id && "on")} onClick={() => setMetric(m.id)}>{m.label}</button>)}</div></div>
     </div>
     <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "stretch", marginBottom: 12 }}>
-      <div style={{ flex: "0 1 auto", background: "rgba(63,96,170,.07)", border: "1px solid rgba(63,96,170,.20)", borderRadius: 12, padding: "7px 10px 8px" }}>
+      <div style={{ flex: "0 1 auto", background: "rgba(63,96,170,.12)", backdropFilter: "blur(14px) saturate(160%)", WebkitBackdropFilter: "blur(14px) saturate(160%)", border: "1px solid rgba(63,96,170,.22)", borderRadius: 12, padding: "7px 10px 8px" }}>
         <div style={{ fontSize: 9.5, fontWeight: 800, color: "var(--blue)", textTransform: "uppercase", letterSpacing: ".07em", marginBottom: 5 }}>Durée glissante</div>
         <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>{presets.map((n) => <button key={n} className={cx("chip", periodMode === "preset" && months === n && "on")} onClick={() => { setPeriodMode("preset"); setMonths(n); }}>{n} mois</button>)}</div>
       </div>
-      <div style={{ flex: "0 1 auto", background: "rgba(248,177,51,.10)", border: "1px solid rgba(248,177,51,.30)", borderRadius: 12, padding: "7px 10px 8px" }}>
+      <div style={{ flex: "0 1 auto", background: "rgba(248,177,51,.15)", backdropFilter: "blur(14px) saturate(160%)", WebkitBackdropFilter: "blur(14px) saturate(160%)", border: "1px solid rgba(248,177,51,.32)", borderRadius: 12, padding: "7px 10px 8px" }}>
         <div style={{ fontSize: 9.5, fontWeight: 800, color: "#a06a06", textTransform: "uppercase", letterSpacing: ".07em", marginBottom: 5 }}>Période fixe</div>
         <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
           {(() => {
@@ -2249,7 +2256,7 @@ function ActivityChart({ deals }) {
           })()}
         </div>
       </div>
-      <div style={{ flex: "0 1 auto", background: "rgba(43,182,115,.08)", border: "1px solid rgba(43,182,115,.26)", borderRadius: 12, padding: "7px 10px 8px" }}>
+      <div style={{ flex: "0 1 auto", background: "rgba(43,182,115,.13)", backdropFilter: "blur(14px) saturate(160%)", WebkitBackdropFilter: "blur(14px) saturate(160%)", border: "1px solid rgba(43,182,115,.28)", borderRadius: 12, padding: "7px 10px 8px" }}>
         <div style={{ fontSize: 9.5, fontWeight: 800, color: "#1d8956", textTransform: "uppercase", letterSpacing: ".07em", marginBottom: 5 }}>Plage personnalisée</div>
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
           <input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPeriodMode("custom"); }} style={{ border: "1px solid rgba(43,182,115,.4)", borderRadius: 8, padding: "5px 8px", fontFamily: "inherit", fontSize: 12, background: "#fff" }} />
@@ -2393,7 +2400,7 @@ function Dashboard({ data, go }) {
   );
   return (<div className="fade">
     {(() => { const g = commercialGame(data); return (
-      <div className="card" style={{ marginBottom: 18, background: "linear-gradient(135deg, rgba(255,90,69,.10), rgba(124,92,240,.10))" }}>
+      <div className="card glass glass-tint" style={{ marginBottom: 18, "--glass-tint": "linear-gradient(135deg, rgba(255,90,69,.18), rgba(124,92,240,.18))" }}>
         <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <div className="pu-display" style={{ width: 54, height: 54, borderRadius: 14, background: "var(--red)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 22, boxShadow: "0 6px 16px rgba(255,90,69,.3)", flexShrink: 0 }}>{g.level}</div>
@@ -5904,6 +5911,12 @@ function SalaireRH({ data, persist }) {
   const [h25, setH25] = useState(autoOT.h25);
   const [h50, setH50] = useState(autoOT.h50);
   const [prime, setPrime] = useState(autoKm);
+  // Automatisation : tant que l'utilisateur n'a pas saisi de valeur manuelle, les heures sup. (réparties
+  // 25/50 % par semaine) et la prime km suivent en direct le pointage du mois.
+  const [otTouched, setOtTouched] = useState(false);
+  const [kmTouched, setKmTouched] = useState(false);
+  useEffect(() => { if (!otTouched) { setH25(autoOT.h25); setH50(autoOT.h50); } }, [autoOT.h25, autoOT.h50, otTouched]);
+  useEffect(() => { if (!kmTouched) setPrime(autoKm); }, [autoKm, kmTouched]);
   const r = estimateSalaire({ tauxBase, h25, h50, prime, part, mutuelle });
   const memoriser = () => persist((p) => ({ ...p, settings: { ...p.settings, salaireTauxBase: Number(tauxBase) || 0 } }));
   const Line = ({ l, v, strong, color, sub }) => (<div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: strong ? 13.5 : 12.5, fontWeight: strong ? 800 : 500, color: color || "inherit", padding: "3px 0" }}><span>{l}{sub && <span style={{ color: "var(--muted)", fontWeight: 500 }}> {sub}</span>}</span><span className="tnum">{v}</span></div>);
@@ -5921,10 +5934,11 @@ function SalaireRH({ data, persist }) {
         <div className="fld" style={{ marginBottom: 8 }}><label>Taux horaire de base (€ / h)</label><input type="number" step="0.0001" value={tauxBase} onChange={(e) => setTauxBase(e.target.value)} /></div>
         <div style={{ fontSize: 11.5, color: "var(--muted)", margin: "0 0 10px", lineHeight: 1.5, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 8, padding: "7px 9px" }}>Majoration heures sup. : <strong>+25 %</strong> = {eur2(r.t25)}/h (8 premières h/semaine) · <strong>+50 %</strong> = {eur2(r.t50)}/h (au-delà de 8 h/semaine).</div>
         <div className="row2" style={{ marginBottom: 8 }}>
-          <div className="fld"><label>H. sup. à +25 % (h)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.25" min="0" value={h25} onChange={(e) => setH25(e.target.value)} /><button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setH25(autoOT.h25)} title="Reprendre depuis le pointage">{autoOT.h25} h</button></div></div>
-          <div className="fld"><label>H. sup. à +50 % (h)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.25" min="0" value={h50} onChange={(e) => setH50(e.target.value)} /><button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setH50(autoOT.h50)} title="Reprendre depuis le pointage">{autoOT.h50} h</button></div></div>
+          <div className="fld"><label>H. sup. à +25 % (h)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.25" min="0" value={h25} onChange={(e) => { setOtTouched(true); setH25(e.target.value); }} /></div></div>
+          <div className="fld"><label>H. sup. à +50 % (h)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.25" min="0" value={h50} onChange={(e) => { setOtTouched(true); setH50(e.target.value); }} /></div></div>
         </div>
-        <div className="fld"><label style={{ textTransform: "capitalize" }}>Prime — indemnités kilométriques · {monthName} (€)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.01" min="0" value={prime} onChange={(e) => setPrime(e.target.value)} /><button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setPrime(autoKm)} title="Reprendre le total des frais kilométriques du mois">{eur2(autoKm)}</button></div></div>
+        <div style={{ marginBottom: 8, fontSize: 11.5, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><span style={{ color: otTouched ? "var(--muted)" : "var(--green)", fontWeight: 700 }}>{otTouched ? "Valeurs saisies manuellement" : "↻ Réparti automatiquement depuis le pointage (" + autoOT.h25 + " h + " + autoOT.h50 + " h)"}</span>{otTouched && <button className="btn btn-g btn-s" onClick={() => setOtTouched(false)} title="Reprendre la répartition automatique du pointage">↻ Auto</button>}</div>
+        <div className="fld"><label style={{ textTransform: "capitalize" }}>Prime — indemnités kilométriques · {monthName} (€)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.01" min="0" value={prime} onChange={(e) => { setKmTouched(true); setPrime(e.target.value); }} />{kmTouched && <button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setKmTouched(false)} title="Reprendre le total des frais kilométriques du mois">↻ {eur2(autoKm)}</button>}</div></div>
         <div style={{ marginTop: 10 }}><button className="btn btn-g btn-s" onClick={memoriser}><Save size={13} /> Mémoriser mon taux horaire</button></div>
         <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 10, lineHeight: 1.5 }}>Statut apprenti : rémunération à {part} % du SMIC, exonération de cotisations salariales jusqu'à 79 % du SMIC, mutuelle {eur2(mutuelle)}. Les heures sup. sont reprises du pointage et réparties par semaine (8 h à +25 %, au-delà à +50 %). Estimation calibrée sur vos bulletins (~1 € près).</div>
       </div>
@@ -6178,7 +6192,7 @@ function Pointage({ data, persist }) {
 
   return (<div className="fade">
     {/* Bandeau gamifié : niveau, XP, série, badges */}
-    <div className="card" style={{ marginBottom: 14, background: "linear-gradient(135deg, rgba(63,96,170,.10), rgba(124,92,240,.10))" }}>
+    <div className="card glass glass-tint" style={{ marginBottom: 14, "--glass-tint": "linear-gradient(135deg, rgba(63,96,170,.18), rgba(124,92,240,.18))" }}>
       <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <div className="pu-display" style={{ width: 54, height: 54, borderRadius: 14, background: "var(--blue)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 22, boxShadow: "0 6px 16px rgba(63,96,170,.3)", flexShrink: 0 }}>{level}</div>
