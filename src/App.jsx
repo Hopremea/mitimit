@@ -5474,9 +5474,19 @@ function Statistiques({ data }) {
       }).filter((r) => r.ca > 0 || r.nbCmd > 0).sort((x, y) => y.ca - x.ca).slice(0, 25);
       if (rows.length === 0) return null;
       const stale = (d) => { if (!d) return false; return (Date.now() - new Date(d).getTime()) / 86400000 > 120; };
+      // Segmentation RFM (Récence / Fréquence / Montant) : classe chaque compte pour prioriser la rétention.
+      const cas = rows.map((r) => r.ca).slice().sort((a, b) => a - b); const medCA = cas[Math.floor(cas.length / 2)] || 0;
+      const seg = (r) => {
+        const days = r.lastDate ? (Date.now() - new Date(r.lastDate).getTime()) / 86400000 : Infinity;
+        if (r.nbCmd >= 3 && days <= 90 && r.ca >= medCA) return { l: "Champion", c: "#2bb673" };
+        if (r.nbCmd >= 3 && days > 120) return { l: "À risque", c: "#F8B133" };
+        if (days > 150) return { l: "À réactiver", c: "#FF5A45" };
+        if (r.nbCmd <= 1 && days <= 120) return { l: "Nouveau", c: "#3F60AA" };
+        return { l: "Régulier", c: "#7c5cf0" };
+      };
       return (<div className="card"><div className="sec-h"><h3 className="pu-display">Comparatif par enseigne / groupe</h3><span>activité commerciale · top {rows.length}</span></div>
-        <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Enseigne / compte</th><th style={{ textAlign: "right" }}>PDV</th><th style={{ textAlign: "right" }}>Commandes</th><th style={{ textAlign: "right" }}>CA HT signé</th><th style={{ textAlign: "right" }}>Panier moyen</th><th>Dernier réassort</th></tr></thead><tbody>
-          {rows.map((r) => (<tr key={r.a.id}><td style={{ fontWeight: 700 }}>{r.a.enseigne || "Sans nom"}</td><td style={{ textAlign: "right" }} className="tnum">{r.pdv || "—"}</td><td style={{ textAlign: "right" }} className="tnum">{r.nbCmd}</td><td style={{ textAlign: "right", fontWeight: 700 }} className="tnum">{eur(Math.round(r.ca))}</td><td style={{ textAlign: "right" }} className="tnum">{r.panier > 0 ? eur(Math.round(r.panier)) : "—"}</td><td className="tnum" style={{ color: stale(r.lastDate) ? "var(--amber)" : "var(--muted)" }}>{r.lastDate || "—"}{stale(r.lastDate) ? " ⚠️" : ""}</td></tr>))}
+        <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Enseigne / compte</th><th style={{ textAlign: "right" }}>PDV</th><th style={{ textAlign: "right" }}>Commandes</th><th style={{ textAlign: "right" }}>CA HT signé</th><th style={{ textAlign: "right" }}>Panier moyen</th><th>Dernier réassort</th><th>Segment</th></tr></thead><tbody>
+          {rows.map((r) => { const sg = seg(r); return (<tr key={r.a.id}><td style={{ fontWeight: 700 }}>{r.a.enseigne || "Sans nom"}</td><td style={{ textAlign: "right" }} className="tnum">{r.pdv || "—"}</td><td style={{ textAlign: "right" }} className="tnum">{r.nbCmd}</td><td style={{ textAlign: "right", fontWeight: 700 }} className="tnum">{eur(Math.round(r.ca))}</td><td style={{ textAlign: "right" }} className="tnum">{r.panier > 0 ? eur(Math.round(r.panier)) : "—"}</td><td className="tnum" style={{ color: stale(r.lastDate) ? "var(--amber)" : "var(--muted)" }}>{r.lastDate || "—"}{stale(r.lastDate) ? " ⚠️" : ""}</td><td><Badge color={sg.c}>{sg.l}</Badge></td></tr>); })}
         </tbody></table></div>
         <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>⚠️ = dernier réassort il y a plus de 4 mois. CA signé = commandes et devis acceptés.</div>
       </div>);
