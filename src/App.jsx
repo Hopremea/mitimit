@@ -1792,6 +1792,18 @@ function Modal({ title, onClose, children, wide, xl, guard = true }) {
     onClose && onClose();
   };
   const closeRef = useRef(requestClose); closeRef.current = requestClose;
+  // Déplacement à la souris (comme une fenêtre) : glisser l'en-tête décale la fenêtre via un
+  // translate mémorisé. Le clic sur la croix de fermeture n'amorce pas de déplacement.
+  const [drag, setDrag] = useState({ x: 0, y: 0 });
+  const dragRef = useRef(null);
+  const onHeaderPointerDown = (e) => {
+    if (e.target.closest && e.target.closest("button")) return; // ne pas gêner le bouton Fermer
+    dragRef.current = { sx: e.clientX, sy: e.clientY, bx: drag.x, by: drag.y };
+    const move = (ev) => { const d = dragRef.current; if (!d) return; setDrag({ x: d.bx + (ev.clientX - d.sx), y: d.by + (ev.clientY - d.sy) }); };
+    const up = () => { dragRef.current = null; window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+    e.preventDefault();
+  };
   // Accessibilité : Échap pour fermer (via la fermeture protégée), focus initial, et capture de la
   // signature initiale du formulaire une fois rendu.
   useEffect(() => {
@@ -1803,7 +1815,7 @@ function Modal({ title, onClose, children, wide, xl, guard = true }) {
   }, []);
   // Garde anti-perte : compte cette fenêtre comme « édition ouverte » le temps de son affichage.
   useEffect(() => { if (!guard) return; _modalGuards++; return () => { _modalGuards = Math.max(0, _modalGuards - 1); }; }, [guard]);
-  return (<div className="ov no-print" onClick={() => closeRef.current()}><div className="modal" ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={typeof title === "string" ? title : undefined} style={{ width: w, outline: "none" }} onClick={(e) => e.stopPropagation()}><div className="modal-h"><h3 className="pu-display">{title}</h3><button className="iconbtn" onClick={() => closeRef.current()} aria-label="Fermer"><X size={18} /></button></div><div className="modal-b">{children}</div></div></div>);
+  return (<div className="ov no-print" onClick={() => closeRef.current()}><div className="modal" ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={typeof title === "string" ? title : undefined} style={{ width: w, outline: "none", transform: (drag.x || drag.y) ? `translate(${drag.x}px, ${drag.y}px)` : undefined }} onClick={(e) => e.stopPropagation()}><div className="modal-h" onPointerDown={onHeaderPointerDown} style={{ cursor: "move", touchAction: "none", userSelect: "none" }}><h3 className="pu-display">{title}</h3><button className="iconbtn" onClick={() => closeRef.current()} aria-label="Fermer"><X size={18} /></button></div><div className="modal-b">{children}</div></div></div>);
 }
 
 // ===== Horaires d'ouverture : parsing du texte libre + affichage vertical façon Google =====
