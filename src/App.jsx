@@ -2033,8 +2033,9 @@ async function aiFindHoraires(query, persistUsage) {
   const text = (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
   const m = text.match(/\{[\s\S]*\}/); let o = {}; try { o = m ? JSON.parse(m[0]) : {}; } catch (e) {}
   const h = typeof o.horaires === "string" ? o.horaires.trim() : "";
-  // On ne conserve que si le texte est réellement interprétable en grille (sinon on considère « rien trouvé »).
-  return h && parseHoraires(h) ? h : "";
+  // On conserve dès que le texte ressemble à des horaires (présence d'une heure) : s'il n'est pas
+  // parfaitement interprétable en grille, l'affichage retombe proprement sur le texte brut.
+  return h && /\d\s*[h:]/.test(h) ? h : "";
 }
 // Encart photo / logo éditable : téléversement, URL, logo automatique (web) ou logo du groupe.
 function EntityPhoto({ value, onChange, initials: ini, bg, round, size = 64, enseigne, groupLogo, fallback, persistUsage }) {
@@ -2777,6 +2778,7 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
   const unArchive = () => { if (!acc) return; persist((p) => ({ ...p, accounts: p.accounts.map((x) => x.id === acc.id ? { ...x, archived: false } : x) })); };
   const [aiBusy, setAiBusy] = useState(false); const [aiMsg, setAiMsg] = useState(null);
   const aiElapsed = useElapsed(aiBusy);
+  const [horBusy, setHorBusy] = useState(false); const [horMsg, setHorMsg] = useState(null);
   // Recherche IA sur la fiche établissement : trouve en ligne le site web (et réseaux) de
   // l'établissement / de son enseigne, et complète les champs encore vides.
   const runSiteAI = async () => {
@@ -2797,6 +2799,18 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
       else setAiMsg(s.site ? "Site web déjà renseigné." : "Aucune information fiable trouvée par l'IA.");
     } catch (e) { setAiMsg("Recherche IA indisponible ici (fonctionne dans l'app Claude)."); }
     finally { setAiBusy(false); }
+  };
+  // Recherche IA dédiée aux horaires d'ouverture de CET établissement, appliquée directement.
+  const runHorairesAI = async () => {
+    setHorBusy(true); setHorMsg(null);
+    const usage = (u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }));
+    const q = [s.label, acc && acc.enseigne, s.adresse || (acc && acc.ville)].filter(Boolean).join(" ");
+    try {
+      const h = await aiFindHoraires(q, usage);
+      if (h) { saveSite({ ...s, horaires: h }); setHorMsg(null); }
+      else setHorMsg("Aucun horaire fiable trouvé pour ce magasin — à saisir manuellement via « Modifier ».");
+    } catch (e) { setHorMsg("Recherche IA indisponible ici (fonctionne dans l'app Claude)."); }
+    finally { setHorBusy(false); }
   };
   // Transforme un établissement indépendant en groupe / chaîne, puis ouvre la fiche du groupe pour
   // y rattacher d'autres établissements. L'établissement actuel en devient le premier point de vente.
@@ -2832,7 +2846,13 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
           {s.adresse && <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 8, display: "inline-flex", alignItems: "center", gap: 6 }}><MapPin size={14} />{s.adresse}</div>}
           {s.telFixe && <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 6 }}><Phone size={14} /><a href={"tel:" + s.telFixe.replace(/\s/g, "")} style={{ color: "inherit" }} title="Téléphone fixe du magasin">{s.telFixe}</a></div>}
           {s.email && <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 6 }}><Mail size={14} /><a href={"mailto:" + s.email} style={{ color: "inherit" }} title="Écrire à cet établissement">{s.email}</a></div>}
-          {s.horaires && <HorairesJours txt={s.horaires} />}
+          {s.horaires ? <HorairesJours txt={s.horaires} /> : (
+            <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 8, display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <Clock size={14} /> Horaires non renseignés
+              <button className="btn btn-g btn-s" onClick={runHorairesAI} disabled={horBusy} title="Rechercher les horaires d'ouverture de ce magasin (fiche Google / site officiel)"><Sparkles size={13} className={horBusy ? "spin" : ""} /> {horBusy ? "Recherche…" : "Rechercher (IA)"}</button>
+            </div>
+          )}
+          {horMsg && <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 6 }}>{horMsg}</div>}
           {s.site && <div style={{ fontSize: 13, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 6 }}><Globe size={14} style={{ color: "var(--muted)" }} /><a className="lnk" href={ensureHttp(s.site)} target="_blank" rel="noreferrer" title="Site internet de l'établissement">{cleanDomain(s.site) || s.site}</a></div>}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9, alignItems: "center" }}>{s.typeSurface && <Badge color="#3F60AA">{s.typeSurface}</Badge>}{s.siret && <span className="tnum" style={{ fontSize: 12, color: "var(--muted)" }}>SIRET {s.siret}</span>}{!s.lat && <Badge color="#c0392b">à géolocaliser</Badge>}</div>
         </div>
