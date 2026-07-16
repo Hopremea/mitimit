@@ -154,6 +154,16 @@ function priorityScore(account, data) {
   const lvl = s >= 60 ? { l: "Élevée", c: "#FF5A45" } : s >= 35 ? { l: "Moyenne", c: "#F8B133" } : { l: "Faible", c: "#9aa6bd" };
   return { score: s, level: lvl.l, color: lvl.c, caAtt, days };
 }
+// Programme de fidélité revendeur : palier (Bronze / Argent / Or) selon le CA HT signé sur 12 mois
+// glissants, avec la distance au palier suivant — utilisable comme argument de vente (« encore X € »).
+const LOYALTY_TIERS = [{ id: "or", label: "Or", color: "#F8B133", min: 6000 }, { id: "argent", label: "Argent", color: "#9aa6bd", min: 2000 }, { id: "bronze", label: "Bronze", color: "#b87333", min: 0 }];
+function loyaltyTier(deals) {
+  const since = Date.now() - 365 * 86400000;
+  const ca12 = sumMontant((deals || []).filter((d) => isCaSigne(d) && d.date && new Date(d.date).getTime() >= since));
+  const tier = LOYALTY_TIERS.find((t) => ca12 >= t.min) || LOYALTY_TIERS[LOYALTY_TIERS.length - 1];
+  const idx = LOYALTY_TIERS.indexOf(tier); const next = idx > 0 ? LOYALTY_TIERS[idx - 1] : null;
+  return { ca12, tier, next, toNext: next ? Math.max(0, next.min - ca12) : 0 };
+}
 // Carte de visite vCard 3.0 d'un contact (téléchargeable / encodable en QR).
 function contactVCard(c, account) {
   const org = account ? account.enseigne : "";
@@ -2850,6 +2860,7 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
   const siteContacts = indep ? data.contacts.filter((c) => c.accountId === acc.id) : data.contacts.filter((c) => c.siteId === s.id);
   const deals = (indep ? data.deals.filter((d) => d.accountId === acc.id) : data.deals.filter((d) => d.siteId === s.id)).sort((x, y) => (y.date || "").localeCompare(x.date || ""));
   const caSigne = sumMontant(deals.filter(isCaSigne)); const caAttente = sumMontant(deals.filter(isDevisEnAttente));
+  const loy = loyaltyTier(deals);
   const siteContactIds = new Set(siteContacts.map((c) => c.id));
   const ints = (indep ? data.interactions.filter((i) => i.accountId === acc.id) : data.interactions.filter((i) => i.siteId === s.id || (i.contactId && siteContactIds.has(i.contactId)))).sort((x, y) => (y.date || "").localeCompare(x.date || ""));
   const atts = (data.attachments && data.attachments[attKey]) || [];
@@ -2933,7 +2944,7 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
         <EntityPhoto value={s.photo || ""} onChange={(url) => saveSite({ ...s, photo: url })} initials={(s.label || "É").slice(0, 1).toUpperCase()} bg={col} size={64} enseigne={[s.label, acc && acc.enseigne, s.adresse].filter(Boolean).join(" ")} groupLogo={acc && acc.logo} fallback={acc && acc.logo} persistUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} />
         <div style={{ flex: 1, minWidth: 220 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}><svg width="22" height="22" viewBox="-12 -16 24 26" style={{ flexShrink: 0 }}><path d={shapePath(tm.shape)} fill={col} stroke="#fff" strokeWidth={1.5} /></svg><h2 className="pu-display" style={{ margin: 0, fontSize: 22 }}>{s.label || "Établissement"}</h2><Badge color={s.type === "decision" ? "#7c5cf0" : "#F8B133"}>{s.type === "decision" ? "Siège" : "Établissement"}</Badge>{acc && <Badge color={st.color}>{st.label}</Badge>}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}><svg width="22" height="22" viewBox="-12 -16 24 26" style={{ flexShrink: 0 }}><path d={shapePath(tm.shape)} fill={col} stroke="#fff" strokeWidth={1.5} /></svg><h2 className="pu-display" style={{ margin: 0, fontSize: 22 }}>{s.label || "Établissement"}</h2><Badge color={s.type === "decision" ? "#7c5cf0" : "#F8B133"}>{s.type === "decision" ? "Siège" : "Établissement"}</Badge>{acc && <Badge color={st.color}>{st.label}</Badge>}{loy.ca12 > 0 && <span title={"CA HT signé sur 12 mois : " + eur(loy.ca12) + (loy.next ? " · encore " + eur(loy.toNext) + " pour le palier " + loy.next.label : " · palier maximum")}><Badge color={loy.tier.color}>🏅 Fidélité {loy.tier.label}</Badge></span>}</div>{loy.ca12 > 0 && loy.next && <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 6 }}>Fidélité : {eur(loy.ca12)} sur 12 mois — encore <strong style={{ color: loy.next.color }}>{eur(loy.toNext)}</strong> pour atteindre le palier {loy.next.label}.</div>}
           {grp && <div style={{ marginTop: 7, fontSize: 13 }}><span style={{ color: "var(--muted)" }}>Groupe : </span><span className="lnk" style={{ fontWeight: 700 }} onClick={() => onGoAccount(acc.id)}>{grp.enseigne}</span>{acc.code ? <span className="tnum" style={{ color: "var(--muted)" }}> · {acc.code}</span> : null}</div>}
           {indep && <div style={{ marginTop: 7, fontSize: 12.5, color: "var(--muted)" }}>Établissement indépendant{acc.siren ? " · SIREN " + acc.siren : ""}{acc.formeJuridique ? " · " + acc.formeJuridique : ""}{acc.nature && NATURE_META[acc.nature] ? " · " + NATURE_META[acc.nature].label : ""}</div>}
           {(s.type === "pdv" || s.type === "decision") && (() => { const groups = data.accounts.filter((x) => isGroupe(x)); const cur = (grp && acc) ? acc.id : "indep"; const onChange = (val) => { if (val === cur) return; if (val === "indep") { if (grp) persist((p) => detachSiteToIndependent(p, s.id)); } else if (indep && acc) persist((p) => attachAccountToGroup(p, acc.id, val)); else if (grp) persist((p) => moveSiteToGroup(p, s.id, val)); }; return (<div style={{ marginTop: 9, display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}><span style={{ fontSize: 12, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 4 }}><Link2 size={13} /> Rattachement</span><select value={cur} onChange={(e) => onChange(e.target.value)} style={{ padding: "5px 9px", border: "1px solid var(--line)", borderRadius: 8, fontFamily: "inherit", fontSize: 12.5, background: "#fff" }}><option value="indep">— Indépendant (aucun groupe) —</option>{groups.map((g) => <option key={g.id} value={g.id}>{g.enseigne}</option>)}</select></div>); })()}
@@ -4392,6 +4403,14 @@ function Sav({ data, persist }) {
       <FilterGroup label="Groupe / établissement" color="#2bb673"><select value={filtAcc} onChange={(e) => setFiltAcc(e.target.value)} style={{ border: "1px solid rgba(43,182,115,.4)", background: "#fff", borderRadius: 8, padding: "5px 9px", fontFamily: "inherit", fontSize: 12.5, minWidth: 140 }}><option value="tous">Toutes</option><AccountOptions accounts={accounts} /></select></FilterGroup>
       {hasFilter && <div style={{ display: "flex", alignItems: "center" }}><button className="btn btn-ghost btn-s" onClick={() => { setQ(""); setFiltAcc("tous"); setFiltGrav("tous"); setFilt("actifs"); }}><X size={13} /> Effacer</button></div>}
     </div>
+    {(() => {
+      // Indicateur NPS global : % promoteurs (9-10) − % détracteurs (0-6) sur les tickets notés.
+      const vals = tickets.filter((t) => typeof t.nps === "number").map((t) => t.nps);
+      if (vals.length < 1) return null;
+      const nps = Math.round((vals.filter((v) => v >= 9).length - vals.filter((v) => v <= 6).length) / vals.length * 100);
+      const c = nps >= 50 ? "var(--green)" : nps >= 0 ? "var(--amber)" : "var(--red)";
+      return (<div style={{ marginBottom: 10 }}><span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12.5, border: "1px solid var(--line)", borderRadius: 20, padding: "4px 12px", background: "var(--card)" }}>😊 Satisfaction client <strong className="tnum" style={{ color: c, fontSize: 15 }}>NPS {nps > 0 ? "+" : ""}{nps}</strong><span style={{ color: "var(--muted)" }}>sur {vals.length} ticket{vals.length > 1 ? "s" : ""} noté{vals.length > 1 ? "s" : ""}</span></span></div>);
+    })()}
     <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>{list.length} ticket{list.length > 1 ? "s" : ""} {hasFilter ? "filtré" + (list.length > 1 ? "s" : "") : ""}</div>
     {(() => {
       if (list.length === 0) return <div className="card empty">Aucun ticket {hasFilter && "correspondant"}.</div>;
@@ -4427,6 +4446,7 @@ function SavForm({ ticket, accounts, products, sites = [], contacts = [], deals 
     <div className="fld"><label>Description</label><textarea rows={3} value={f.description} onChange={(e) => up("description", e.target.value)} /></div>
     <div className="fld"><label>Résolution</label><textarea rows={2} value={f.resolution} onChange={(e) => up("resolution", e.target.value)} /></div>
     {f.resolution && <div className="fld"><label>Date de résolution</label><input type="date" value={f.dateResolution} onChange={(e) => up("dateResolution", e.target.value)} /></div>}
+    {(f.statut === "resolu" || f.statut === "clos") && <div className="fld"><label>Satisfaction client après résolution — NPS 0 à 10 (optionnel)</label><select value={f.nps ?? ""} onChange={(e) => up("nps", e.target.value === "" ? "" : Number(e.target.value))}><option value="">— non renseigné —</option>{Array.from({ length: 11 }, (_, i) => <option key={i} value={i}>{i}{i >= 9 ? " · promoteur" : i <= 6 ? " · détracteur" : " · passif"}</option>)}</select><span style={{ fontSize: 11, color: "var(--muted)" }}>Alimente l'indicateur de satisfaction (NPS) global du SAV.</span></div>}
     <div style={{ display: "flex", justifyContent: "flex-end" }}><button className="btn btn-p" onClick={() => onSave(f)} disabled={!f.titre}>Enregistrer</button></div>
   </>);
 }
