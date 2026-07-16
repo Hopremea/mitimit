@@ -594,13 +594,30 @@ function seedInteractions() {
 }
 const L = (code, designation, qte, pu) => ({ id: "l_" + code + "_" + Math.random().toString(36).slice(2, 11), code, designation, qte, pu });
 const dealMontant = (lines) => (lines || []).reduce((s, l) => s + (l.qte || 0) * (l.pu || 0), 0);
-const FRANCO_SEUIL_HT = 300; const FRANCO_PART_HT = 15;
+// Franco de port par zone de livraison (grille tarifaire PEN'UP 3D 2026) : seuil de franco et
+// participation forfaitaire aux frais de port en deçà.
+const FRANCO_ZONES = {
+  metropole: { label: "France métropolitaine", seuil: 300, part: 15 },
+  monaco: { label: "Monaco", seuil: 600, part: 35 },
+  corse: { label: "Corse", seuil: 760, part: 60 },
+};
+const FRANCO_ZONE_ORDER = ["metropole", "monaco", "corse"];
+const francoZone = (z) => FRANCO_ZONES[z] || FRANCO_ZONES.metropole;
+const FRANCO_SEUIL_HT = FRANCO_ZONES.metropole.seuil; const FRANCO_PART_HT = FRANCO_ZONES.metropole.part;
+// Déduit la zone de livraison d'une adresse (code postal) : Corse = 20xxx, Monaco = 98000, sinon métropole.
+function detectFrancoZone(adr) {
+  const m = String(adr || "").match(/\b(\d{5})\b/); if (!m) return null;
+  const cp = m[1];
+  if (cp.startsWith("20")) return "corse";
+  if (cp === "98000") return "monaco";
+  return "metropole";
+}
 // Coordonnées bancaires PEN'UP 3D (affichées sur les factures pour le règlement par virement).
 const BANK = { iban: "FR76 1695 8000 0146 8870 1131 251", bic: "QNTOFRP1XXX", titulaire: "PEN'UP 3D", adresse: "20 Place Prax Paris, 82000 Montauban" };
-// Franco de port dès 300 € HT de marchandise, sinon participation forfaitaire de 15 € HT
-const fraisPortHT = (htMarchandise) => (htMarchandise > 0 && htMarchandise < FRANCO_SEUIL_HT) ? FRANCO_PART_HT : 0;
+// Participation aux frais de port selon la zone : offert (franco) au-delà du seuil, forfait en deçà.
+const fraisPortHT = (htMarchandise, zone) => { const z = francoZone(zone); return (htMarchandise > 0 && htMarchandise < z.seuil) ? z.part : 0; };
 const dealQte = (lines) => (lines || []).reduce((s, l) => s + (l.qte || 0), 0);
-function mkDeal(o) { const lines = o.lines || []; return { tva: 20, note: "", prestoStatus: "", prestoRef: "", prestoDate: "", converti: false, livraisonSiteId: "", ...o, lines, montant: dealMontant(lines), qte: dealQte(lines) }; }
+function mkDeal(o) { const lines = o.lines || []; return { tva: 20, note: "", prestoStatus: "", prestoRef: "", prestoDate: "", converti: false, livraisonSiteId: "", zoneLivraison: "", ...o, lines, montant: dealMontant(lines), qte: dealQte(lines) }; }
 function seedDeals() {
   return [
     mkDeal({ id: "d3", accountId: "acc_cultura", type: "Commande", date: "2025-12-12", statut: "livre", ref: "CMD-2025-019", note: "Commande de lancement", prestoStatus: "transmis", prestoRef: "PR-25-1187", prestoDate: "2025-12-13", lines: [L("PU3D-PACK-COMPLET", "Pack Complet", 30, 52), L("PU3D-STYLO", "Stylo Pen'Up 3D", 20, 28)] }),
@@ -685,7 +702,7 @@ function normalize(d) {
   // On renomme proprement en « mobile » (mobile) et « fixe » (ligne fixe). Idempotent : ne s'exécute qu'une fois par contact.
   d.contacts = (d.contacts || seedContacts()).map((c) => { const n = { departement: "", principalEtab: false, ...c }; if (n.fixe === undefined) { n.fixe = n.mobile || ""; n.mobile = n.telephone || ""; } delete n.telephone; return n; });
   d.interactions = d.interactions || seedInteractions();
-  d.deals = (d.deals || seedDeals()).map((x) => ({ tva: 20, lines: [], qte: 0, prestoStatus: "", prestoRef: "", prestoDate: "", converti: false, livraisonSiteId: "", datePaiement: "", ...x, montant: x.lines && x.lines.length ? dealMontant(x.lines) : (x.montant || 0) }));
+  d.deals = (d.deals || seedDeals()).map((x) => ({ tva: 20, lines: [], qte: 0, prestoStatus: "", prestoRef: "", prestoDate: "", converti: false, livraisonSiteId: "", zoneLivraison: "", datePaiement: "", ...x, montant: x.lines && x.lines.length ? dealMontant(x.lines) : (x.montant || 0) }));
   d.tickets = d.tickets || []; d.rotations = d.rotations || {}; d.savedCalcs = d.savedCalcs || []; d.prospects = (d.prospects || seedProspects()).map((p) => ({ enseigne: "", type: "autre", format: "", adresse: "", ville: "", cp: "", departement: "", region: "", telephone: "", site: "", email: "", statut: "a_qualifier", potentiel: "", notes: "", source: "", accountId: null, createdAt: TODAY(), siren: "", siret: "", raisonSociale: "", formeJuridique: "", contactPrenom: "", contactNom: "", contactFonction: "", contactEmail: "", contactTel: "", contactSource: "", archived: false, archiveReason: "", archiveDate: "", archiveNote: "", ...p }));
   { const sm = {}; seedProspects().forEach((s) => { sm[s.id] = s; }); d.prospects = d.prospects.map((p) => { if (p.id === "p_jc_mtb" && p.siren === "918164757") { const s = sm["p_jc_mtb"] || {}; p = { ...p, siren: "", raisonSociale: "", formeJuridique: "", contactPrenom: "", contactNom: "", contactFonction: "", contactSource: "", notes: s.notes || p.notes }; } const s = sm[p.id]; if (s && !p.siren && (s.siren || s.contactNom)) p = { ...p, siren: p.siren || s.siren, raisonSociale: p.raisonSociale || s.raisonSociale, formeJuridique: p.formeJuridique || s.formeJuridique, contactPrenom: p.contactPrenom || s.contactPrenom, contactNom: p.contactNom || s.contactNom, contactFonction: p.contactFonction || s.contactFonction, contactTel: p.contactTel || s.contactTel, contactSource: p.contactSource || s.contactSource }; if (s && s.siret && !p.siret) p = { ...p, siret: s.siret }; return p; }); } d.sites = Array.isArray(d.sites) ? d.sites.map((s) => ({ accountId: null, type: "pdv", adresse: "", lat: null, lng: null, notes: "", contactPrenom: "", contactNom: "", contactTel: "", contactMail: "", contactId: "", typeSurface: "", siret: "", adresseLivraison: "", livraisonIdentique: true, ...s })) : seedSites();
   { const sim = {}; seedSites().forEach((s) => { sim[s.id] = s; }); d.sites = d.sites.map((s) => { const o = sim[s.id]; return (o && !s.siret && o.siret) ? { ...s, siret: o.siret } : s; }); }
@@ -3685,21 +3702,29 @@ function DealForm({ deal, accounts, products, sites, onSave, onPreview }) {
   const onPick = (id, code) => { const pr = products.find((x) => x.code === code); setLine(id, { code, designation: pr ? pr.designation : "", pu: pr ? (pr.cessionHT != null ? pr.cessionHT : pr.pvc) : 0 }); };
   const addLine = () => setF((p) => ({ ...p, lines: [...p.lines, L("", "", 1, 0)] }));
   const rmLine = (id) => setF((p) => ({ ...p, lines: p.lines.filter((l) => l.id !== id) }));
-  const ht = dealMontant(f.lines); const port = fraisPortHT(ht); const baseHt = ht + port; const tva = baseHt * (f.tva || 0) / 100; const ttc = baseHt + tva;
-  const clean = () => ({ ...f, lines: f.lines.filter((l) => l.code) });
+  // Zone de livraison : déduite automatiquement de l'adresse de destination (site rattaché ou compte),
+  // avec possibilité de forcer manuellement. Détermine le franco de port appliqué au document.
+  const destAdr = (() => { const site = f.livraisonSiteId ? (sites || []).find((s) => s.id === f.livraisonSiteId) : null; if (site && site.adresse) return site.adresse; return effLivraison(acc) || (acc && (acc.adressePostale || acc.adresseLivraison)) || ""; })();
+  const detectedZone = detectFrancoZone(destAdr);
+  const zoneInit = useRef(false);
+  useEffect(() => { if (!zoneInit.current) { zoneInit.current = true; if (f.zoneLivraison) return; } if (detectedZone) setF((p) => ({ ...p, zoneLivraison: detectedZone })); }, [detectedZone]);
+  const zone = f.zoneLivraison || detectedZone || "metropole"; const zc = francoZone(zone);
+  const ht = dealMontant(f.lines); const port = fraisPortHT(ht, zone); const baseHt = ht + port; const tva = baseHt * (f.tva || 0) / 100; const ttc = baseHt + tva;
+  const clean = () => ({ ...f, zoneLivraison: zone, lines: f.lines.filter((l) => l.code) });
   return (<>
     <div className="row2"><div className="fld"><label>Groupe / établissement</label><EtabPicker accounts={accounts} sites={sites} accountId={f.accountId} siteId={f.siteId} onChange={(a, s) => setF((p) => ({ ...p, accountId: a, siteId: s }))} noneLabel="— Choisir —" /></div><div className="fld"><label>Type</label><select value={f.type} onChange={(e) => up("type", e.target.value)}><option value="Devis">Devis</option><option value="Commande">Bon de commande</option><option value="Facture">Facture</option></select></div></div>
     <div className="row2"><div className="fld"><label>Référence</label><input value={f.ref} onChange={(e) => up("ref", e.target.value)} /></div><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div><div className="fld"><label>Statut</label><select value={f.statut} onChange={(e) => up("statut", e.target.value)}>{Object.entries(DEAL_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div></div>
     {f.type === "Facture" && <div className="fld"><label>Date de paiement (laisser vide si non réglée)</label><input type="date" value={f.datePaiement || ""} onChange={(e) => up("datePaiement", e.target.value)} /><span style={{ fontSize: 11, color: "var(--muted)" }}>Renseigner la date d'encaissement alimente l'indicateur de délai de paiement (DSO) dans l'onglet Performance.</span></div>}
     {f.type === "Commande" && <div className="fld"><label>Destination de livraison (point de vente)</label><select value={f.livraisonSiteId || ""} onChange={(e) => up("livraisonSiteId", e.target.value)}><option value="">— aucune (pas de tracé sur la carte) —</option>{destSites.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select><span style={{ fontSize: 11, color: "var(--muted)" }}>Si renseignée et le statut « En cours de livraison », un tracé entrepôt → établissement apparaît sur la carte.</span></div>}
     {effLivraison(acc) && <div style={{ fontSize: 12, color: "var(--muted)" }}><MapPin size={12} style={{ verticalAlign: -2 }} /> Livraison : {effLivraison(acc)}</div>}
+    <div className="fld"><label>Zone de livraison (détermine le franco)</label><select value={zone} onChange={(e) => up("zoneLivraison", e.target.value)}>{FRANCO_ZONE_ORDER.map((k) => <option key={k} value={k}>{FRANCO_ZONES[k].label} — franco {FRANCO_ZONES[k].seuil} € HT, sinon {FRANCO_ZONES[k].part} € HT</option>)}</select><span style={{ fontSize: 11, color: "var(--muted)" }}>{detectedZone && detectedZone === zone ? "Détectée automatiquement d'après l'adresse de livraison." : detectedZone ? ("Détection auto : " + FRANCO_ZONES[detectedZone].label + " (vous avez forcé une autre zone).") : "Renseignez une adresse de livraison avec code postal pour la détection automatique."}</span></div>
     <div><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}><label style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)" }}>Lignes (prix unitaire = prix de cession HT)</label><button className="btn btn-g btn-s" onClick={addLine}><Plus size={14} /> Ligne</button></div>
       <div className="lineRow" style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}><span>Produit</span><span style={{ textAlign: "right" }}>Qté</span><span style={{ textAlign: "right" }}>PU HT</span><span style={{ textAlign: "right" }}>Total</span><span></span></div>
       {f.lines.map((l) => (<div className="lineRow" key={l.id}><select value={l.code} onChange={(e) => onPick(l.id, e.target.value)}><option value="">— produit —</option>{sortProducts(products).map((p) => <option key={p.code} value={p.code}>{p.designation}</option>)}</select><input type="number" style={{ textAlign: "right" }} value={l.qte} onChange={(e) => setLine(l.id, { qte: +e.target.value })} /><input type="number" step="0.01" style={{ textAlign: "right" }} value={l.pu} onChange={(e) => setLine(l.id, { pu: +e.target.value })} /><div style={{ textAlign: "right", fontWeight: 700, fontSize: 13 }} className="tnum">{eur2((l.qte || 0) * (l.pu || 0))}</div><button className="iconbtn" onClick={() => rmLine(l.id)}><X size={14} /></button></div>))}
     </div>
     <div className="row2"><div className="fld"><label>TVA (%)</label><input type="number" value={f.tva} onChange={(e) => up("tva", +e.target.value)} /></div><div className="fld"><label>Note</label><input value={f.note} onChange={(e) => up("note", e.target.value)} /></div></div>
     <div style={{ display: "flex", justifyContent: "flex-end", gap: 26, padding: "4px 2px", borderTop: "1px solid var(--line)", paddingTop: 12 }}><Stat label="Total HT" value={eur2(ht)} /><Stat label={port > 0 ? "Participation port" : "Franco de port"} value={port > 0 ? eur2(port) : "offert"} /><Stat label={"TVA " + f.tva + "%"} value={eur2(tva)} /><Stat label="Total TTC" value={eur2(ttc)} /></div>
-    <div style={{ fontSize: 11, color: port > 0 ? "var(--amber)" : "var(--green)", textAlign: "right", marginTop: -4 }}>{port > 0 ? `Sous ${FRANCO_SEUIL_HT} € HT : participation de ${FRANCO_PART_HT} € HT aux frais de port. Encore ${eur2(FRANCO_SEUIL_HT - ht)} HT pour le franco.` : `Franco de port atteint (commande ≥ ${FRANCO_SEUIL_HT} € HT).`}</div>
+    <div style={{ fontSize: 11, color: port > 0 ? "var(--amber)" : "var(--green)", textAlign: "right", marginTop: -4 }}>{port > 0 ? `${zc.label} — sous ${zc.seuil} € HT : participation de ${zc.part} € HT aux frais de port. Encore ${eur2(zc.seuil - ht)} HT pour le franco.` : `Franco de port atteint (${zc.label} : commande ≥ ${zc.seuil} € HT).`}</div>
     <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}><button className="btn btn-g" onClick={() => onPreview(clean())}><Eye size={16} /> Aperçu</button><button className="btn btn-p" onClick={() => onSave(clean())}>Enregistrer</button></div>
   </>);
 }
@@ -3713,7 +3738,8 @@ function DevisPreview({ deal, account, settings, products = [], onClose }) {
     document.title = (t + " " + docRef(deal, account)).trim();
     return () => { document.body.classList.remove("doc-print"); document.title = prevTitle; };
   }, []);
-  const ht = dealMontant(deal.lines); const port = fraisPortHT(ht); const baseHt = ht + port; const tva = baseHt * (deal.tva || 0) / 100; const ttc = baseHt + tva;
+  const zone = deal.zoneLivraison || detectFrancoZone(account && (account.adresseLivraison || account.adressePostale)) || "metropole"; const zc = francoZone(zone);
+  const ht = dealMontant(deal.lines); const port = fraisPortHT(ht, zone); const baseHt = ht + port; const tva = baseHt * (deal.tva || 0) / 100; const ttc = baseHt + tva;
   const titre = deal.type === "Facture" ? "FACTURE" : deal.type === "Commande" ? "BON DE COMMANDE" : "DEVIS";
   return createPortal(<div className="ov print-doc-overlay" onClick={onClose}><div className="doc" onClick={(e) => e.stopPropagation()}>
     <div className="no-print" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: "1px solid var(--line)", position: "sticky", top: 0, background: "#fff", zIndex: 3 }}><strong>{titre} {docRef(deal, account)}</strong><div style={{ display: "flex", gap: 8 }}><button className="btn btn-p btn-s" onClick={() => window.print()}><Printer size={15} /> Imprimer / PDF</button><button className="iconbtn" onClick={onClose}><X size={16} /></button></div></div>
@@ -3739,8 +3765,8 @@ function DevisPreview({ deal, account, settings, products = [], onClose }) {
       </div>}
       <div style={{ marginTop: 26, fontSize: 10.5, color: "#6b7589", borderTop: "1px solid #eef1f7", paddingTop: 10, lineHeight: 1.7 }}>
         {titre === "DEVIS" && <div>Devis valable 30 jours.</div>}
-        <div>Franco de port dès {FRANCO_SEUIL_HT} € HT de commande.</div>
-        <div>En deçà, participation forfaitaire de {FRANCO_PART_HT} € HT aux frais de port.</div>
+        <div><strong>Livraison {zc.label}</strong> — franco de port dès {zc.seuil} € HT de commande ; en deçà, participation forfaitaire de {zc.part} € HT aux frais de port.</div>
+        <div>Franco de port : France métropolitaine {FRANCO_ZONES.metropole.seuil} € HT (particip. {FRANCO_ZONES.metropole.part} € HT) · Monaco {FRANCO_ZONES.monaco.seuil} € HT (particip. {FRANCO_ZONES.monaco.part} € HT) · Corse {FRANCO_ZONES.corse.seuil} € HT (particip. {FRANCO_ZONES.corse.part} € HT).</div>
         <div>PEN'UP 3D, SAS au capital de 1 000 €. Président : P'TIT BUNCH SARL, représentée par M. Dimitri DESSEAUX. RCS Montauban 978 651 891.</div>
       </div>
     </div>
@@ -6218,7 +6244,7 @@ function assistantAnswer(qRaw, data) {
   }
   // Franco de port
   if (has("franco", "frais de port", "livraison gratuite", "port offert", "participation port")) {
-    return { text: `Franco de port dès ${FRANCO_SEUIL_HT} € HT de commande. En dessous, une participation forfaitaire de ${FRANCO_PART_HT} € HT est ajoutée. Ces règles apparaissent automatiquement dans les devis et bons de commande.` };
+    return { text: `Franco de port selon la zone de livraison : France métropolitaine dès ${FRANCO_ZONES.metropole.seuil} € HT (sinon participation ${FRANCO_ZONES.metropole.part} € HT), Monaco dès ${FRANCO_ZONES.monaco.seuil} € HT (sinon ${FRANCO_ZONES.monaco.part} € HT), Corse dès ${FRANCO_ZONES.corse.seuil} € HT (sinon ${FRANCO_ZONES.corse.part} € HT). La zone est déduite automatiquement de l'adresse de livraison (modifiable dans le devis) et applique le bon franco.` };
   }
   // Pipeline / valeur
   if (has("pipeline", "entonnoir", "portefeuille", "valeur", "potentiel")) {
