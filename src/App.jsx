@@ -2458,13 +2458,61 @@ function Dashboard({ data, go }) {
         <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>{mini.map((m, i) => (<div key={i} className="calc-out" style={{ background: m.ok ? "var(--blue-l)" : "var(--bg)" }}><span className="l">{m.lab}</span><span className="b pu-display tnum" style={{ color: m.ok ? "var(--blue)" : "var(--muted)" }}>{m.v}</span><span style={{ fontSize: 10.5, color: "var(--muted)" }}>{m.hint}</span></div>))}</div>
       </div>); })()}
     {(() => {
+      const now = new Date(); const y = now.getFullYear(), mo = now.getMonth();
       const key = new Date().toISOString().slice(0, 7);
       const signedThis = deals.filter((d) => isCaSigne(d) && (d.date || "").startsWith(key));
       const caMois = sumMontant(signedThis); const cmdMois = signedThis.filter((d) => d.type === "Commande").length;
       const objCa = Number(data.settings.objCaMois) || 0; const objCmd = Number(data.settings.objCmdMois) || 0;
-      if (!objCa && !objCmd) return null;
+      // Jours ouvrés (lun-ven) écoulés vs total du mois → extrapolation linéaire (run-rate) de fin de mois.
+      const bizDays = (from, to) => { let n = 0; const d = new Date(from); while (d <= to) { const w = d.getDay(); if (w !== 0 && w !== 6) n++; d.setDate(d.getDate() + 1); } return n; };
+      const elapsed = bizDays(new Date(y, mo, 1), now); const totalBiz = bizDays(new Date(y, mo, 1), new Date(y, mo + 1, 0));
+      const projCa = elapsed > 0 ? caMois / elapsed * totalBiz : 0; const projCmd = elapsed > 0 ? cmdMois / elapsed * totalBiz : 0;
       const gauge = (label, val, obj, fmt) => { const pct = obj > 0 ? Math.min(100, Math.round(val / obj * 100)) : 0; const col = pct >= 100 ? "var(--green)" : pct >= 60 ? "var(--blue)" : "var(--amber)"; return (<div style={{ flex: 1, minWidth: 220 }}><div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 4 }}><span style={{ fontWeight: 700 }}>{label}</span><span className="tnum" style={{ color: "var(--muted)" }}>{fmt(val)} / {fmt(obj)} · {pct}%</span></div><div style={{ height: 10, borderRadius: 6, background: "var(--bg)", overflow: "hidden" }}><div style={{ width: pct + "%", height: "100%", background: col, transition: "width .5s" }} /></div></div>); };
-      return (<div className="card" style={{ marginBottom: 18, borderLeft: "4px solid var(--green)" }}><div className="sec-h"><h3 className="pu-display">Objectifs du mois</h3><span style={{ textTransform: "capitalize" }}>{new Date().toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}</span></div><div style={{ display: "flex", gap: 26, flexWrap: "wrap" }}>{objCa > 0 && gauge("CA HT signé", caMois, objCa, eur)}{objCmd > 0 && gauge("Commandes signées", cmdMois, objCmd, (n) => num(n))}</div></div>);
+      // Projection vs objectif : écart en % (positif = au-dessus de la cible en rythme actuel).
+      const ecart = objCa > 0 && projCa > 0 ? Math.round((projCa - objCa) / objCa * 100) : null;
+      return (<>
+        {(objCa || objCmd) ? (<div className="card" style={{ marginBottom: 18, borderLeft: "4px solid var(--green)" }}><div className="sec-h"><h3 className="pu-display">Objectifs du mois</h3><span style={{ textTransform: "capitalize" }}>{now.toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}</span></div>
+          <div style={{ display: "flex", gap: 26, flexWrap: "wrap" }}>{objCa > 0 && gauge("CA HT signé", caMois, objCa, eur)}{objCmd > 0 && gauge("Commandes signées", cmdMois, objCmd, (n) => num(n))}</div>
+          {elapsed > 0 && <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--line)", display: "flex", gap: 22, flexWrap: "wrap", alignItems: "baseline", fontSize: 12.5 }}>
+            <span style={{ fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3, fontSize: 11 }}>Projection fin de mois (rythme {elapsed}/{totalBiz} j ouvrés)</span>
+            {objCa > 0 && <span>CA : <strong className="tnum">{eur(Math.round(projCa))}</strong>{ecart != null && <span style={{ color: ecart >= 0 ? "var(--green)" : "var(--amber)", fontWeight: 700 }}> ({ecart >= 0 ? "+" : ""}{ecart}% vs cible)</span>}</span>}
+            {objCmd > 0 && <span>Commandes : <strong className="tnum">{Math.round(projCmd)}</strong></span>}
+          </div>}
+        </div>) : null}
+        {(() => {
+          // Comparatif année N vs N-1 sur la même période (1er janvier → aujourd'hui) : distingue dynamique réelle et saisonnalité.
+          const mm = String(mo + 1).padStart(2, "0"), dd = String(now.getDate()).padStart(2, "0");
+          const ytd = (yr) => sumMontant(deals.filter((d) => { const dt = d.date || ""; return isCaSigne(d) && dt.startsWith(yr + "-") && dt <= yr + "-" + mm + "-" + dd; }));
+          const caY = ytd(String(y)), caY1 = ytd(String(y - 1));
+          if (caY === 0 && caY1 === 0) return null;
+          const evol = caY1 > 0 ? Math.round((caY - caY1) / caY1 * 100) : null;
+          return (<div className="card" style={{ marginBottom: 18, borderLeft: "4px solid #5b8def" }}><div className="sec-h"><h3 className="pu-display">CA cumulé — {y} vs {y - 1}</h3><span>au {dd}/{mm}, à périmètre de date égal</span></div>
+            <div style={{ display: "flex", gap: 28, flexWrap: "wrap", alignItems: "baseline" }}>
+              <div><div style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 700 }}>{y} (à date)</div><div className="pu-display tnum" style={{ fontSize: 26, color: "var(--blue)" }}>{eur(Math.round(caY))}</div></div>
+              <div><div style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 700 }}>{y - 1} (même période)</div><div className="pu-display tnum" style={{ fontSize: 22, color: "var(--muted)" }}>{eur(Math.round(caY1))}</div></div>
+              {evol != null && <div><div style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 700 }}>Évolution</div><div className="pu-display tnum" style={{ fontSize: 24, color: evol >= 0 ? "var(--green)" : "var(--red)" }}>{evol >= 0 ? "+" : ""}{evol}%</div></div>}
+            </div>
+          </div>);
+        })()}
+      </>);
+    })()}
+    {(() => {
+      // Taux de conversion devis→commande (win rate) : part des devis traités (hors brouillon) qui ont
+      // été signés (statut « accepté » ou convertis), + valeur moyenne d'un devis signé.
+      const devis = deals.filter((d) => d.type === "Devis");
+      const traites = devis.filter((d) => d.statut && d.statut !== "brouillon");
+      if (traites.length === 0) return null;
+      const gagnes = traites.filter((d) => d.statut === "accepte" || d.converti);
+      const rate = Math.round(gagnes.length / traites.length * 100);
+      const panier = gagnes.length ? sumMontant(gagnes) / gagnes.length : 0;
+      const col = rate >= 50 ? "var(--green)" : rate >= 25 ? "var(--blue)" : "var(--amber)";
+      return (<div className="card" style={{ marginBottom: 18, borderLeft: "4px solid " + col }}><div className="sec-h"><h3 className="pu-display">Taux de signature des devis</h3><span>conversion devis → commande</span></div>
+        <div style={{ display: "flex", gap: 28, flexWrap: "wrap", alignItems: "baseline" }}>
+          <div><div style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 700 }}>Taux de signature</div><div className="pu-display tnum" style={{ fontSize: 28, color: col }}>{rate}%</div></div>
+          <div><div style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 700 }}>Devis signés</div><div className="pu-display tnum" style={{ fontSize: 22 }}>{gagnes.length} / {traites.length}</div></div>
+          {panier > 0 && <div><div style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 700 }}>Panier moyen signé</div><div className="pu-display tnum" style={{ fontSize: 22 }}>{eur(Math.round(panier))}</div></div>}
+        </div>
+      </div>);
     })()}
     <DashSection icon={RefreshCw} color="#7c5cf0" title="Activité commerciale" note="échanges, relances & pipeline" />
     <ActivityChart deals={deals} />
