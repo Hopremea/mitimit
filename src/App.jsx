@@ -3268,7 +3268,7 @@ function AccountInteractionForm({ contactId, accountId, contacts, onCancel, onSa
   const onContact = (cid) => setF((p) => { const ct = (contacts || []).find((c) => c.id === cid); return { ...p, contactId: cid, siteId: ct && ct.siteId ? ct.siteId : (p.siteId || "") }; });
   return (<>
     <div className="row2"><div className="fld"><label>Type</label><select value={f.type} onChange={(e) => up("type", e.target.value)}>{Object.entries(INT_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div></div>
-    <div className="row2"><div className="fld"><label>Heure</label><input type="time" step="300" value={f.heure || ""} onChange={(e) => up("heure", e.target.value)} /></div><div className="fld" /></div>
+    <div className="row2"><div className="fld"><label>Heure</label><TimeSelect value={f.heure || ""} onChange={(v) => up("heure", v)} /></div><div className="fld" /></div>
     <div className="row2"><div className="fld"><label>Sens</label><select value={f.direction} onChange={(e) => up("direction", e.target.value)}><option value="sortant">Sortant</option><option value="entrant">Entrant</option><option value="sortant_rejete">Sortant (rejeté)</option></select></div><div className="fld"><label>Contact</label><select value={f.contactId} onChange={(e) => onContact(e.target.value)}><option value="">Aucun précis</option>{contacts.map((c) => <option key={c.id} value={c.id}>{fullName(c)}</option>)}</select></div></div>
     <div className="fld"><label>Sujet</label><Combo value={f.sujet} onChange={(v) => up("sujet", v)} options={SUJET_PRESETS} placeholder="Choisir ou saisir l'objet de l'échange" /></div>
     <ResumeField value={f.resume} onChange={(v) => up("resume", v)} onUsage={onUsage} rows={3} baseDate={f.date} onPlan={onPlanEvents ? (evs) => onPlanEvents(evs, f) : undefined} />
@@ -3478,7 +3478,7 @@ function InteractionForm({ accountId, contactId, siteId, onSave, interaction, on
   const up = (k, v) => setF((p) => ({ ...p, [k]: v })); const showDir = f.type === "email" || f.type === "appel";
   return (<>
     <div className="row2"><div className="fld"><label>Type</label><select value={f.type} onChange={(e) => up("type", e.target.value)}>{Object.entries(INT_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div>{showDir && <div className="fld"><label>Sens</label><select value={f.direction} onChange={(e) => up("direction", e.target.value)}><option value="sortant">Sortant</option><option value="entrant">Entrant</option><option value="sortant_rejete">Sortant (rejeté)</option></select></div>}</div>
-    <div className="row2"><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div><div className="fld"><label>Heure</label><input type="time" step="300" value={f.heure || ""} onChange={(e) => up("heure", e.target.value)} /></div></div>
+    <div className="row2"><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div><div className="fld"><label>Heure</label><TimeSelect value={f.heure || ""} onChange={(v) => up("heure", v)} /></div></div>
     <div className="fld"><label>Sujet</label><Combo value={f.sujet} onChange={(v) => up("sujet", v)} options={SUJET_PRESETS} placeholder="Choisir ou saisir l'objet de l'échange" /></div>
     <ResumeField value={f.resume} onChange={(v) => up("resume", v)} onUsage={onUsage} rows={4} baseDate={f.date} onPlan={onPlanEvents ? (evs) => onPlanEvents(evs, f) : undefined} />
     <div style={{ display: "flex", justifyContent: "flex-end" }}><button className="btn btn-p" onClick={() => onSave(f)} disabled={!f.sujet}>Enregistrer</button></div>
@@ -5581,6 +5581,27 @@ function presenceDay(rec) {
   const worked = Math.max(0, d - a - pause);
   return { worked, pause, arrivee: rec.arrivee, depart: rec.depart, invalid: false, motif: "presence" };
 }
+// Sélecteur d'heure au pas de 5 min (2 menus heures/minutes) : le champ natif <input type="time">
+// ignore step="300" sur plusieurs navigateurs et propose les minutes 1 par 1. Ici c'est garanti.
+function TimeSelect({ value, onChange }) {
+  const ok = /^\d{1,2}:\d{2}$/.test(value || "");
+  const h = ok ? Number(value.split(":")[0]) : null;
+  const m = ok ? Number(value.split(":")[1]) : null;
+  const pad = (n) => String(n).padStart(2, "0");
+  const mins = Array.from({ length: 12 }, (_, i) => i * 5);
+  if (m != null && !mins.includes(m)) { mins.push(m); mins.sort((a, b) => a - b); }
+  const set = (nh, nm) => onChange(pad(nh) + ":" + pad(nm));
+  return (<div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+    <select style={{ flex: 1 }} value={h == null ? "" : String(h)} onChange={(e) => set(Number(e.target.value), m == null ? 0 : m)}>
+      {h == null && <option value="">– h</option>}
+      {Array.from({ length: 24 }, (_, i) => <option key={i} value={i}>{pad(i)} h</option>)}
+    </select>
+    <select style={{ flex: 1 }} value={m == null ? "" : String(m)} onChange={(e) => set(h == null ? 0 : h, Number(e.target.value))}>
+      {m == null && <option value="">– min</option>}
+      {mins.map((mm) => <option key={mm} value={mm}>{pad(mm)} min</option>)}
+    </select>
+  </div>);
+}
 // Onglet RH : sous-navigation entre le temps de présence (pointage) et les frais kilométriques.
 function RH({ data, persist }) {
   const [sub, setSub] = useState("presence");
@@ -5682,8 +5703,8 @@ function PointageEditor({ ds, rec, onSave, onDelete, onClose }) {
     </div>
     {isPresence ? (<>
       <div className="row2">
-        <div className="fld"><label>Heure d'arrivée</label><input type="time" step="300" value={arrivee} onChange={(e) => setArrivee(e.target.value)} /></div>
-        <div className="fld"><label>Heure de départ</label><input type="time" step="300" value={depart} onChange={(e) => setDepart(e.target.value)} /></div>
+        <div className="fld"><label>Heure d'arrivée</label><TimeSelect value={arrivee} onChange={setArrivee} /></div>
+        <div className="fld"><label>Heure de départ</label><TimeSelect value={depart} onChange={setDepart} /></div>
       </div>
       <div className="fld" style={{ marginTop: 2, marginBottom: pause ? 8 : 0 }}>
         <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", fontWeight: 600 }}>
