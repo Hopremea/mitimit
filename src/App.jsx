@@ -2524,6 +2524,24 @@ function Dashboard({ data, go }) {
       </div>);
     })()}
     {(() => {
+      // Détection de décrochage (churn précoce) : pour un client qui commandait régulièrement, on compare
+      // le délai depuis sa dernière commande signée à son intervalle habituel entre commandes. Au-delà de
+      // 1,5× l'intervalle moyen (et > 45 j), on signale un décrochage AVANT qu'il ne devienne dormant.
+      const churn = accounts.map((a) => {
+        const dates = deals.filter((d) => d.accountId === a.id && d.type === "Commande" && isCaSigne(d) && d.date).map((d) => d.date).sort();
+        if (dates.length < 3) return null;
+        const gaps = []; for (let i = 1; i < dates.length; i++) gaps.push((new Date(dates[i]) - new Date(dates[i - 1])) / 86400000);
+        const avg = gaps.reduce((s, x) => s + x, 0) / gaps.length;
+        const since = (Date.now() - new Date(dates[dates.length - 1])) / 86400000;
+        if (avg > 0 && since > avg * 1.5 && since > 45) return { a, avg: Math.round(avg), since: Math.round(since), ratio: since / avg };
+        return null;
+      }).filter(Boolean).sort((x, y) => y.ratio - x.ratio).slice(0, 6);
+      if (churn.length === 0) return null;
+      return (<div className="card" style={{ marginBottom: 18, borderLeft: "4px solid var(--amber)" }}><div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><TrendingUp size={16} style={{ color: "var(--amber)", transform: "scaleY(-1)" }} /> Clients en décrochage</h3><span>rythme de commande ralenti</span></div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{churn.map(({ a, avg, since }) => (<div key={a.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "8px 0", borderBottom: "1px solid #f0f3f9" }}><AlertTriangle size={16} style={{ color: "var(--amber)", flexShrink: 0 }} /><div style={{ flex: 1, minWidth: 0 }}><div className="lnk" style={{ fontWeight: 700, fontSize: 13.5 }} onClick={() => go("accounts", a.id)}>{a.enseigne || "Sans nom"}</div><div style={{ fontSize: 11.5, color: "var(--muted)" }}>commandait tous les ~{avg} j · <strong style={{ color: "var(--amber)" }}>silence depuis {since} j</strong></div></div><button className="btn btn-g btn-s" onClick={() => go("accounts", a.id)}><ChevronRight size={14} /> Relancer</button></div>))}</div>
+      </div>);
+    })()}
+    {(() => {
       const ex = (data.interactions || []).slice().sort((a, b) => (b.date || "").localeCompare(a.date || "")); const list = allEx ? ex.slice(0, 50) : ex.slice(0, 6);
       return (<div className="card" style={{ marginBottom: 18 }}><div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><RefreshCw size={16} style={{ color: "var(--blue)" }} /> Derniers échanges</h3>{ex.length > 6 && <button className="lnk" style={{ fontSize: 12.5, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }} onClick={() => setAllEx((v) => !v)}>{allEx ? "Réduire" : "Voir tout"} <ChevronRight size={14} /></button>}</div>
         {list.length === 0 ? <div className="empty">Aucun échange enregistré.</div> : <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: allEx ? 360 : "none", overflowY: allEx ? "auto" : "visible" }}>{list.map((it) => { const m = INT_META[it.type] || INT_META.note; const Ic = m.icon; const ct = contacts.find((c) => c.id === it.contactId); const acc = accounts.find((a) => a.id === it.accountId); return (<div key={it.id} onClick={() => ct ? go("repertoire", ct.id) : (acc ? go("accounts", acc.id) : null)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid #f0f3f9", cursor: (ct || acc) ? "pointer" : "default" }}><span style={{ width: 26, height: 26, borderRadius: 8, background: m.color + "18", color: m.color, display: "grid", placeItems: "center", flexShrink: 0 }}><Ic size={14} /></span><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 700, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{it.sujet || m.label}</div><div style={{ fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{[acc && acc.enseigne, ct && fullName(ct)].filter(Boolean).join(" · ") || m.label}{it.resume ? " — " + it.resume : ""}</div></div><span className="tnum" style={{ fontSize: 11.5, color: "var(--muted)", flexShrink: 0 }}>{it.date}</span></div>); })}</div>}
