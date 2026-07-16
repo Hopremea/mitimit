@@ -2016,6 +2016,26 @@ async function aiFindLinks(query, persistUsage) {
   const clean = (v) => (typeof v === "string" ? v.trim() : "");
   return { site: clean(o.site), facebook: clean(o.facebook), instagram: clean(o.instagram) };
 }
+// Recherche web des horaires d'ouverture habituels d'un magasin (fiche Google / site officiel).
+// Renvoie une chaîne au format français jour par jour, directement exploitable par parseHoraires
+// (ex. « Lun 10h-19h; Mar 10h-19h; … Dim fermé »). Chaîne vide si aucun horaire fiable trouvé.
+async function aiFindHoraires(query, persistUsage) {
+  const prompt = "Recherche les horaires d'ouverture HABITUELS de ce magasin (fiche Google Business / site officiel) : \"" + query + "\". " +
+    "N'invente RIEN : si tu ne trouves pas d'horaires fiables pour CE magasin précis, renvoie une chaîne vide. " +
+    "Réponds UNIQUEMENT par un objet JSON sans texte ni Markdown : {\"horaires\":\"\"}. " +
+    "Le champ horaires liste les 7 jours, un par jour, séparés par des points-virgules, au format français : " +
+    "\"Lun 10h-19h; Mar 10h-19h; Mer 10h-19h; Jeu 10h-19h; Ven 10h-19h; Sam 10h-19h; Dim fermé\". " +
+    "Pour une coupure méridienne, donne les deux plages : \"Lun 9h30-12h30 et 14h-19h\". Jour de fermeture : \"Dim fermé\".";
+  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 600, tools: [{ type: "web_search_20250305", name: "web_search" }], messages: [{ role: "user", content: prompt }] }) });
+  if (!res.ok) throw new Error("API " + res.status);
+  const dt = await res.json();
+  if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
+  const text = (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+  const m = text.match(/\{[\s\S]*\}/); let o = {}; try { o = m ? JSON.parse(m[0]) : {}; } catch (e) {}
+  const h = typeof o.horaires === "string" ? o.horaires.trim() : "";
+  // On ne conserve que si le texte est réellement interprétable en grille (sinon on considère « rien trouvé »).
+  return h && parseHoraires(h) ? h : "";
+}
 // Encart photo / logo éditable : téléversement, URL, logo automatique (web) ou logo du groupe.
 function EntityPhoto({ value, onChange, initials: ini, bg, round, size = 64, enseigne, groupLogo, fallback, persistUsage }) {
   const fileRef = useRef(null);
@@ -2538,6 +2558,54 @@ function LogosBulk({ data, persist, onClose }) {
     </div>); })}</div>}
   </Modal>);
 }
+// Recherche IA + application des horaires d'ouverture pour TOUS les établissements enregistrés.
+// Pour chaque magasin sans horaires, l'IA cherche (fiche Google / site officiel) et applique
+// directement le résultat. « Rechercher & appliquer à tous » traite la liste séquentiellement.
+function HorairesBulk({ data, persist, onClose }) {
+  const accById = {}; (data.accounts || []).forEach((a) => { accById[a.id] = a; });
+  const archived = new Set((data.accounts || []).filter((a) => a.archived).map((a) => a.id));
+  const stores = (data.sites || [])
+    .filter((s) => (s.type === "pdv" || s.type === "decision") && !archived.has(s.accountId))
+    .map((s) => ({ s, acc: accById[s.accountId] || null }))
+    .sort((x, y) => (x.s.label || "").localeCompare(y.s.label || ""));
+  const missing = stores.filter((o) => !String(o.s.horaires || "").trim());
+  const [st, setSt] = useState({});
+  const [running, setRunning] = useState(false);
+  const persistUsage = (u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }));
+  const applyHoraires = (id, h) => persist((p) => ({ ...p, sites: (p.sites || []).map((x) => x.id === id ? { ...x, horaires: h } : x) }));
+  const searchOne = async (o) => {
+    const id = o.s.id;
+    setSt((s) => ({ ...s, [id]: { busy: true } }));
+    const q = [o.s.label, o.acc && o.acc.enseigne, o.s.adresse || (o.acc && o.acc.ville)].filter(Boolean).join(" ");
+    try {
+      const h = await aiFindHoraires(q, persistUsage);
+      if (h) { applyHoraires(id, h); setSt((s) => ({ ...s, [id]: { busy: false, applied: true, horaires: h } })); }
+      else setSt((s) => ({ ...s, [id]: { busy: false, msg: "Aucun horaire fiable trouvé — à saisir manuellement." } }));
+    } catch (e) { setSt((s) => ({ ...s, [id]: { busy: false, msg: "Recherche IA indisponible ici (fonctionne dans l'app Claude)." } })); }
+  };
+  const runAll = async () => {
+    setRunning(true);
+    for (const o of missing) {
+      if (st[o.s.id] && (st[o.s.id].applied || st[o.s.id].busy)) continue;
+      await searchOne(o);
+      await new Promise((r) => setTimeout(r, 250)); // léger délai entre appels pour rester raisonnable
+    }
+    setRunning(false);
+  };
+  const doneCount = Object.values(st).filter((x) => x && x.applied).length;
+  return (<Modal title="Compléter les horaires (IA)" onClose={onClose} wide>
+    <p style={{ fontSize: 12.5, color: "var(--muted)", marginTop: -4, lineHeight: 1.5 }}>Pour chaque établissement sans horaires, l'IA recherche les horaires d'ouverture (fiche Google / site officiel) et les <strong>applique directement</strong>. Vous pouvez lancer toute la liste en une fois, ou magasin par magasin. Les horaires restent modifiables sur chaque fiche.</p>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", margin: "8px 0 12px" }}>
+      <button className="btn btn-p btn-s" onClick={runAll} disabled={running || missing.length === 0}><Sparkles size={14} className={running ? "spin" : ""} /> {running ? "Recherche en cours…" : "Rechercher & appliquer à tous (" + missing.length + ")"}</button>
+      {doneCount > 0 && <span style={{ fontSize: 12, color: "var(--green)", fontWeight: 700 }}>{doneCount} appliqué{doneCount > 1 ? "s" : ""} ✓</span>}
+    </div>
+    {missing.length === 0 ? <div className="empty">Tous les établissements ont déjà des horaires. 🎉</div> : <div style={{ display: "flex", flexDirection: "column", gap: 7, maxHeight: 420, overflowY: "auto" }}>{missing.map((o) => { const s = st[o.s.id] || {}; return (<div key={o.s.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 11, background: "#fff" }}>
+      <Clock size={16} color="var(--muted)" style={{ flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 700, fontSize: 13.5 }}>{o.s.label || "Établissement"}{o.acc && o.acc.enseigne ? <span style={{ fontWeight: 500, color: "var(--muted)" }}> · {o.acc.enseigne}</span> : ""}</div>{s.applied ? <div style={{ fontSize: 11.5, color: "var(--green)" }}>Appliqué ✓ — {s.horaires}</div> : s.msg ? <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{s.msg}</div> : (o.s.adresse ? <div style={{ fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.s.adresse}</div> : null)}</div>
+      {!s.applied && <button className="btn btn-g btn-s" onClick={() => searchOne(o)} disabled={s.busy || running}><Sparkles size={14} className={s.busy ? "spin" : ""} /> {s.busy ? "…" : (s.msg ? "Réessayer" : "Chercher")}</button>}
+    </div>); })}</div>}
+  </Modal>);
+}
 // Détection et fusion des doublons (enseignes proches, contacts homonymes ou même e-mail).
 function DoublonsModal({ data, persist, onClose }) {
   const filled = (o, keys) => keys.reduce((n, k) => n + ((o[k] != null && o[k] !== "") ? 1 : 0), 0);
@@ -2598,7 +2666,7 @@ function ArchiveModal({ account, existing, onUsage, onArchive, onClose, noun = "
   </Modal>);
 }
 function Accounts({ data, persist, go, focus }) {
-  const { accounts, contacts } = data; const [detailId, setDetailId] = useState(null); const [edit, setEdit] = useState(null); const [addC, setAddC] = useState(null); const [openSite, setOpenSite] = useState(null); const [q, setQ] = useState(""); const [sortPdv, setSortPdv] = useState("nom"); const [siteAdd, setSiteAdd] = useState(null); const [siteDetailId, setSiteDetailId] = useState(null); const [logosOpen, setLogosOpen] = useState(false); const [dupOpen, setDupOpen] = useState(false); const [view, setView] = useState("actifs"); const [archiveEdit, setArchiveEdit] = useState(null);
+  const { accounts, contacts } = data; const [detailId, setDetailId] = useState(null); const [edit, setEdit] = useState(null); const [addC, setAddC] = useState(null); const [openSite, setOpenSite] = useState(null); const [q, setQ] = useState(""); const [sortPdv, setSortPdv] = useState("nom"); const [siteAdd, setSiteAdd] = useState(null); const [siteDetailId, setSiteDetailId] = useState(null); const [logosOpen, setLogosOpen] = useState(false); const [horairesOpen, setHorairesOpen] = useState(false); const [dupOpen, setDupOpen] = useState(false); const [view, setView] = useState("actifs"); const [archiveEdit, setArchiveEdit] = useState(null);
   useEffect(() => { if (focus && focus.site) { setSiteDetailId(focus.site); setDetailId(null); } else if (focus && focus.id) { setDetailId(focus.id); setSiteDetailId(null); } }, [focus && focus.n]);
   const unarchiveAccount = (id) => persist((p) => ({ ...p, accounts: p.accounts.map((x) => x.id === id ? { ...x, archived: false } : x) }));
   const saveArchive = (acc, info) => persist((p) => ({ ...p, accounts: p.accounts.map((x) => x.id === acc.id ? { ...x, archived: true, archiveReason: info.reason, archiveDate: info.date || TODAY(), archiveNote: info.note || "" } : x) }));
@@ -2646,8 +2714,9 @@ function Accounts({ data, persist, go, focus }) {
         </div>
       ))}</div>}
     </div>) : (<>
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, gap: 10, flexWrap: "wrap" }}><h3 className="pu-display" style={{ margin: 0, fontSize: 16 }}>Groupes <span style={{ color: "var(--muted)", fontWeight: 600 }}>({nbMulti})</span></h3><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button className="btn btn-g" onClick={() => setDupOpen(true)} title="Détecter et fusionner les doublons"><GitBranch size={16} /> Doublons</button><button className="btn btn-g" onClick={() => setLogosOpen(true)} title="Trouver et valider les logos manquants"><ImageIcon size={16} /> Compléter les logos</button><button className="btn btn-p" onClick={() => setEdit({ id: "acc_" + Date.now(), enseigne: "", kind: "groupe", stage: "prospect", magasins: 0, nature: "", code: "", siren: "", formeJuridique: "", typeSurface: "", ville: "", lat: null, lng: null, pipeline: 0, prochaineAction: "", dateAction: "", notes: "", adressePostale: "", adresseLivraison: "", livraisonIdentique: true })}><Plus size={16} /> Nouveau groupe</button></div></div>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, gap: 10, flexWrap: "wrap" }}><h3 className="pu-display" style={{ margin: 0, fontSize: 16 }}>Groupes <span style={{ color: "var(--muted)", fontWeight: 600 }}>({nbMulti})</span></h3><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button className="btn btn-g" onClick={() => setDupOpen(true)} title="Détecter et fusionner les doublons"><GitBranch size={16} /> Doublons</button><button className="btn btn-g" onClick={() => setLogosOpen(true)} title="Trouver et valider les logos manquants"><ImageIcon size={16} /> Compléter les logos</button><button className="btn btn-g" onClick={() => setHorairesOpen(true)} title="Rechercher et appliquer les horaires d'ouverture à tous les établissements (IA)"><Clock size={16} /> Compléter les horaires</button><button className="btn btn-p" onClick={() => setEdit({ id: "acc_" + Date.now(), enseigne: "", kind: "groupe", stage: "prospect", magasins: 0, nature: "", code: "", siren: "", formeJuridique: "", typeSurface: "", ville: "", lat: null, lng: null, pipeline: 0, prochaineAction: "", dateAction: "", notes: "", adressePostale: "", adresseLivraison: "", livraisonIdentique: true })}><Plus size={16} /> Nouveau groupe</button></div></div>
     {logosOpen && <LogosBulk data={data} persist={persist} onClose={() => setLogosOpen(false)} />}
+    {horairesOpen && <HorairesBulk data={data} persist={persist} onClose={() => setHorairesOpen(false)} />}
     {dupOpen && <DoublonsModal data={data} persist={persist} onClose={() => setDupOpen(false)} />}
     {(() => { const groupList = accounts.filter((a) => isMulti(a) && !a.archived).slice().sort((a, b) => (a.enseigne || "").localeCompare(b.enseigne || "")); return groupList.length === 0 ? <div className="empty">Aucun groupe. Créez un groupe (Cultura, King Jouet…) pour y rattacher des établissements.</div> : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(238px, 1fr))", gap: 10 }}>{groupList.map((a) => { const pc = principal(a.id); const sm = stageMeta(a.stage); const seg = networkSeg(a.magasins); return (<button key={a.id} className="tile" onClick={() => go("accounts", a.id)} style={{ textAlign: "left", border: "1px solid var(--line)", borderLeft: "3px solid #3F60AA", borderRadius: 12, padding: "11px 13px", background: "#fff", display: "flex", flexDirection: "column", gap: 5, fontFamily: "inherit" }}><div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>{a.logo ? <img src={a.logo} alt="" style={{ width: 24, height: 24, borderRadius: 6, objectFit: "contain", background: "#fff", border: "1px solid var(--line)", flexShrink: 0 }} /> : <Building2 size={16} color="#3F60AA" style={{ flexShrink: 0 }} />}<span style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.2 }}>{a.enseigne || "Sans nom"}</span>{a.code && <span style={{ fontWeight: 800, fontSize: 10.5, letterSpacing: ".03em", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 6, padding: "1px 6px", color: "var(--muted)" }} className="tnum">{a.code}</span>}</div>{pc && <div className="meta"><User size={12} />{pc}</div>}<div className="meta"><Store size={12} />{magasinLabel(a.magasins)}</div><div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 5, marginTop: 2 }}><Badge color={seg.color}>{seg.label}</Badge><StageTag stage={sm} /></div>{(() => { const att = sumMontant((data.deals || []).filter((d) => d.accountId === a.id && isDevisEnAttente(d))); return att > 0 ? <div style={{ marginTop: 4, fontWeight: 700, color: "var(--blue)", fontSize: 13 }} className="tnum" title="CA HT en attente (devis non validés)">{eur(att)}</div> : null; })()}</button>); })}</div>; })()}
     <div style={{ marginTop: 22 }}>
@@ -2715,13 +2784,17 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
     const usage = (u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }));
     const q = [s.label, acc && acc.enseigne, s.adresse || (acc && acc.ville)].filter(Boolean).join(" ");
     try {
-      const links = await aiFindLinks(q, usage);
+      const [links, horaires] = await Promise.all([
+        aiFindLinks(q, usage),
+        String(s.horaires || "").trim() ? Promise.resolve("") : aiFindHoraires(q, usage).catch(() => ""),
+      ]);
       const patch = {}; const got = [];
       if (links.site && !s.site) { patch.site = links.site; got.push("site web"); }
       if (links.facebook && !s.facebook) { patch.facebook = links.facebook; got.push("Facebook"); }
       if (links.instagram && !s.instagram) { patch.instagram = links.instagram; got.push("Instagram"); }
+      if (horaires && !String(s.horaires || "").trim()) { patch.horaires = horaires; got.push("horaires"); }
       if (got.length) { saveSite({ ...s, ...patch }); setAiMsg("Trouvé par l'IA : " + got.join(", ") + "."); }
-      else setAiMsg(s.site ? "Site web déjà renseigné." : "Aucun site web fiable trouvé par l'IA.");
+      else setAiMsg(s.site ? "Site web déjà renseigné." : "Aucune information fiable trouvée par l'IA.");
     } catch (e) { setAiMsg("Recherche IA indisponible ici (fonctionne dans l'app Claude)."); }
     finally { setAiBusy(false); }
   };
@@ -2763,7 +2836,7 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
           {s.site && <div style={{ fontSize: 13, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 6 }}><Globe size={14} style={{ color: "var(--muted)" }} /><a className="lnk" href={ensureHttp(s.site)} target="_blank" rel="noreferrer" title="Site internet de l'établissement">{cleanDomain(s.site) || s.site}</a></div>}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9, alignItems: "center" }}>{s.typeSurface && <Badge color="#3F60AA">{s.typeSurface}</Badge>}{s.siret && <span className="tnum" style={{ fontSize: 12, color: "var(--muted)" }}>SIRET {s.siret}</span>}{!s.lat && <Badge color="#c0392b">à géolocaliser</Badge>}</div>
         </div>
-        <div className="tile-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button className="btn btn-ai" onClick={runSiteAI} disabled={aiBusy} title="Rechercher en ligne le site web (et réseaux) de l'établissement"><Sparkles size={15} className={aiBusy ? "spin" : ""} /> {aiBusy ? ("Recherche… " + fmtElapsed(aiElapsed)) : "Recherche IA"}</button><button className="btn btn-g" onClick={() => setChatOpen(true)} title="Conseil IA : discuter de ce compte (analyse, prochaine action, arguments de vente)"><MessageSquare size={15} /> Conseil IA</button><button className="btn btn-g" onClick={() => setGmapOpen(true)} title="Voir la fiche Google de cet établissement dans le logiciel"><MapPin size={15} /> Fiche Google</button>{s.lat != null && <button className="btn btn-g" onClick={() => go("carte", s.id)}><MapIcon size={15} /> Carte</button>}<button className="btn btn-g" onClick={() => openPrint("Fiche " + (s.label || ""), ficheBody(s.label || "Établissement", [acc ? acc.enseigne : "Indépendant", s.adresse].filter(Boolean).join(" · "), [s.type === "decision" ? "Siège" : "Établissement", s.typeSurface].filter(Boolean), [{ l: "CA HT en attente", v: eur(caAttente) }, { l: "CA HT signé", v: eur(caSigne) }, { l: "Contacts", v: num(siteContacts.length) }, { l: "Documents", v: num(deals.length) }], siteContacts, deals, ints, acc))}><Printer size={15} /> PDF</button>{indep && acc && (acc.archived ? <button className="btn btn-g" onClick={unArchive} title="Réactiver : remettre dans les listes actives"><ArchiveRestore size={15} /> Désarchiver</button> : <button className="btn btn-g" onClick={() => setArchiveOpen(true)} title="Archiver : parcours commercial arrêté"><Archive size={15} /> Archiver</button>)}<button className="btn btn-g" onClick={() => setEdit({ ...s })}><Pencil size={15} /> Modifier</button>{indep && <button className="btn btn-p" onClick={promoteIndepToGroup} title="Faire de cet établissement une chaîne / un groupe, pour y rattacher d'autres établissements"><GitBranch size={15} /> Transformer en groupe</button>}<button className="btn btn-g" style={{ color: "var(--red)" }} onClick={delThis}><Trash2 size={15} /> Supprimer</button></div>
+        <div className="tile-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button className="btn btn-ai" onClick={runSiteAI} disabled={aiBusy} title="Rechercher en ligne le site web, les réseaux et les horaires d'ouverture de l'établissement"><Sparkles size={15} className={aiBusy ? "spin" : ""} /> {aiBusy ? ("Recherche… " + fmtElapsed(aiElapsed)) : "Recherche IA"}</button><button className="btn btn-g" onClick={() => setChatOpen(true)} title="Conseil IA : discuter de ce compte (analyse, prochaine action, arguments de vente)"><MessageSquare size={15} /> Conseil IA</button><button className="btn btn-g" onClick={() => setGmapOpen(true)} title="Voir la fiche Google de cet établissement dans le logiciel"><MapPin size={15} /> Fiche Google</button>{s.lat != null && <button className="btn btn-g" onClick={() => go("carte", s.id)}><MapIcon size={15} /> Carte</button>}<button className="btn btn-g" onClick={() => openPrint("Fiche " + (s.label || ""), ficheBody(s.label || "Établissement", [acc ? acc.enseigne : "Indépendant", s.adresse].filter(Boolean).join(" · "), [s.type === "decision" ? "Siège" : "Établissement", s.typeSurface].filter(Boolean), [{ l: "CA HT en attente", v: eur(caAttente) }, { l: "CA HT signé", v: eur(caSigne) }, { l: "Contacts", v: num(siteContacts.length) }, { l: "Documents", v: num(deals.length) }], siteContacts, deals, ints, acc))}><Printer size={15} /> PDF</button>{indep && acc && (acc.archived ? <button className="btn btn-g" onClick={unArchive} title="Réactiver : remettre dans les listes actives"><ArchiveRestore size={15} /> Désarchiver</button> : <button className="btn btn-g" onClick={() => setArchiveOpen(true)} title="Archiver : parcours commercial arrêté"><Archive size={15} /> Archiver</button>)}<button className="btn btn-g" onClick={() => setEdit({ ...s })}><Pencil size={15} /> Modifier</button>{indep && <button className="btn btn-p" onClick={promoteIndepToGroup} title="Faire de cet établissement une chaîne / un groupe, pour y rattacher d'autres établissements"><GitBranch size={15} /> Transformer en groupe</button>}<button className="btn btn-g" style={{ color: "var(--red)" }} onClick={delThis}><Trash2 size={15} /> Supprimer</button></div>
       </div>
       <div style={{ display: "flex", gap: 26, marginTop: 16, flexWrap: "wrap", borderTop: "1px solid var(--line)", paddingTop: 14 }}><Stat label="Contacts" value={num(siteContacts.length)} />{caAttente > 0 && <Stat label="CA HT en attente" value={eur(caAttente)} />}<Stat label="CA HT signé" value={eur(caSigne)} /><Stat label="Échanges" value={num(ints.length)} /><Stat label="Documents" value={num(deals.length)} /></div>
       {aiMsg && <div style={{ marginTop: 10, fontSize: 12, color: "var(--muted)" }}>{aiMsg}</div>}
