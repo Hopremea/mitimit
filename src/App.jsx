@@ -3617,7 +3617,7 @@ function PreviewCard({ x, y, data }) {
 }
 function AccountInteractionForm({ contactId, accountId, contacts, onCancel, onSave, interaction, onUsage, onPlanEvents }) {
   const initCt = (contacts || []).find((c) => c.id === (interaction ? interaction.contactId : contactId));
-  const [f, setF] = useState(interaction ? { ...interaction } : { id: "i_" + Date.now(), accountId, contactId: contactId || "", siteId: (initCt && initCt.siteId) || "", type: "appel", direction: "sortant", date: new Date().toISOString().slice(0, 10), heure: "", sujet: "", resume: "" });
+  const [f, setF] = useState(interaction ? { ...interaction } : { id: "i_" + Date.now(), accountId, contactId: contactId || "", siteId: (initCt && initCt.siteId) || "", type: "appel", direction: "sortant", date: new Date().toISOString().slice(0, 10), heure: new Date().toTimeString().slice(0, 5), sujet: "", resume: "" });
   const up = (k, v) => setF((p) => ({ ...p, [k]: v }));
   // Choisir un contact rattache l'échange à son établissement (site) : il apparaîtra sur la fiche
   // de l'établissement, et sur celle du groupe si l'établissement en fait partie.
@@ -3830,7 +3830,7 @@ function Fiche({ c, account, data, myEmail, settings, deals, interactions, onBac
   </div>);
 }
 function InteractionForm({ accountId, contactId, siteId, onSave, interaction, onUsage, onPlanEvents }) {
-  const [f, setF] = useState(interaction ? { siteId: siteId || "", ...interaction } : { id: "i_" + Date.now(), accountId, contactId, siteId: siteId || "", type: "email", direction: "sortant", date: TODAY(), heure: "", sujet: "", resume: "" });
+  const [f, setF] = useState(interaction ? { siteId: siteId || "", ...interaction } : { id: "i_" + Date.now(), accountId, contactId, siteId: siteId || "", type: "email", direction: "sortant", date: TODAY(), heure: new Date().toTimeString().slice(0, 5), sujet: "", resume: "" });
   const up = (k, v) => setF((p) => ({ ...p, [k]: v })); const showDir = f.type === "email" || f.type === "appel";
   return (<>
     <div className="row2"><div className="fld"><label>Type</label><select value={f.type} onChange={(e) => up("type", e.target.value)}>{Object.entries(INT_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div>{showDir && <div className="fld"><label>Sens</label><select value={f.direction} onChange={(e) => up("direction", e.target.value)}><option value="sortant">Sortant</option><option value="entrant">Entrant</option><option value="sortant_rejete">Sortant (rejeté)</option></select></div>}</div>
