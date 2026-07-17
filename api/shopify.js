@@ -49,8 +49,11 @@ export default async function handler(req, res) {
 
   // Identifiants : ceux fournis par l'application (onglet Integrations) priment ; a defaut,
   // repli sur les variables d'environnement Vercel. Le jeton n'est jamais journalise.
-  const rawDomain = (body.domain && String(body.domain).trim()) || process.env.SHOPIFY_STORE_DOMAIN;
-  const adminToken = (body.token && String(body.token).trim()) || process.env.SHOPIFY_ADMIN_TOKEN;
+  // Sécurité : les variables d'environnement serveur PRIMENT sur d'éventuels identifiants envoyés par
+  // le client. Une fois SHOPIFY_STORE_DOMAIN + SHOPIFY_ADMIN_TOKEN définis sur Vercel, le jeton n'a plus
+  // besoin de transiter par le navigateur ni d'être stocké dans l'application.
+  const rawDomain = (process.env.SHOPIFY_STORE_DOMAIN && String(process.env.SHOPIFY_STORE_DOMAIN).trim()) || (body.domain && String(body.domain).trim());
+  const adminToken = (process.env.SHOPIFY_ADMIN_TOKEN && String(process.env.SHOPIFY_ADMIN_TOKEN).trim()) || (body.token && String(body.token).trim());
   if (!rawDomain || !adminToken) {
     res.status(503).json({
       error:
