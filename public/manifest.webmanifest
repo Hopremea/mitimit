@@ -1,0 +1,18 @@
+{
+  "name": "MITMIT · Cockpit PEN'UP 3D",
+  "short_name": "MITMIT",
+  "description": "Poste de pilotage commercial et logistique B2B de PEN'UP 3D.",
+  "lang": "fr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#fff8ea",
+  "theme_color": "#3F60AA",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
