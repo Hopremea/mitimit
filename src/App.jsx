@@ -4388,6 +4388,20 @@ function Reassort({ data, persist }) {
   const [q, setQ] = useState(""); const [filtAcc, setFiltAcc] = useState("tous"); const [filtUrg, setFiltUrg] = useState("tous"); const [grp, setGrp] = useState("urgence"); const [dir, setDir] = useState("asc");
   const all = pdvForecast(data).sort((a, b) => (a.daysLeft ?? 1e9) - (b.daysLeft ?? 1e9));
   const setRot = (k, v) => persist((p) => ({ ...p, rotations: { ...p.rotations, [k]: v } }));
+  // Relance de réassort prédictive : regroupe les établissements ayant ≥ 1 référence proche de rupture
+  // et permet de programmer en 1 clic un événement « Relance » listant les produits concernés.
+  const [relanced, setRelanced] = useState({});
+  const riskAccounts = (() => {
+    const byAcc = {}; all.filter((r) => r.daysLeft != null && r.daysLeft <= 21).forEach((r) => { (byAcc[r.accountId] = byAcc[r.accountId] || []).push(r); });
+    return Object.entries(byAcc).map(([id, lines]) => ({ id, lines, min: Math.min(...lines.map((l) => l.daysLeft)) })).sort((a, b) => a.min - b.min);
+  })();
+  const programmer = (ra) => {
+    const d = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
+    const prods = ra.lines.slice().sort((a, b) => a.daysLeft - b.daysLeft).map((l) => `${l.designation} (${l.daysLeft <= 0 ? "rupture" : l.daysLeft + " j"})`).join(", ");
+    const ev = { id: "ev_" + Date.now() + "_" + ra.id, date: d, heure: "", titre: "Relance réassort — " + accName(ra.id), notes: "Références proches de rupture : " + prods, type: "relance", color: EVENT_TYPES.relance.color, accountId: ra.id };
+    persist((p) => ({ ...p, events: [...(p.events || []), ev] }));
+    setRelanced((s) => ({ ...s, [ra.id]: true }));
+  };
   const nq = normStr(q);
   const urgenceOf = (r) => r.daysLeft == null ? "x" : r.daysLeft <= 7 ? "rupture" : r.daysLeft <= 21 ? "alerte" : "ok";
   const rows = all.filter((r) => {
@@ -4399,6 +4413,10 @@ function Reassort({ data, persist }) {
   const hasFilter = q || filtAcc !== "tous" || filtUrg !== "tous";
   return (<div className="fade">
     <div className="card" style={{ marginBottom: 14, borderLeft: "4px solid var(--amber)" }}><div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}><AlertTriangle size={18} style={{ color: "var(--amber)", flexShrink: 0, marginTop: 2 }} /><div style={{ fontSize: 13, lineHeight: 1.55 }}><strong>Estimation, pas une mesure.</strong> Le stock chez vos clients est déduit des commandes passées moins une rotation mensuelle estimée. Tant que vous n'avez pas les sorties de caisse réelles (sell-out) des établissements, ajustez la rotation à la main par ligne pour coller à la réalité.</div></div></div>
+    {riskAccounts.length > 0 && <div className="card" style={{ marginBottom: 14, borderLeft: "4px solid var(--red)" }}><div className="sec-h"><h3 className="pu-display">Relances de réassort à programmer</h3><span>{riskAccounts.length} établissement(s) à risque</span></div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{riskAccounts.slice(0, 8).map((ra) => (<div key={ra.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "8px 0", borderBottom: "1px solid #f0f3f9", flexWrap: "wrap" }}><div style={{ flex: 1, minWidth: 180 }}><div style={{ fontWeight: 700, fontSize: 13.5 }}>{accName(ra.id)}</div><div style={{ fontSize: 11.5, color: "var(--muted)" }}>{ra.lines.length} référence(s) · plus urgent : {ra.min <= 0 ? "rupture probable" : ra.min + " j"}</div></div>{relanced[ra.id] ? <span style={{ fontSize: 12, color: "var(--green)", fontWeight: 700 }}>Relance programmée ✓</span> : <button className="btn btn-p btn-s" onClick={() => programmer(ra)}><Calendar size={14} /> Programmer une relance</button>}</div>))}</div>
+      <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>Crée un événement « Relance » à J+2 avec la liste des références proches de rupture (visible dans l'agenda et le calendrier).</div>
+    </div>}
     <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
       <div style={{ position: "relative", flex: 1, minWidth: 200 }}><Search size={15} style={{ position: "absolute", left: 11, top: 11, color: "var(--muted)" }} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher par groupe, établissement ou produit…" style={{ width: "100%", padding: "9px 11px 9px 32px", border: "1px solid var(--line)", borderRadius: 11, fontFamily: "inherit", fontSize: 13.5 }} /></div>
       <GroupBar value={grp} onChange={setGrp} dir={dir} onToggleDir={() => setDir((d) => d === "asc" ? "desc" : "asc")} options={[{ id: "urgence", label: "urgence" }, { id: "enseigne", label: "groupe / établissement" }, { id: "produit", label: "produit" }]} />
@@ -6764,7 +6782,7 @@ function InteractionView({ interaction: it, data, go, onClose, onEdit }) {
       {site && <button className="lnk" style={lnkStyle} onClick={() => nav(() => go("accounts", null, site.id))}><Store size={14} /> {site.label || site.adresse || "Établissement"}</button>}
       {!site && account && <button className="lnk" style={lnkStyle} onClick={() => nav(() => go("accounts", account.id))}><Building2 size={14} /> {account.enseigne}</button>}
     </div>}
-    {onEdit && <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, borderTop: "1px solid var(--line)", paddingTop: 12 }}><button className="btn btn-p" onClick={onEdit}><Pencil size={14} /> Modifier</button></div>}
+    {(onEdit || (it.email && it.direction === "entrant")) && <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, borderTop: "1px solid var(--line)", paddingTop: 12 }}>{it.email && it.direction === "entrant" && <a className="btn btn-g" href={"mailto:" + it.email + "?subject=" + encodeURIComponent("Re: " + (it.sujet || ""))} style={{ textDecoration: "none" }} title="Répondre à ce courriel (objet pré-rempli)"><Mail size={14} /> Répondre</a>}{onEdit && <button className="btn btn-p" onClick={onEdit}><Pencil size={14} /> Modifier</button>}</div>}
   </div>);
 }
 // Liste d'échanges présentée comme un fil de discussion (entrant à gauche, sortant à droite), avec Voir / Modifier / Supprimer.
