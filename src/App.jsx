@@ -6187,6 +6187,7 @@ function TimeSelect({ value, onChange }) {
 // mensuelle est de 151,67 h. Les indemnités kilométriques sont versées en prime (soumise au même calcul).
 // Vérif : avril net 1513,85 / mai 1550,95 / juin 1678,88 — le modèle recolle à moins d'1 € près.
 const SAL_BASE_HOURS = 151.67;      // heures mensuelles contractuelles (35 h/semaine)
+const PRIME_KM_RATE = 0.5;          // la prime versée = 50 % des frais kilométriques réels
 const SAL_COTIS_EXCESS = 0.125;     // taux moyen de cotisations salariales sur la part > 79 % du SMIC
 const SAL_MUTUELLE = 22.63;         // mutuelle santé salariale (fixe)
 const SAL_PART = 78;                // rémunération apprenti = 78 % du SMIC (base)
@@ -6233,10 +6234,12 @@ function SalaireRH({ data, persist }) {
     Object.values(byWeek).forEach((min) => { m25 += Math.min(min, SAL_SEUIL_50_MIN); m50 += Math.max(0, min - SAL_SEUIL_50_MIN); });
     return { h25: Math.round((m25 / 60) * 100) / 100, h50: Math.round((m50 / 60) * 100) / 100 };
   }, [data.pointages, monthPrefix]);
-  // Indemnités kilométriques du mois (= total frais domicile-travail) versées en prime.
+  // Frais kilométriques du mois (coût réel domicile-travail). La PRIME versée en paie correspond à
+  // 50 % de ces frais (PRIME_KM_RATE).
   const coutJour = (Number(s.fraisEssence != null ? s.fraisEssence : 8) + Number(s.fraisPeage != null ? s.fraisPeage : 3.2)) * (s.fraisAR !== false ? 2 : 1);
   const presDays = useMemo(() => Object.entries(data.pointages || {}).filter(([ds, r]) => ds.startsWith(monthPrefix) && r && (!r.motif || r.motif === "presence") && r.arrivee && r.depart).length, [data.pointages, monthPrefix]);
-  const autoKm = Math.round(coutJour * presDays * 100) / 100;
+  const fraisKmMois = Math.round(coutJour * presDays * 100) / 100;
+  const autoKm = Math.round(fraisKmMois * PRIME_KM_RATE * 100) / 100;
   const [h25, setH25] = useState(autoOT.h25);
   const [h50, setH50] = useState(autoOT.h50);
   const [prime, setPrime] = useState(autoKm);
@@ -6267,7 +6270,7 @@ function SalaireRH({ data, persist }) {
           <div className="fld"><label>H. sup. à +50 % (h)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.25" min="0" value={h50} onChange={(e) => { setOtTouched(true); setH50(e.target.value); }} /></div></div>
         </div>
         <div style={{ marginBottom: 8, fontSize: 11.5, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><span style={{ color: otTouched ? "var(--muted)" : "var(--green)", fontWeight: 700 }}>{otTouched ? "Valeurs saisies manuellement" : "↻ Réparti automatiquement depuis le pointage (" + autoOT.h25 + " h + " + autoOT.h50 + " h)"}</span>{otTouched && <button className="btn btn-g btn-s" onClick={() => setOtTouched(false)} title="Reprendre la répartition automatique du pointage">↻ Auto</button>}</div>
-        <div className="fld"><label style={{ textTransform: "capitalize" }}>Prime — indemnités kilométriques · {monthName} (€)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.01" min="0" value={prime} onChange={(e) => { setKmTouched(true); setPrime(e.target.value); }} />{kmTouched && <button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setKmTouched(false)} title="Reprendre le total des frais kilométriques du mois">↻ {eur2(autoKm)}</button>}</div></div>
+        <div className="fld"><label style={{ textTransform: "capitalize" }}>Prime — indemnités kilométriques · {monthName} (€)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.01" min="0" value={prime} onChange={(e) => { setKmTouched(true); setPrime(e.target.value); }} />{kmTouched && <button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setKmTouched(false)} title="Reprendre la prime (50 % des frais kilométriques du mois)">↻ {eur2(autoKm)}</button>}</div><span style={{ fontSize: 11, color: "var(--muted)" }}>Prime = 50 % des frais kilométriques du mois ({eur2(fraisKmMois)} de frais → {eur2(fraisKmMois * PRIME_KM_RATE)} de prime).</span></div>
         <div style={{ marginTop: 10 }}><button className="btn btn-g btn-s" onClick={memoriser}><Save size={13} /> Mémoriser mon taux horaire</button></div>
         <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 10, lineHeight: 1.5 }}>Statut apprenti : rémunération à {part} % du SMIC, exonération de cotisations salariales jusqu'à 79 % du SMIC, mutuelle {eur2(mutuelle)}. Les heures sup. sont reprises du pointage et réparties par semaine (8 h à +25 %, au-delà à +50 %). Estimation calibrée sur vos bulletins (~1 € près).</div>
       </div>
@@ -6323,9 +6326,13 @@ function FraisKm({ data, persist }) {
     <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--green)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
       <div>
         <div style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3 }}>Frais domicile-travail · <span style={{ textTransform: "capitalize" }}>{monthName}</span></div>
-        <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3, lineHeight: 1.5 }}>{presDays} journée(s) de présence pointée(s) × {eur2(coutJour)}{ar ? " (aller-retour)" : ""} — chaque jour travaillé sur place compte 1 aller-retour.</div>
+        <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3, lineHeight: 1.5 }}>{presDays} journée(s) de présence pointée(s) × {eur2(coutJour)}{ar ? " (aller-retour)" : ""} — frais réels. La <strong>prime versée en paie = 50 %</strong> des frais.</div>
       </div>
-      <div className="pu-display tnum" style={{ fontSize: 30, color: "var(--green)", fontWeight: 900 }}>{eur2(coutJour * presDays)}</div>
+      <div style={{ textAlign: "right" }}>
+        <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3 }}>Frais</div>
+        <div className="pu-display tnum" style={{ fontSize: 28, color: "var(--green)", fontWeight: 900, lineHeight: 1 }}>{eur2(coutJour * presDays)}</div>
+        <div style={{ fontSize: 12.5, color: "var(--blue)", fontWeight: 800, marginTop: 3 }}>Prime (50 %) : {eur2(coutJour * presDays * PRIME_KM_RATE)}</div>
+      </div>
     </div>
     <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
       <button className={cx("chip", mode === "domicile" && "on")} onClick={() => setMode("domicile")} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Home size={14} /> Domicile ↔ Travail</button>
@@ -6348,8 +6355,9 @@ function FraisKm({ data, persist }) {
             <div className="calc-out" style={{ background: "#eef2fb" }}><span className="l">Coût du trajet quotidien{ar ? " (aller-retour)" : ""}</span><span className="b pu-display tnum">{eur2(coutJour)}</span></div>
           </div>
           <div className="card" style={{ borderTop: "3px solid var(--green)" }}><div className="sec-h"><h3 className="pu-display" style={{ textTransform: "capitalize" }}>Total · {monthName}</h3></div>
-            <div className="calc-out" style={{ background: "#e7f7ef" }}><span className="l">{Number(jours) || 0} jour(s) × {eur2(coutJour)}</span><span className="b pu-display tnum" style={{ color: "var(--green)" }}>{eur2(totalMois)}</span></div>
-            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8, lineHeight: 1.5 }}>Estimation des frais de trajet domicile-travail sur le mois, basée sur vos jours de présence pointés.</div>
+            <div className="calc-out" style={{ background: "#e7f7ef" }}><span className="l">Frais réels · {Number(jours) || 0} jour(s) × {eur2(coutJour)}</span><span className="b pu-display tnum" style={{ color: "var(--green)" }}>{eur2(totalMois)}</span></div>
+            <div className="calc-out" style={{ background: "#eef2fb", marginTop: 8 }}><span className="l">Prime versée (50 % des frais)</span><span className="b pu-display tnum" style={{ color: "var(--blue)" }}>{eur2(totalMois * PRIME_KM_RATE)}</span></div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8, lineHeight: 1.5 }}>Frais de trajet domicile-travail sur le mois (jours de présence pointés). La prime effectivement versée en paie correspond à 50 % de ces frais.</div>
           </div>
         </div>
       </div>
@@ -6366,7 +6374,8 @@ function FraisKm({ data, persist }) {
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}><span>Péage</span><span className="tnum">{eur2(Number(pPea) || 0)}</span></div>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}><span>Autres frais</span><span className="tnum">{eur2(Number(pAutre) || 0)}</span></div>
           </div>
-          <div className="calc-out" style={{ background: "#eef2fb" }}><span className="l">Total{pDest ? " · " + pDest : ""}{pKm ? " · " + pKm + " km" : ""}</span><span className="b pu-display tnum">{eur2(pTotal)}</span></div>
+          <div className="calc-out" style={{ background: "#e7f7ef" }}><span className="l">Frais réels{pDest ? " · " + pDest : ""}{pKm ? " · " + pKm + " km" : ""}</span><span className="b pu-display tnum" style={{ color: "var(--green)" }}>{eur2(pTotal)}</span></div>
+          <div className="calc-out" style={{ background: "#eef2fb", marginTop: 8 }}><span className="l">Prime versée (50 % des frais)</span><span className="b pu-display tnum" style={{ color: "var(--blue)" }}>{eur2(pTotal * PRIME_KM_RATE)}</span></div>
         </div>
       </div>
     )}
