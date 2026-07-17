@@ -4316,6 +4316,11 @@ document.getElementById("closeBtn").addEventListener("click", function(){ overla
 overlay.addEventListener("click", function(e){ if(e.target===overlay) overlay.classList.remove("on"); });
 </script></body></html>`;
 }
+// Identifiants Shopify : stockés LOCALEMENT (par appareil), jamais dans le blob synchronisé sur
+// Supabase — le jeton Admin est un secret. Le serveur (variables Vercel) reste prioritaire.
+const SHOPIFY_LOCAL_KEY = "penup_shopify_creds";
+const shopifyLocalGet = () => { try { return JSON.parse(localStorage.getItem(SHOPIFY_LOCAL_KEY) || "{}"); } catch (e) { return {}; } };
+const shopifyLocalSet = (d) => { try { localStorage.setItem(SHOPIFY_LOCAL_KEY, JSON.stringify(d || {})); } catch (e) {} };
 function Stock({ data, persist }) {
   const { products } = data; const [q, setQ] = useState(""); const [fam, setFam] = useState("Tous");
   const [filtStatut, setFiltStatut] = useState("tous"); const [grp, setGrp] = useState("catalogue"); const [dir, setDir] = useState("asc");
@@ -4323,7 +4328,8 @@ function Stock({ data, persist }) {
   const syncShopify = async () => {
     setShopBusy(true); setShopMsg(null);
     try {
-      const dt = await shopifyApi("sync", { domain: data.settings.shopifyDomain, token: data.settings.shopifyToken });
+      const c = shopifyLocalGet();
+      const dt = await shopifyApi("sync", { domain: c.domain || "", token: c.token || "" });
       const { patch, matched } = shopifyStockPatch(products, dt.variants);
       const total = dt.count != null ? dt.count : (dt.variants ? dt.variants.length : 0);
       if (matched === 0) { setShopMsg("Shopify : aucun SKU ne correspond au catalogue (" + total + " variante(s))."); }
@@ -5728,10 +5734,20 @@ function Connexions({ data, persist, autoBackup }) {
   const [shopMsg, setShopMsg] = useState(null);
   const [shopBusy, setShopBusy] = useState(false);
   const shopSync = data._shopifySync || null;
-  const [shopDomain, setShopDomain] = useState(settings.shopifyDomain || "");
-  const [shopToken, setShopToken] = useState(settings.shopifyToken || "");
+  // Identifiants Shopify : lus depuis le stockage LOCAL (par appareil). Migration : si d'anciennes
+  // valeurs traînent dans data.settings (blob synchronisé), on les rapatrie en local et on les purge.
+  const _shopInit = (() => { const c = shopifyLocalGet(); return { domain: c.domain || settings.shopifyDomain || "", token: c.token || settings.shopifyToken || "" }; })();
+  const [shopDomain, setShopDomain] = useState(_shopInit.domain);
+  const [shopToken, setShopToken] = useState(_shopInit.token);
   const [showTok, setShowTok] = useState(false);
-  const saveShopify = () => { persist((p) => ({ ...p, settings: { ...p.settings, shopifyDomain: shopDomain.trim(), shopifyToken: shopToken.trim() } })); setShopMsg("Identifiants Shopify enregistrés."); setTimeout(() => setShopMsg(null), 2200); };
+  useEffect(() => {
+    if (settings.shopifyToken || settings.shopifyDomain) {
+      const c = shopifyLocalGet();
+      shopifyLocalSet({ domain: c.domain || settings.shopifyDomain || "", token: c.token || settings.shopifyToken || "" });
+      persist((p) => { const s = { ...p.settings }; delete s.shopifyToken; delete s.shopifyDomain; return { ...p, settings: s }; });
+    }
+  }, []);
+  const saveShopify = () => { shopifyLocalSet({ domain: shopDomain.trim(), token: shopToken.trim() }); persist((p) => { const s = { ...p.settings }; delete s.shopifyToken; delete s.shopifyDomain; return { ...p, settings: s }; }); setShopMsg("Identifiants Shopify enregistrés sur cet appareil (hors base partagée)."); setTimeout(() => setShopMsg(null), 2600); };
   const runShopify = async (action) => {
     setShopBusy(true); setShopMsg(null);
     try {
@@ -5798,7 +5814,7 @@ function Connexions({ data, persist, autoBackup }) {
             {(() => {
               const vget = (k) => (diag.vars || []).find((v) => v.key === k);
               const vset = (k) => { const v = vget(k); return !!(v && v.set); };
-              const shopInApp = !!(settings.shopifyDomain && settings.shopifyToken);
+              const _shc = shopifyLocalGet(); const shopInApp = !!(_shc.domain && _shc.token);
               const items = [
                 { n: "IA (Claude)", ok: vset("ANTHROPIC_API_KEY"), d: vset("ANTHROPIC_API_KEY") ? "relais serveur actif" : "clé manquante" },
                 { n: "Authentification (Clerk)", ok: !!(diag.clerk && diag.clerk.authenticated), d: diag.clerk && diag.clerk.authenticated ? "session active" : "non authentifié" },
