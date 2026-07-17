@@ -2026,7 +2026,7 @@ async function resolveLogoUrl(domain) {
 }
 // Recherche web (via Claude) du domaine du site officiel d'une enseigne, pour en déduire le logo.
 async function webFindDomain(query, persistUsage) {
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 300, tools: [{ type: "web_search_20250305", name: "web_search" }], messages: [{ role: "user", content: "Donne le domaine du site web officiel de l'enseigne ou de l'entreprise : \"" + query + "\". Réponds UNIQUEMENT par un objet JSON sans texte ni Markdown : {\"domaine\":\"exemple.fr\"}. Si tu n'es pas sûr, mets une chaîne vide." }] }) });
+  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 300, tools: [{ type: "web_search_20250305", name: "web_search" }], messages: [{ role: "user", content: "Donne le domaine du site web officiel de l'enseigne ou de l'entreprise : \"" + query + "\". Réponds UNIQUEMENT par un objet JSON sans texte ni Markdown : {\"domaine\":\"exemple.fr\"}. Si tu n'es pas sûr, mets une chaîne vide." }] }) });
   if (!res.ok) throw new Error("API " + res.status);
   const dt = await res.json();
   if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
@@ -2045,7 +2045,7 @@ function smartLink(a) {
 }
 // Recherche web (via Claude) de la présence en ligne officielle : site web, Facebook, Instagram.
 async function aiFindLinks(query, persistUsage) {
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 600, tools: [{ type: "web_search_20250305", name: "web_search" }], messages: [{ role: "user", content: "Recherche la présence en ligne officielle de cet établissement ou enseigne : \"" + query + "\". Donne, uniquement si tu les trouves de façon fiable : l'URL du site web officiel, l'URL de la page Facebook officielle, l'URL du compte Instagram officiel. N'invente RIEN : laisse une chaîne vide si tu n'es pas certain. Réponds UNIQUEMENT par un objet JSON sans texte ni Markdown : {\"site\":\"\",\"facebook\":\"\",\"instagram\":\"\"}." }] }) });
+  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 600, tools: [{ type: "web_search_20250305", name: "web_search" }], messages: [{ role: "user", content: "Recherche la présence en ligne officielle de cet établissement ou enseigne : \"" + query + "\". Donne, uniquement si tu les trouves de façon fiable : l'URL du site web officiel, l'URL de la page Facebook officielle, l'URL du compte Instagram officiel. N'invente RIEN : laisse une chaîne vide si tu n'es pas certain. Réponds UNIQUEMENT par un objet JSON sans texte ni Markdown : {\"site\":\"\",\"facebook\":\"\",\"instagram\":\"\"}." }] }) });
   if (!res.ok) throw new Error("API " + res.status);
   const dt = await res.json();
   if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
@@ -2064,7 +2064,7 @@ async function aiFindHoraires(query, persistUsage) {
     "Le champ horaires liste les 7 jours, un par jour, séparés par des points-virgules, au format français : " +
     "\"Lun 10h-19h; Mar 10h-19h; Mer 10h-19h; Jeu 10h-19h; Ven 10h-19h; Sam 10h-19h; Dim fermé\". " +
     "Pour une coupure méridienne, donne les deux plages : \"Lun 9h30-12h30 et 14h-19h\". Jour de fermeture : \"Dim fermé\".";
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 600, tools: [{ type: "web_search_20250305", name: "web_search" }], messages: [{ role: "user", content: prompt }] }) });
+  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 600, tools: [{ type: "web_search_20250305", name: "web_search" }], messages: [{ role: "user", content: prompt }] }) });
   if (!res.ok) throw new Error("API " + res.status);
   const dt = await res.json();
   if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
@@ -3155,7 +3155,7 @@ function AccountDetail({ account, data, persist, go, onBack, onEdit, onAddContac
 }
 // Reformulation IA d'une note libre en compte rendu clair et professionnel (sans inventer de faits).
 async function aiRephrase(text, persistUsage) {
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 500, system: "Tu reformules des notes de compte rendu commercial B2B en français : style clair, professionnel et concis. Tu conserves TOUS les faits, dates, chiffres, noms et décisions sans rien inventer ni ajouter. Tu renvoies UNIQUEMENT le texte reformulé, sans préambule, sans guillemets, sans Markdown.", messages: [{ role: "user", content: text }] }) });
+  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 500, system: "Tu reformules des notes de compte rendu commercial B2B en français : style clair, professionnel et concis. Tu conserves TOUS les faits, dates, chiffres, noms et décisions sans rien inventer ni ajouter. Tu renvoies UNIQUEMENT le texte reformulé, sans préambule, sans guillemets, sans Markdown.", messages: [{ role: "user", content: text }] }) });
   if (!res.ok) throw new Error(await claudeErrorText(res));
   const dt = await res.json();
   if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
@@ -3163,7 +3163,7 @@ async function aiRephrase(text, persistUsage) {
 }
 // Génération de texte par l'IA (e-mail, message LinkedIn, suggestion d'action…).
 async function aiGenerate(system, user, persistUsage, maxTokens = 800) {
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] }) });
+  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] }) });
   if (!res.ok) throw new Error(await claudeErrorText(res));
   const dt = await res.json();
   if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
@@ -3172,7 +3172,7 @@ async function aiGenerate(system, user, persistUsage, maxTokens = 800) {
 // Chat IA multi-tours : conserve l'historique de la conversation (messages user/assistant) avec un
 // prompt système porteur du contexte. Réutilise le relais /api/claude (jeton Clerk, clé jamais exposée).
 async function aiChat(system, messages, persistUsage, maxTokens = 700) {
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: maxTokens, system, messages }) });
+  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: maxTokens, system, messages }) });
   if (!res.ok) throw new Error(await claudeErrorText(res));
   const dt = await res.json();
   if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
@@ -3756,7 +3756,7 @@ function Fiche({ c, account, data, myEmail, settings, deals, interactions, onBac
     if (!fullName(c) || fullName(c) === "Contact") { setEnrMsg("Renseignez d'abord le prénom et le nom."); return; }
     setEnr(true); setEnrMsg(null);
     try {
-      const text = await callClaude({ model: "claude-sonnet-4-6", max_tokens: 700, tools: [{ type: "web_search_20250305", name: "web_search" }], messages: [{ role: "user", content: "Recherche sur le web l'URL publique du profil LinkedIn de " + (c.prenom + " " + c.nom).trim() + (ens ? (", qui travaille chez " + ens + (c.fonction ? (" comme " + c.fonction) : "")) : "") + ", ainsi que sa ville si trouvable. Renvoie UNIQUEMENT un objet JSON sans texte ni Markdown: {\"linkedin\":\"url ou vide\",\"ville\":\"ville ou vide\",\"confiance\":\"haute/moyenne/faible\"}. Ne devine pas: si tu n'es pas sur, laisse vide." }] });
+      const text = await callClaude({ model: "claude-haiku-4-5", max_tokens: 700, tools: [{ type: "web_search_20250305", name: "web_search" }], messages: [{ role: "user", content: "Recherche sur le web l'URL publique du profil LinkedIn de " + (c.prenom + " " + c.nom).trim() + (ens ? (", qui travaille chez " + ens + (c.fonction ? (" comme " + c.fonction) : "")) : "") + ", ainsi que sa ville si trouvable. Renvoie UNIQUEMENT un objet JSON sans texte ni Markdown: {\"linkedin\":\"url ou vide\",\"ville\":\"ville ou vide\",\"confiance\":\"haute/moyenne/faible\"}. Ne devine pas: si tu n'es pas sur, laisse vide." }] });
       const m = text.match(/\{[\s\S]*\}/); const o = m ? JSON.parse(m[0]) : {};
       const patch = {}; if (o.linkedin && !c.linkedin) patch.linkedin = o.linkedin; if (o.ville && !c.ville) patch.ville = o.ville;
       if (Object.keys(patch).length) { onSaveContact({ ...c, ...patch }); setEnrMsg("Proposition (confiance " + (o.confiance || "?") + ") ajoutée. À vérifier avant de vous y fier."); }
@@ -3858,7 +3858,7 @@ async function aiQualifyCommande(text, products) {
   const cat = (products || []).map((p) => p.code + " | " + p.designation).join("\n");
   const sys = "Tu extrais une commande de produits à partir d'un message en langage naturel (mail, note, liste). Tu ne mappes QUE sur les produits du catalogue fourni et tu renvoies leur code EXACT. Tu peux déduire une quantité quand le client est vague (ex. 'une dizaine' = 10) et proposer le produit le plus proche quand il est nommé approximativement, MAIS tu signales toujours ton incertitude via le champ confiance, et tu n'inventes JAMAIS un code absent du catalogue.";
   const user = "Catalogue (CODE | désignation), seules valeurs autorisées pour \"code\" :\n" + cat + "\n\nMessage client :\n\"\"\"\n" + text + "\n\"\"\"\n\nExtrais les lignes de commande. Renvoie UNIQUEMENT un objet JSON valide, sans texte ni balise autour :\n{\"lignes\":[{\"code\":\"<CODE exact du catalogue>\",\"qte\":<entier>,\"confiance\":\"haute|moyenne|faible\",\"source\":\"<extrait du message qui justifie cette ligne>\"}],\"ignore\":[\"<fragments non rattachables à un produit>\"]}\nRègles de confiance : \"haute\" = produit identifié sans ambiguïté ET quantité explicite ; \"moyenne\" = quantité déduite (ex. 'une dizaine') OU produit proposé par approximation ; \"faible\" = forte incertitude. Tout passage non rattachable à un produit du catalogue va dans \"ignore\", jamais inventé.";
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1500, system: sys, messages: [{ role: "user", content: user }] }) });
+  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1500, system: sys, messages: [{ role: "user", content: user }] }) });
   if (!res.ok) throw new Error("API " + res.status);
   const data = await res.json();
   const { lines, ignore } = mapAiCommande(data, products);
@@ -3891,7 +3891,7 @@ async function aiQualifyCommandePdf(base64, products) {
   const cat = (products || []).map((p) => p.code + " | " + p.designation).join("\n");
   const sys = "Tu lis un bon de commande, un devis ou une facture fourni au format PDF et tu en extrais la commande de produits. Tu ne mappes QUE sur les produits du catalogue fourni et tu renvoies leur code EXACT. Tu peux déduire une quantité quand le document est ambigu et proposer le produit le plus proche quand il est nommé approximativement, MAIS tu signales toujours ton incertitude via le champ confiance, et tu n'inventes JAMAIS un code absent du catalogue.";
   const user = "Catalogue (CODE | désignation), seules valeurs autorisées pour \"code\" :\n" + cat + "\n\nLis le PDF joint et extrais les lignes de commande ainsi que les coordonnées du client si elles figurent dans le document. Renvoie UNIQUEMENT un objet JSON valide, sans texte ni balise autour :\n{\"client\":\"<nom de l'établissement/client>\",\"contact\":\"<personne>\",\"email\":\"\",\"tel\":\"\",\"siret\":\"\",\"adresse\":\"<adresse de livraison>\",\"note\":\"<remarque utile>\",\"lignes\":[{\"code\":\"<CODE exact du catalogue>\",\"qte\":<entier>,\"confiance\":\"haute|moyenne|faible\",\"source\":\"<extrait du document qui justifie cette ligne>\"}],\"ignore\":[\"<fragments non rattachables à un produit>\"]}\nLaisse une chaîne vide pour les coordonnées absentes. Règles de confiance : \"haute\" = produit identifié sans ambiguïté ET quantité explicite ; \"moyenne\" = quantité déduite OU produit proposé par approximation ; \"faible\" = forte incertitude. Tout passage non rattachable à un produit du catalogue va dans \"ignore\", jamais inventé.";
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1500, system: sys, messages: [{ role: "user", content: [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } }, { type: "text", text: user }] }] }) });
+  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1500, system: sys, messages: [{ role: "user", content: [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } }, { type: "text", text: user }] }] }) });
   if (!res.ok) throw new Error("API " + res.status);
   const data = await res.json();
   const { lines, ignore, header } = mapAiCommande(data, products);
@@ -4754,7 +4754,7 @@ Renvoie UNIQUEMENT un tableau JSON valide (aucun texte ni balise autour). Chaque
 Si la requête est une zone, donne entre 6 et 10 établissements ; si c'est un établissement ou une enseigne précis, ne renvoie que la ou les fiches correspondantes (ne complète pas avec d'autres établissements). Toujours des adresses réelles : mieux vaut moins de fiches mais fiables.`;
   const res = await fetch(CLAUDE_URL, {
     method: "POST", headers: await claudeHeaders(),
-    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 3000, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search" }] }),
+    body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 3000, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search" }] }),
   });
   if (!res.ok) throw new Error("API " + res.status);
   const data = await res.json();
@@ -4778,7 +4778,7 @@ async function aiAutofill({ kind, enseigne, ville, adresse, typesEtab }) {
   user += `\n\nRenvoie UNIQUEMENT un objet JSON valide, sans aucun texte ni balise autour, avec EXACTEMENT ces clés :\n${schema}\n"source" = nom de la source officielle utilisée. Tout champ non trouvé reste une chaîne vide.`;
   const res = await fetch(CLAUDE_URL, {
     method: "POST", headers: await claudeHeaders(),
-    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1200, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search" }] }),
+    body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1200, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search" }] }),
   });
   if (!res.ok) throw new Error("API " + res.status);
   const data = await res.json();
@@ -4813,7 +4813,7 @@ Renvoie UNIQUEMENT un objet JSON valide (aucun texte ni balise autour) avec EXAC
 - adresse : complète ; telephone : du magasin, format français.
 - contact : dirigeant ou responsable identifié, coordonnées issues de la meilleure source publique ; "source" = d'où vient l'info.
 - notes : une phrase factuelle (univers produits, implantation) ; "source" = registre / source principale.`;
-  const body = { model: "claude-sonnet-4-6", max_tokens: 1500, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search" }] };
+  const body = { model: "claude-haiku-4-5", max_tokens: 1500, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search" }] };
   const onlyNum = (v) => (typeof v === "string" ? v.replace(/[^0-9A-Za-z]/g, "") : "");
   let lastErr;
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -6895,7 +6895,7 @@ function assistantContext(data) {
 async function assistantAI(text, history, data) {
   const ctx = assistantContext(data);
   const sys = "Tu es l'assistant interne du cockpit CRM de PEN'UP 3D (PME française, stylos d'impression 3D créatifs pour enfants, distribution B2B en établissements spécialisés). Tu aides à piloter l'activité commerciale : groupes et établissements, contacts, pipeline, devis et commandes, stock, agenda, marges, logistique, produits PEN'UP.\n\nPERIMETRE STRICT : tu ne traites QUE ces sujets metier. Toute demande hors perimetre (cuisine, culture generale, code informatique, bavardage, etc.) renvoie inScope=false, actions vide, et un reply poli rappelant que tu es limite au cockpit PEN'UP 3D.\n\nTu reponds TOUJOURS en JSON strict valide, sans aucun texte autour ni balise Markdown, selon ce schema :\n{\"inScope\":bool,\"reply\":\"texte en francais, concis\",\"actions\":[ ... ]}\n\nActions possibles (n'en propose que si l'utilisateur le demande) :\n- {\"type\":\"navigate\",\"label\":\"Ouvrir la fiche ...\",\"tab\":\"accounts|repertoire|deals|stock|agenda|pipeline|carte|performance|stats|prospection|presto|reassort|sav|calc|conn|dash\",\"id\":\"identifiant de la fiche\"} : ouvre une fiche. tab \"accounts\" + id=accountId ouvre la fiche du compte (qui contient ses contacts) ; tab \"repertoire\" + id=contactId ouvre la fiche contact ; tab \"deals\" + id=dealId ouvre le devis/commande ; tab \"stock\" ouvre le stock (sans id). Mets TOUJOURS un label clair en francais.\n- {\"type\":\"add_event\",\"date\":\"AAAA-MM-JJ\",\"heure\":\"HH:MM optionnel\",\"titre\":\"...\",\"eventType\":\"rdv|relance|salon|preparation|tache|echeance|livraison\",\"accountId\":\"id ou null\",\"notes\":\"optionnel\"}\n- {\"type\":\"update_product\",\"code\":\"code produit\",\"set\":{\"dispo\":int,\"resa\":int,\"encmd\":int,\"pvc\":number,\"seuil\":int,\"cout\":number,\"poidsG\":int,\"vendable\":bool}}\n- {\"type\":\"add_interaction\",\"accountId\":\"id\",\"contactId\":\"id ou null\",\"intType\":\"rdv|email|appel|note\",\"date\":\"AAAA-MM-JJ\",\"sujet\":\"...\",\"resume\":\"optionnel\"}\n- {\"type\":\"create_deal\",\"accountId\":\"id\",\"dealType\":\"Devis|Commande\",\"date\":\"AAAA-MM-JJ\",\"lines\":[{\"code\":\"code\",\"qte\":int,\"pu\":number}],\"note\":\"optionnel\"}\n\nREGLES :\n- Pour repondre a une question, mets la reponse dans reply. Si ta reponse cite un ou des enregistrements precis (un groupe ou établissement, un contact, un devis/commande, un produit), AJOUTE pour chacun une action navigate vers sa fiche, avec un label clair (ex: \"Ouvrir la fiche Cultura\", \"Voir le devis DV-2026-008\", \"Voir le stock du stylo\"). Pour un contact, renvoie vers la fiche client (tab \"accounts\", id=accountId). N'ajoute navigate que pour les enregistrements reellement cites, 3 au maximum.\n- Resous les noms en identifiants a partir des donnees (ex: \"Cultura\" -> accountId, \"pack complet\" -> code produit).\n- N'invente JAMAIS une valeur manquante (prix, quantite non precisee). Si une info indispensable manque, demande-la dans reply au lieu d'agir.\n- Pour create_deal, omets \"pu\" si l'utilisateur ne donne pas de prix : la ligne sera valorisee au prix de cession HT du produit (cessionHT). N'inscris JAMAIS de coefficient ni de marge dans une note de devis ou de commande : ces documents sont destines aux distributeurs et ne doivent contenir que des prix de cession HT.\n- Convertis les dates relatives (\"demain\", \"vendredi\") en AAAA-MM-JJ avec la date du jour fournie.\n- Une seule demande peut produire plusieurs actions.\n\nDONNEES ACTUELLES DU COCKPIT (JSON) :\n" + JSON.stringify(ctx);
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1500, system: sys, messages: [...history, { role: "user", content: text }] }) });
+  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1500, system: sys, messages: [...history, { role: "user", content: text }] }) });
   if (!res.ok) throw new Error("HTTP " + res.status);
   const j = await res.json();
   const raw = (j.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
