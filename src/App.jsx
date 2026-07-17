@@ -111,7 +111,7 @@ const STAGE_ORDER = ["prospect", "contact", "rdv", "referencement", "actif"];
 const DEAL_STATUS = { brouillon: { label: "Brouillon", color: "#9aa6bd" }, envoye: { label: "Envoyé", color: "#5b8def" }, accepte: { label: "Accepté / Signé", color: "#2bb673" }, expediee: { label: "En cours de livraison", color: "#F8B133" }, refuse: { label: "Refusé", color: "#FF5A45" }, livre: { label: "Livré", color: "#3F60AA" } };
 // Devis non validé (brouillon ou envoyé) → alimente le « CA HT en attente ». Document signé → « CA HT signé ».
 const isDevisEnAttente = (d) => d && d.type === "Devis" && (d.statut === "brouillon" || d.statut === "envoye");
-const isCaSigne = (d) => d && (d.statut === "accepte" || d.statut === "expediee" || d.statut === "livre");
+const isCaSigne = (d) => d && d.type !== "Avoir" && (d.statut === "accepte" || d.statut === "expediee" || d.statut === "livre");
 const sumMontant = (arr) => (arr || []).reduce((s, d) => s + (d.montant || 0), 0);
 const escapeHtml = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 // Décode les entités HTML (ex. &#39; → '), pour afficher proprement les courriels importés de Gmail
@@ -4068,7 +4068,7 @@ function DealForm({ deal, accounts, products, sites, onSave, onPreview }) {
   const zoneInit = useRef(false);
   useEffect(() => { if (!zoneInit.current) { zoneInit.current = true; if (f.zoneLivraison) return; } if (detectedZone) setF((p) => ({ ...p, zoneLivraison: detectedZone })); }, [detectedZone]);
   const zone = f.zoneLivraison || detectedZone || "metropole"; const zc = francoZone(zone);
-  const ht = dealMontant(f.lines); const port = fraisPortHT(ht, zone); const baseHt = ht + port; const tva = baseHt * (f.tva || 0) / 100; const ttc = baseHt + tva;
+  const ht = dealMontant(f.lines); const port = f.type === "Avoir" ? 0 : fraisPortHT(ht, zone); const baseHt = ht + port; const tva = baseHt * (f.tva || 0) / 100; const ttc = baseHt + tva;
   const clean = () => ({ ...f, zoneLivraison: zone, lines: f.lines.filter((l) => l.code) });
   // Upsell « atteindre le franco » : complète la commande avec le filament le plus vendu (lot de 12
   // Multicolore, sinon un lot de bobines) pour dépasser le seuil de franco de la zone — la marchandise
@@ -4082,7 +4082,7 @@ function DealForm({ deal, accounts, products, sites, onSave, onPreview }) {
     setF((p) => ({ ...p, lines: [...p.lines.filter((l) => l.code), L(pr.code, pr.designation, qte, pu)] }));
   };
   return (<>
-    <div className="row2"><div className="fld"><label>Groupe / établissement</label><EtabPicker accounts={accounts} sites={sites} accountId={f.accountId} siteId={f.siteId} onChange={(a, s) => setF((p) => ({ ...p, accountId: a, siteId: s }))} noneLabel="— Choisir —" /></div><div className="fld"><label>Type</label><select value={f.type} onChange={(e) => up("type", e.target.value)}><option value="Devis">Devis</option><option value="Commande">Bon de commande</option><option value="Facture">Facture</option></select></div></div>
+    <div className="row2"><div className="fld"><label>Groupe / établissement</label><EtabPicker accounts={accounts} sites={sites} accountId={f.accountId} siteId={f.siteId} onChange={(a, s) => setF((p) => ({ ...p, accountId: a, siteId: s }))} noneLabel="— Choisir —" /></div><div className="fld"><label>Type</label><select value={f.type} onChange={(e) => up("type", e.target.value)}><option value="Devis">Devis</option><option value="Commande">Bon de commande</option><option value="Facture">Facture</option><option value="Avoir">Avoir / Retour</option></select></div></div>
     <div className="row2"><div className="fld"><label>Référence</label><input value={f.ref} onChange={(e) => up("ref", e.target.value)} /></div><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div><div className="fld"><label>Statut</label><select value={f.statut} onChange={(e) => up("statut", e.target.value)}>{Object.entries(DEAL_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div></div>
     {f.type === "Facture" && <div className="fld"><label>Date de paiement (laisser vide si non réglée)</label><input type="date" value={f.datePaiement || ""} onChange={(e) => up("datePaiement", e.target.value)} /><span style={{ fontSize: 11, color: "var(--muted)" }}>Renseigner la date d'encaissement alimente l'indicateur de délai de paiement (DSO) dans l'onglet Performance.</span></div>}
     {f.type === "Commande" && <div className="fld"><label>Destination de livraison (point de vente)</label><select value={f.livraisonSiteId || ""} onChange={(e) => up("livraisonSiteId", e.target.value)}><option value="">— aucune (pas de tracé sur la carte) —</option>{destSites.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select><span style={{ fontSize: 11, color: "var(--muted)" }}>Si renseignée et le statut « En cours de livraison », un tracé entrepôt → établissement apparaît sur la carte.</span></div>}
@@ -4094,10 +4094,10 @@ function DealForm({ deal, accounts, products, sites, onSave, onPreview }) {
     </div>
     <div className="row2"><div className="fld"><label>TVA (%)</label><input type="number" value={f.tva} onChange={(e) => up("tva", +e.target.value)} /></div><div className="fld"><label>Note</label><input value={f.note} onChange={(e) => up("note", e.target.value)} /></div></div>
     <div style={{ display: "flex", justifyContent: "flex-end", gap: 26, padding: "4px 2px", borderTop: "1px solid var(--line)", paddingTop: 12 }}><Stat label="Total HT" value={eur2(ht)} /><Stat label={port > 0 ? "Participation port" : "Franco de port"} value={port > 0 ? eur2(port) : "offert"} /><Stat label={"TVA " + f.tva + "%"} value={eur2(tva)} /><Stat label="Total TTC" value={eur2(ttc)} /></div>
-    <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: -4, flexWrap: "wrap" }}>
+    {f.type !== "Avoir" && <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: -4, flexWrap: "wrap" }}>
       {port > 0 && <button className="btn btn-g btn-s" onClick={completerFranco} title="Ajouter des bobines Multicolore pour dépasser le seuil de franco"><Plus size={13} /> Compléter pour le franco</button>}
       <div style={{ fontSize: 11, color: port > 0 ? "var(--amber)" : "var(--green)", textAlign: "right" }}>{port > 0 ? `${zc.label} — sous ${zc.seuil} € HT : participation de ${zc.part} € HT aux frais de port. Encore ${eur2(zc.seuil - ht)} HT pour le franco.` : `Franco de port atteint (${zc.label} : commande ≥ ${zc.seuil} € HT).`}</div>
-    </div>
+    </div>}
     {f.type === "Commande" && <div className="fld"><label>Signature du client — bon pour accord (optionnel)</label><SignaturePad value={f.signature || ""} onChange={(v) => up("signature", v)} /><div className="row2" style={{ marginTop: 8 }}><div className="fld"><label>Nom du signataire</label><input value={f.signataire || ""} onChange={(e) => up("signataire", e.target.value)} placeholder="Nom et fonction" /></div><div className="fld"><label>Date de signature</label><input type="date" value={f.signatureDate || ""} onChange={(e) => up("signatureDate", e.target.value)} /></div></div></div>}
     <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}><button className="btn btn-g" onClick={() => onPreview(clean())}><Eye size={16} /> Aperçu</button><button className="btn btn-p" onClick={() => onSave(clean())}>Enregistrer</button></div>
   </>);
@@ -4108,13 +4108,13 @@ function DevisPreview({ deal, account, settings, products = [], data = {}, onClo
   useEffect(() => {
     document.body.classList.add("doc-print");
     const prevTitle = document.title;
-    const t = deal.type === "Facture" ? "Facture" : deal.type === "Commande" ? "Bon de commande" : "Devis";
+    const t = deal.type === "Facture" ? "Facture" : deal.type === "Commande" ? "Bon de commande" : deal.type === "Avoir" ? "Avoir" : "Devis";
     document.title = (t + " " + docRef(deal, account)).trim();
     return () => { document.body.classList.remove("doc-print"); document.title = prevTitle; };
   }, []);
   const zone = deal.zoneLivraison || detectFrancoZone(account && (account.adresseLivraison || account.adressePostale)) || "metropole"; const zc = francoZone(zone);
-  const ht = dealMontant(deal.lines); const port = fraisPortHT(ht, zone); const baseHt = ht + port; const tva = baseHt * (deal.tva || 0) / 100; const ttc = baseHt + tva;
-  const titre = deal.type === "Facture" ? "FACTURE" : deal.type === "Commande" ? "BON DE COMMANDE" : "DEVIS";
+  const ht = dealMontant(deal.lines); const port = deal.type === "Avoir" ? 0 : fraisPortHT(ht, zone); const baseHt = ht + port; const tva = baseHt * (deal.tva || 0) / 100; const ttc = baseHt + tva;
+  const titre = deal.type === "Facture" ? "FACTURE" : deal.type === "Commande" ? "BON DE COMMANDE" : deal.type === "Avoir" ? "AVOIR" : "DEVIS";
   // Coordonnées du magasin pour l'encart « Client » : établissement rattaché en priorité, sinon contact
   // principal du compte, sinon le compte. La note interne du devis n'est jamais imprimée.
   const findSite = (id) => id ? (data.sites || []).find((s) => s.id === id) : null;
