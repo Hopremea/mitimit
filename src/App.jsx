@@ -3916,6 +3916,20 @@ async function aiQualifyCommandePdf(base64, products) {
 function ImportCommande({ accounts, products, onCreate, onUsage }) {
   const [text, setText] = useState(""); const [accountId, setAccountId] = useState(accounts[0]?.id || ""); const [parsed, setParsed] = useState(null); const fileRef = useRef(null); const [fileName, setFileName] = useState(""); const [aiBusy, setAiBusy] = useState(false); const [aiErr, setAiErr] = useState("");
   const analyse = (src) => setParsed(parseCommande(src != null ? src : text, products));
+  // Dictée vocale (fr-FR) de la commande sur le terrain : le texte dicté alimente la zone de saisie,
+  // qu'on passe ensuite à l'IA de qualification pour obtenir les lignes mappées au catalogue.
+  const [listening, setListening] = useState(false); const recRef = useRef(null);
+  const dicter = () => {
+    const SR = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
+    if (!SR) { setAiErr("La dictée vocale n'est pas supportée par ce navigateur."); return; }
+    if (listening && recRef.current) { recRef.current.stop(); return; }
+    const rec = new SR(); rec.lang = "fr-FR"; rec.interimResults = false; rec.continuous = true;
+    recRef.current = rec; setListening(true);
+    rec.onresult = (e) => { let add = ""; for (let i = e.resultIndex; i < e.results.length; i++) add += e.results[i][0].transcript; add = add.trim(); if (add) { setText((t) => (t ? t + "\n" : "") + add); setParsed(null); } };
+    rec.onend = () => { setListening(false); recRef.current = null; };
+    rec.onerror = () => { setListening(false); recRef.current = null; };
+    rec.start();
+  };
   const onFile = (e) => {
     const f = e.target.files && e.target.files[0]; if (!f) return; setFileName(f.name);
     if (f.type === "application/pdf" || /\.pdf$/i.test(f.name)) {
@@ -3936,6 +3950,7 @@ function ImportCommande({ accounts, products, onCreate, onUsage }) {
     <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
       <input ref={fileRef} type="file" accept=".csv,.txt,.pdf,text/csv,text/plain,application/pdf" onChange={onFile} style={{ display: "none" }} />
       <button className="btn btn-g btn-s" type="button" onClick={() => fileRef.current && fileRef.current.click()}><Upload size={14} /> Déposer un fichier CSV / texte / PDF</button>
+      <button className="btn btn-g btn-s" type="button" onClick={dicter} style={{ color: listening ? "var(--red)" : undefined, borderColor: listening ? "var(--red)" : undefined }} title="Dicter la commande à voix haute (en magasin) puis lancer l'analyse IA"><Mic size={14} className={listening ? "spin" : ""} /> {listening ? "Arrêter la dictée" : "Dicter la commande"}</button>
       {fileName && <span style={{ fontSize: 12, color: "var(--muted)" }}>{fileName}</span>}
       {aiBusy && <span style={{ fontSize: 12, color: "var(--blue)", display: "inline-flex", alignItems: "center", gap: 6 }}><Sparkles size={13} className="spin" /> Lecture du document en cours…</span>}
     </div>
