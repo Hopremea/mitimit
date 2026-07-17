@@ -4037,6 +4037,21 @@ function Deals({ data, persist, go, focus }) {
     {preview && <DevisPreview deal={preview} account={accOf(preview.accountId)} settings={settings} products={products} data={data} onClose={() => setPreview(null)} />}
   </div>);
 }
+// Pad de signature tactile/souris (canvas) : le client signe au doigt, la signature est stockée en
+// dataURL et rendue sur le bon de commande imprimé/PDF, sans imprimer ni scanner.
+function SignaturePad({ value, onChange }) {
+  const ref = useRef(null); const drawing = useRef(false);
+  useEffect(() => { if (value && ref.current) { const img = new Image(); img.onload = () => { const c = ref.current; if (!c) return; const ctx = c.getContext("2d"); ctx.clearRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height); }; img.src = value; } }, []);
+  const pos = (e) => { const c = ref.current; const r = c.getBoundingClientRect(); const t = e.touches ? e.touches[0] : e; return { x: (t.clientX - r.left) * (c.width / r.width), y: (t.clientY - r.top) * (c.height / r.height) }; };
+  const start = (e) => { e.preventDefault(); drawing.current = true; const ctx = ref.current.getContext("2d"); const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); };
+  const move = (e) => { if (!drawing.current) return; e.preventDefault(); const ctx = ref.current.getContext("2d"); const p = pos(e); ctx.lineTo(p.x, p.y); ctx.strokeStyle = "#16203a"; ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.stroke(); };
+  const end = () => { if (!drawing.current) return; drawing.current = false; onChange(ref.current.toDataURL("image/png")); };
+  const clear = () => { const c = ref.current; c.getContext("2d").clearRect(0, 0, c.width, c.height); onChange(""); };
+  return (<div>
+    <canvas ref={ref} width={520} height={150} onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end} onTouchStart={start} onTouchMove={move} onTouchEnd={end} style={{ width: "100%", maxWidth: 520, height: 150, border: "1px dashed var(--line)", borderRadius: 10, background: "#fff", touchAction: "none", cursor: "crosshair", display: "block" }} />
+    <div style={{ marginTop: 6 }}><button type="button" className="btn btn-g btn-s" onClick={clear}><X size={13} /> Effacer</button></div>
+  </div>);
+}
 function DealForm({ deal, accounts, products, sites, onSave, onPreview }) {
   const [f, setF] = useState({ ...deal, lines: deal.lines.length ? deal.lines : [L("", "", 1, 0)] });
   const up = (k, v) => setF((p) => ({ ...p, [k]: v }));
@@ -4083,6 +4098,7 @@ function DealForm({ deal, accounts, products, sites, onSave, onPreview }) {
       {port > 0 && <button className="btn btn-g btn-s" onClick={completerFranco} title="Ajouter des bobines Multicolore pour dépasser le seuil de franco"><Plus size={13} /> Compléter pour le franco</button>}
       <div style={{ fontSize: 11, color: port > 0 ? "var(--amber)" : "var(--green)", textAlign: "right" }}>{port > 0 ? `${zc.label} — sous ${zc.seuil} € HT : participation de ${zc.part} € HT aux frais de port. Encore ${eur2(zc.seuil - ht)} HT pour le franco.` : `Franco de port atteint (${zc.label} : commande ≥ ${zc.seuil} € HT).`}</div>
     </div>
+    {f.type === "Commande" && <div className="fld"><label>Signature du client — bon pour accord (optionnel)</label><SignaturePad value={f.signature || ""} onChange={(v) => up("signature", v)} /><div className="row2" style={{ marginTop: 8 }}><div className="fld"><label>Nom du signataire</label><input value={f.signataire || ""} onChange={(e) => up("signataire", e.target.value)} placeholder="Nom et fonction" /></div><div className="fld"><label>Date de signature</label><input type="date" value={f.signatureDate || ""} onChange={(e) => up("signatureDate", e.target.value)} /></div></div></div>}
     <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}><button className="btn btn-g" onClick={() => onPreview(clean())}><Eye size={16} /> Aperçu</button><button className="btn btn-p" onClick={() => onSave(clean())}>Enregistrer</button></div>
   </>);
 }
@@ -4130,6 +4146,7 @@ function DevisPreview({ deal, account, settings, products = [], data = {}, onClo
         </div>
         <div style={{ fontSize: 11.5, color: "#6b7589", marginTop: 7 }}>Merci d'indiquer la référence {docRef(deal, account)} lors de votre virement.</div>
       </div>}
+      {deal.type === "Commande" && deal.signature && <div style={{ marginTop: 22, display: "flex", justifyContent: "flex-end" }}><div style={{ border: "1px solid #eef1f7", borderRadius: 8, padding: "10px 14px", minWidth: 240, textAlign: "center" }}><div style={{ fontSize: 11, color: "#6b7589", fontWeight: 700, marginBottom: 4 }}>Bon pour accord{deal.signataire ? " — " + deal.signataire : ""}{deal.signatureDate ? " · " + deal.signatureDate : ""}</div><img src={deal.signature} alt="Signature" style={{ maxWidth: 240, maxHeight: 90, display: "block", margin: "0 auto" }} /></div></div>}
       <div style={{ marginTop: 26, fontSize: 10.5, color: "#6b7589", borderTop: "1px solid #eef1f7", paddingTop: 10, lineHeight: 1.7 }}>
         {titre === "DEVIS" && <div>Devis valable 30 jours.</div>}
         <div><strong>Livraison {zc.label}</strong> — franco de port dès {zc.seuil} € HT de commande ; en deçà, participation forfaitaire de {zc.part} € HT aux frais de port.</div>
@@ -6689,6 +6706,20 @@ function EventView({ event, data, go, onClose, onEdit, onDelete }) {
       {relDate(event.date) && <Badge color={col}>{relDate(event.date)}</Badge>}
     </div>
     {event.notes && <div style={{ fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{event.notes}</div>}
+    {(event.type === "rdv" || event.type === "visio") && (() => {
+      // Brief de préparation de RDV : synthèse de l'historique et des enjeux commerciaux du compte concerné.
+      const accId = account ? account.id : (site ? site.accountId : null); if (!accId && !ints.length) return null;
+      const accDeals = accId ? (data.deals || []).filter((d) => d.accountId === accId) : [];
+      const enAttente = accDeals.filter(isDevisEnAttente); const signed = accDeals.filter(isCaSigne); const lastInt = ints[0];
+      return (<div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: "12px 14px", background: "var(--blue-l)" }}>
+        <div className="pu-display" style={{ fontWeight: 800, marginBottom: 6 }}>📋 Brief de préparation</div>
+        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, lineHeight: 1.7 }}>
+          <li>Dernier échange : {lastInt ? (lastInt.date + " — " + (lastInt.sujet || (INT_META[lastInt.type] || INT_META.note).label) + (lastInt.resume ? " : " + lastInt.resume.slice(0, 90) : "")) : "aucun échange enregistré"}</li>
+          <li>Devis en attente : {enAttente.length ? (enAttente.length + " · " + eur(sumMontant(enAttente)) + " HT") : "aucun"}</li>
+          <li>Historique : {ints.length} échange{ints.length > 1 ? "s" : ""}{accId ? " · CA HT signé " + eur(sumMontant(signed)) + " · " + signed.filter((d) => d.type === "Commande").length + " commande(s)" : ""}</li>
+        </ul>
+      </div>);
+    })()}
     <div>
       <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 8 }}>Fiches liées</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
