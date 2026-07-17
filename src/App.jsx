@@ -3689,7 +3689,7 @@ function AccountForm({ acc, accounts, onSave, known = [], onUsage }) {
 
 function Repertoire({ data, persist, go, focus }) {
   const { contacts, accounts, deals, interactions, settings } = data;
-  const [openId, setOpenId] = useState(null); const [q, setQ] = useState(""); const [filt, setFilt] = useState("tous"); const [editC, setEditC] = useState(null); const [grp, setGrp] = useState("enseigne"); const [dir, setDir] = useState("asc"); const [view, setView] = useState("actifs");
+  const [openId, setOpenId] = useState(null); const [q, setQ] = useState(""); const [filt, setFilt] = useState("tous"); const [editC, setEditC] = useState(null); const [grp, setGrp] = useState("alpha"); const [dir, setDir] = useState("asc"); const [view, setView] = useState("actifs");
   const unarchiveContact = (id) => persist((p) => ({ ...p, contacts: p.contacts.map((c) => c.id === id ? { ...c, archived: false } : c) }));
   const archivedContacts = contacts.filter((c) => c.archived);
   const dwell = useDwellPreview();
@@ -3715,7 +3715,14 @@ function Repertoire({ data, persist, go, focus }) {
       <button className="btn btn-ghost" onClick={() => downloadCSV(contacts.map((c) => { const acc = accounts.find((a) => a.id === c.accountId); return { Prenom: c.prenom, Nom: c.nom, Fonction: c.fonction, Role: (ROLE_META[c.role] || { label: c.role }).label, Email: c.email, Mobile: c.mobile, Fixe: c.fixe, Ville: contactLocality(c, data).ville, Departement: contactLocality(c, data).departement, LinkedIn: c.linkedin, Enseigne: acc ? acc.enseigne : "", Principal: c.principal ? "oui" : "" }; }), "contacts-penup3d-" + new Date().toISOString().slice(0, 10) + ".csv")} title="Exporter en CSV"><FileDown size={15} /> CSV</button>
       <button className="btn btn-p" onClick={() => setEditC({ id: "c_" + Date.now(), accountId: accounts[0]?.id || "", prenom: "", nom: "", fonction: "", role: "autre", email: "", mobile: "", fixe: "", linkedin: "", ville: "", departement: "", adresse: "", principal: false, notes: "", createdAt: TODAY() })}><Plus size={16} /> Nouveau contact</button>
     </div>
-    <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}><AllChip active={filt === "tous"} onClick={() => setFilt("tous")}>Tous ({activeCount})</AllChip>{accounts.filter((a) => !a.archived).map((a) => { const n = contacts.filter((c) => !c.archived && c.accountId === a.id).length; return n === 0 ? null : <button key={a.id} className={cx("chip", filt === a.id && "on")} onClick={() => setFilt(a.id)}>{a.enseigne} ({n})</button>; })}</div>
+    <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+      <span style={{ fontSize: 12.5, color: "var(--muted)", fontWeight: 700 }}>Filtrer par enseigne :</span>
+      <select value={filt} onChange={(e) => setFilt(e.target.value)} style={{ padding: "7px 10px", border: "1px solid var(--line)", borderRadius: 9, fontSize: 13, fontFamily: "inherit", background: "var(--card)", minWidth: 220, maxWidth: "100%" }}>
+        <option value="tous">Toutes les enseignes ({activeCount})</option>
+        {accounts.filter((a) => !a.archived).map((a) => ({ a, n: contacts.filter((c) => !c.archived && c.accountId === a.id).length })).filter((x) => x.n > 0).sort((x, y) => (x.a.enseigne || "").localeCompare(y.a.enseigne || "", "fr")).map(({ a, n }) => <option key={a.id} value={a.id}>{a.enseigne} ({n})</option>)}
+      </select>
+      {filt !== "tous" && <button className="btn btn-g btn-s" onClick={() => setFilt("tous")}><X size={13} /> Réinitialiser</button>}
+    </div>
     {(() => {
       if (list.length === 0) return <div className="card empty">Aucun contact.</div>;
       const GD = { alpha: { get: (c) => { const s = (c.nom || c.prenom || "?").trim(); return (s.charAt(0) || "#").toUpperCase(); } }, enseigne: { get: (c) => accName(c.accountId) }, role: { get: (c) => c.role || "autre", meta: (v) => ROLE_META[v] || ROLE_META.autre, order: Object.keys(ROLE_META) }, ville: { get: (c) => contactLocality(c, data).ville || "Sans ville" }, departement: { get: (c) => contactLocality(c, data).departement || "Sans département" } };
