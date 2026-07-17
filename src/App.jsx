@@ -4080,6 +4080,10 @@ function DealForm({ deal, accounts, products, sites, onSave, onPreview }) {
   const zone = f.zoneLivraison || detectedZone || "metropole"; const zc = francoZone(zone);
   const ht = dealMontant(f.lines); const port = f.type === "Avoir" ? 0 : fraisPortHT(ht, zone); const baseHt = ht + port; const tva = baseHt * (f.tva || 0) / 100; const ttc = baseHt + tva;
   const clean = () => ({ ...f, zoneLivraison: zone, lines: f.lines.filter((l) => l.code) });
+  // Marge PEN'UP en temps réel : coût de revient (product.cout, repli sur le prix d'achat officiel)
+  // rapporté au prix de cession de chaque ligne. Alerte discrète si la marge globale est faible.
+  const coutOf = (code) => { const p = products.find((x) => x.code === code); if (p && p.cout != null) return p.cout; return PA_HT_OFFICIEL[code] != null ? PA_HT_OFFICIEL[code] : null; };
+  const marge = (() => { let cost = 0, ca = 0, known = true, anyKnown = false; f.lines.forEach((l) => { if (!l.code) return; const c = coutOf(l.code); if (c == null) { known = false; return; } anyKnown = true; cost += c * (l.qte || 0); ca += (l.pu || 0) * (l.qte || 0); }); const m = ca - cost; return { m, pct: ca > 0 ? m / ca * 100 : 0, known, anyKnown }; })();
   // Upsell « atteindre le franco » : complète la commande avec le filament le plus vendu (lot de 12
   // Multicolore, sinon un lot de bobines) pour dépasser le seuil de franco de la zone — la marchandise
   // ajoutée coûte au revendeur moins que la participation au port économisée.
@@ -4104,6 +4108,7 @@ function DealForm({ deal, accounts, products, sites, onSave, onPreview }) {
     </div>
     <div className="row2"><div className="fld"><label>TVA (%)</label><input type="number" value={f.tva} onChange={(e) => up("tva", +e.target.value)} /></div><div className="fld"><label>Note</label><input value={f.note} onChange={(e) => up("note", e.target.value)} /></div></div>
     <div style={{ display: "flex", justifyContent: "flex-end", gap: 26, padding: "4px 2px", borderTop: "1px solid var(--line)", paddingTop: 12 }}><Stat label="Total HT" value={eur2(ht)} /><Stat label={port > 0 ? "Participation port" : "Franco de port"} value={port > 0 ? eur2(port) : "offert"} /><Stat label={"TVA " + f.tva + "%"} value={eur2(tva)} /><Stat label="Total TTC" value={eur2(ttc)} /></div>
+    {f.type !== "Avoir" && marge.anyKnown && <div style={{ fontSize: 11.5, textAlign: "right", fontWeight: 700, marginTop: 2, color: marge.pct >= 40 ? "var(--green)" : marge.pct >= 25 ? "var(--amber)" : "var(--red)" }} title="Marge interne PEN'UP (prix de cession − coût de revient). N'apparaît jamais sur le document client.">Marge PEN'UP : {eur2(marge.m)} ({Math.round(marge.pct)}%){!marge.known ? " · coûts partiels" : ""}</div>}
     {f.type !== "Avoir" && <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: -4, flexWrap: "wrap" }}>
       {port > 0 && <button className="btn btn-g btn-s" onClick={completerFranco} title="Ajouter des bobines Multicolore pour dépasser le seuil de franco"><Plus size={13} /> Compléter pour le franco</button>}
       <div style={{ fontSize: 11, color: port > 0 ? "var(--amber)" : "var(--green)", textAlign: "right" }}>{port > 0 ? `${zc.label} — sous ${zc.seuil} € HT : participation de ${zc.part} € HT aux frais de port. Encore ${eur2(zc.seuil - ht)} HT pour le franco.` : `Franco de port atteint (${zc.label} : commande ≥ ${zc.seuil} € HT).`}</div>
