@@ -68,3 +68,11 @@ function Root() {
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
+
+// PWA : enregistrement du service worker (app-shell en cache, lancement rapide, mode hors-ligne de
+// secours, installation sur l'écran d'accueil). Sans effet en développement local sans HTTPS.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch((e) => { try { console.warn("SW non enregistré :", e); } catch (x) {} });
+  });
+}
