@@ -8,7 +8,8 @@ import {
   Calculator, Percent, Truck, ArrowRightLeft, RefreshCw, Eye, Printer,
   LifeBuoy, Repeat, Zap, Map as MapIcon, Send, ExternalLink, Link2,
   Layers, ShoppingCart, Navigation, Copy, Sparkles, Camera, Image as ImageIcon, Palette, Mic, MessageSquare, Video, Archive, ArchiveRestore,
-  Download, Paperclip, Moon, Sun, ChevronRight, CalendarDays,
+  Download, Paperclip, Moon, Sun, ChevronRight, ChevronDown, CalendarDays,
+  Wand2, Scissors, Check,
   Clock, Flame, Trophy, Award, Coffee,
   GitBranch, Save, FileDown, ArrowDown, ArrowUp, Undo2,
   Globe, Facebook, Instagram, Menu, Home,
@@ -3041,7 +3042,7 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
     {preview && <DevisPreview deal={preview} account={acc} settings={data.settings} products={data.products} data={data} onClose={() => setPreview(null)} />}
     {addInt && <Modal title="Nouvel échange" onClose={() => setAddInt(false)}><AccountInteractionForm contactId={siteContacts[0]?.id || ""} accountId={s.accountId} contacts={siteContacts} onCancel={() => setAddInt(false)} onSave={(it) => { addInteraction({ ...it, siteId: s.id }); setAddInt(false); }} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onPlanEvents={(evs, f) => persist((p) => ({ ...p, events: [...(p.events || []), ...plannedEvents(evs, { baseDate: f.date, accountId: s.accountId, siteId: s.id, contactId: f.contactId || "" })] }))} /></Modal>}
     {chatOpen && <EstablishmentChat account={acc} site={s} contacts={siteContacts} interactions={ints} deals={deals} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onClose={() => setChatOpen(false)} />}
-    {composerOpen && <MessageComposer account={acc} site={s} contacts={siteContacts} interactions={ints} deals={deals} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onClose={() => setComposerOpen(false)} />}
+    {composerOpen && <MessageComposer account={acc} site={s} contacts={siteContacts} data={data} persist={persist} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onClose={() => setComposerOpen(false)} />}
     {archiveOpen && (indep ? <ArchiveModal account={acc} existing={acc} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onArchive={doArchive} onClose={() => setArchiveOpen(false)} /> : <ArchiveModal account={{ enseigne: s.label || "Établissement" }} existing={s} noun="établissement" onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onArchive={doArchiveSite} onClose={() => setArchiveOpen(false)} />)}
     {intEdit && <Modal title="Modifier l'échange" onClose={() => setIntEdit(null)}><AccountInteractionForm contactId={intEdit.contactId} accountId={s.accountId} contacts={siteContacts} interaction={intEdit} onCancel={() => setIntEdit(null)} onSave={(it) => { saveInteraction({ ...it, siteId: s.id }); setIntEdit(null); }} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onPlanEvents={(evs, f) => persist((p) => ({ ...p, events: [...(p.events || []), ...plannedEvents(evs, { baseDate: f.date, accountId: s.accountId, siteId: s.id, contactId: f.contactId || "" })] }))} /></Modal>}
     {dealEdit && <Modal title={(dealEdit.ref || "Document") + " · " + dealEdit.type} onClose={() => setDealEdit(null)} xl><DealForm deal={dealEdit} accounts={data.accounts} products={data.products} sites={data.sites} onPreview={(d) => setPreview(d)} onSave={(d) => { saveDeal(d); setDealEdit(null); }} /></Modal>}
@@ -3174,7 +3175,7 @@ function AccountDetail({ account, data, persist, go, onBack, onEdit, onAddContac
     {preview && <DevisPreview deal={preview} account={a} settings={data.settings} products={data.products} data={data} onClose={() => setPreview(null)} />}
     {addInt && <Modal title="Nouvel échange" onClose={() => setAddInt(false)}><AccountInteractionForm contactId={conts[0]?.id || ""} accountId={a.id} contacts={conts} onCancel={() => setAddInt(false)} onSave={(it) => { addInteraction(it); setAddInt(false); }} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onPlanEvents={(evs, f) => persist((p) => ({ ...p, events: [...(p.events || []), ...plannedEvents(evs, { baseDate: f.date, accountId: a.id, contactId: f.contactId || "" })] }))} /></Modal>}
     {chatOpen && <EstablishmentChat account={a} contacts={conts} interactions={accInteractions} deals={deals} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onClose={() => setChatOpen(false)} />}
-    {composerOpen && <MessageComposer account={a} contacts={conts} interactions={accInteractions} deals={deals} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onClose={() => setComposerOpen(false)} />}
+    {composerOpen && <MessageComposer account={a} contacts={conts} data={data} persist={persist} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onClose={() => setComposerOpen(false)} />}
     {archiveOpen && <ArchiveModal account={a} existing={a} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onArchive={doArchive} onClose={() => setArchiveOpen(false)} />}
     {dwell.node}
     {intEdit && <Modal title="Modifier l'échange" onClose={() => setIntEdit(null)}><AccountInteractionForm contactId={intEdit.contactId} accountId={a.id} contacts={conts} interaction={intEdit} onCancel={() => setIntEdit(null)} onSave={(it) => { saveInteraction(it); setIntEdit(null); }} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onPlanEvents={(evs, f) => persist((p) => ({ ...p, events: [...(p.events || []), ...plannedEvents(evs, { baseDate: f.date, accountId: a.id, contactId: f.contactId || "" })] }))} /></Modal>}
@@ -3350,97 +3351,391 @@ function ChannelPreview({ canal, recipient, estabName, subject, setSubject, out,
     <div style={{ textAlign: "right", fontSize: 11, color: len > 320 ? "var(--red)" : "var(--muted)", marginTop: 6 }}>{len} caractère{len > 1 ? "s" : ""} · {segs} SMS</div>
   </div>);
 }
+// ===== Rédaction assistée des messages : contexte structuré, prompt système, garde-fous marque =====
+// Format ISO local (évite le décalage UTC de toISOString sur une date de jour).
+function isoDay(dt) { const y = dt.getFullYear(); const m = String(dt.getMonth() + 1).padStart(2, "0"); const d = String(dt.getDate()).padStart(2, "0"); return y + "-" + m + "-" + d; }
+function nowHM() { const d = new Date(); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); }
+// Écart en jours entre deux dates ISO (AAAA-MM-JJ). Calcul fait en JS : le modèle ne calcule jamais de durée.
+function daysBetween(isoA, isoB) { const a = Date.parse(isoA), b = Date.parse(isoB); if (isNaN(a) || isNaN(b)) return null; return Math.round((b - a) / 86400000); }
+// Jours fériés français (métropole) d'une année (calcul de Pâques inclus).
+function joursFeries(an) {
+  const f = Math.floor;
+  const a = an % 19, b = f(an / 100), c = an % 100;
+  const d = f(b / 4), e = b % 4, g = f((8 * b + 13) / 25);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = f(c / 4), k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = f((a + 11 * h + 19 * l) / 433);
+  const mois = f((h + l - 7 * m + 90) / 25);
+  const jour = (h + l - 7 * m + 33 * mois + 19) % 32;
+  const paques = new Date(Date.UTC(an, mois - 1, jour));
+  const plus = (n) => new Date(paques.getTime() + n * 86400000);
+  const iso = (dt) => dt.toISOString().slice(0, 10);
+  return [
+    `${an}-01-01`, `${an}-05-01`, `${an}-05-08`, `${an}-07-14`,
+    `${an}-08-15`, `${an}-11-01`, `${an}-11-11`, `${an}-12-25`,
+    iso(plus(1)), iso(plus(39)), iso(plus(50))
+  ];
+}
+// Type d'adresse : « generique » (standard, contact, accueil, info, direction, secretariat, magasin, ou
+// nom d'enseigne) vs « nominative ». Un message à un dirigeant via une boîte de standard doit être routé.
+const GENERIC_LOCALS = ["standard", "contact", "accueil", "info", "infos", "direction", "secretariat", "magasin", "boutique", "commande", "commandes"];
+function stripAccentsLow(s) { return String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, ""); }
+function typeAdresseOf(email, enseigne) {
+  const e = String(email || "").trim();
+  const at = e.indexOf("@");
+  if (at <= 0) return "nominative";
+  const local = stripAccentsLow(e.slice(0, at)).replace(/[._\-\d]/g, "");
+  if (GENERIC_LOCALS.indexOf(local) >= 0) return "generique";
+  const ens = stripAccentsLow(enseigne).replace(/[^a-z0-9]/g, "");
+  if (ens && ens.length >= 4 && local.length >= 3 && (local.indexOf(ens) >= 0 || ens.indexOf(local) >= 0)) return "generique";
+  return "nominative";
+}
+// Saisonnalité depuis les réglages (texte libre, une période par ligne : « libellé ; date ; date »).
+// Vide par défaut : si la date du jour ne tombe dans aucune période, on ne transmet rien.
+function periodeFromSettings(txt, nowIso) {
+  if (!txt || !String(txt).trim()) return "";
+  const lines = String(txt).split(/\n/).map((x) => x.trim()).filter(Boolean);
+  for (const ln of lines) {
+    const dates = ln.match(/\d{4}-\d{2}-\d{2}/g) || [];
+    if (dates.length >= 2) {
+      const bounds = [dates[0], dates[1]].sort();
+      if (nowIso >= bounds[0] && nowIso <= bounds[1]) {
+        const label = ln.replace(/\d{4}-\d{2}-\d{2}/g, "").replace(/[;,|]/g, " ").replace(/\s+/g, " ").trim();
+        return label || "période en cours";
+      }
+    }
+  }
+  return "";
+}
+// Créneaux d'appel réellement possibles (≈10 jours ouvrés) = intersection des horaires d'ouverture de
+// l'établissement et de ma plage d'appel, hors week-ends, jours fériés et rendez-vous déjà pris.
+// Le modèle ne peut que reprendre un élément de cette liste ; il n'invente jamais de date.
+function computeDisponibilites(reachSite, myEvents, now, plage) {
+  const toMin = (hhmm) => { const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm || ""); return m ? (+m[1]) * 60 + (+m[2]) : null; };
+  const pDeb = toMin(plage && plage.debut); const pFin = toMin(plage && plage.fin);
+  const openStart = pDeb == null ? 9 * 60 : pDeb; const openEnd = pFin == null ? 18 * 60 : pFin;
+  const grid = reachSite ? parseHoraires(reachSite.horaires) : null;
+  const JSHORT = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"];
+  const feriesCache = {};
+  const feriesFor = (y) => (feriesCache[y] || (feriesCache[y] = joursFeries(y)));
+  const out = [];
+  const cur = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let added = 0, scanned = 0;
+  while (added < 8 && scanned < 24) {
+    cur.setDate(cur.getDate() + 1); scanned++;
+    const dow = (cur.getDay() + 6) % 7;
+    if (dow >= 5) continue;
+    const iso = isoDay(cur);
+    if (feriesFor(cur.getFullYear()).indexOf(iso) >= 0) continue;
+    let ranges;
+    if (grid) { const gd = grid[dow]; if (!gd || gd.closed || !gd.ranges || !gd.ranges.length) continue; ranges = gd.ranges; }
+    else ranges = [[openStart, openEnd]];
+    const inter = [];
+    ranges.forEach((r) => { const s = Math.max(r[0], openStart), en = Math.min(r[1], openEnd); if (en - s >= 30) inter.push([s, en]); });
+    if (!inter.length) continue;
+    const busy = (myEvents || []).filter((ev) => ev.date === iso && /^\d{1,2}:\d{2}$/.test(ev.heure || "")).map((ev) => { const s = toMin(ev.heure); return [s, s + 60]; });
+    inter.forEach((seg) => {
+      let segs = [seg];
+      busy.forEach((bz) => { segs = segs.reduce((acc, sg) => { if (bz[1] <= sg[0] || bz[0] >= sg[1]) { acc.push(sg); return acc; } if (bz[0] > sg[0]) acc.push([sg[0], Math.min(bz[0], sg[1])]); if (bz[1] < sg[1]) acc.push([Math.max(bz[1], sg[0]), sg[1]]); return acc; }, []).filter((x) => x[1] - x[0] >= 30); });
+      segs.forEach((x) => { if (added >= 8) return; out.push(JSHORT[dow] + " " + iso.slice(8, 10) + "/" + iso.slice(5, 7) + ", " + _fmtHM(x[0]) + "–" + _fmtHM(x[1])); added++; });
+    });
+  }
+  return out;
+}
+// Collecteur de contexte (fonction PURE, aucun appel réseau) transmis au modèle. Filtrage par liste
+// blanche : aucun coefficient, marge, coût, prix de cession ni scoring n'entre jamais dans cet objet.
+function buildMessageContext({ data, contactId, siteId, accountId, canal, now }) {
+  now = now || new Date();
+  const nowIso = isoDay(now);
+  const accounts = data.accounts || [], sites = data.sites || [], contacts = data.contacts || [];
+  const interactions = data.interactions || [], deals = data.deals || [], tickets = data.tickets || [], events = data.events || [];
+  const settings = data.settings || {};
+  const account = accounts.find((a) => a.id === accountId) || null;
+  const site = sites.find((s) => s.id === siteId) || null;
+  const contact = contacts.find((c) => c.id === contactId) || null;
+  const reachSite = site || (account ? sites.find((s) => s.accountId === account.id && s.type === "pdv") : null);
+  const enseigne = (account && account.enseigne) || (reachSite && reachSite.label) || "";
+  const positionnement = "Marque française basée à Montauban (Tarn-et-Garonne)";
+  const institutionnel = !!(account && account.nature === "AS");
+  const emetteur = institutionnel
+    ? { nom: "PEN'UP 3D", fonction: "Pôle institutionnel / éducation", societe: "PEN'UP 3D", email: "contact@penup3d.com", telephone: "06 71 84 90 03", positionnement, segment: "institutionnel" }
+    : { nom: "Matthis-Anaël PREVEDELLO", fonction: "Directeur des Opérations", societe: "PEN'UP 3D", email: "matthis-anael@penup3d.com", telephone: "06 95 50 37 68", positionnement, segment: "retail" };
+  const destinataire = contact ? {
+    civilite: contact.civilite || "",
+    nom: fullName(contact) || contact.nom || "",
+    fonction: contact.fonction || "",
+    email: contact.email || "",
+    typeAdresse: typeAdresseOf(contact.email, enseigne),
+  } : null;
+  let stageEntry = "";
+  const slog = (account && account.stageLog) || [];
+  for (let i = slog.length - 1; i >= 0; i--) { if (account && slog[i].stage === account.stage) { stageEntry = slog[i].date; break; } }
+  if (!stageEntry && slog.length) stageEntry = slog[slog.length - 1].date;
+  const etablissement = {
+    raisonSociale: (account && (account.raisonSociale || account.enseigne)) || (reachSite && reachSite.label) || "",
+    enseigne: enseigne,
+    type: account ? (isGroupe(account) ? "groupe" : "indépendant") : "",
+    ville: (reachSite && reachSite.ville) || (account && account.ville) || "",
+    departement: (account && account.departement) || "",
+    natureClient: (account && NATURE_META[account.nature]) ? NATURE_META[account.nature].label : "",
+    etape: (account && account.stage) ? stageMeta(account.stage).label : "",
+    etapeDepuis: stageEntry || "",
+    etapeAncienneteJours: stageEntry ? Math.max(0, daysBetween(stageEntry, nowIso) || 0) : null,
+  };
+  const relevant = interactions.filter((i) => {
+    if (contactId && i.contactId === contactId) return true;
+    if (siteId) return i.siteId === siteId;
+    if (accountId) return i.accountId === accountId;
+    return false;
+  }).slice().sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.heure || "").localeCompare(a.heure || ""));
+  const echanges = []; let hchars = 0;
+  for (const i of relevant) {
+    if (echanges.length >= 10) break;
+    const meta = INT_META[i.type] || {};
+    const entry = { date: i.date || "", ancienneteJours: i.date ? Math.max(0, daysBetween(i.date, nowIso) || 0) : null, sens: i.direction === "entrant" ? "entrant" : "sortant", canal: meta.label || i.type || "", resume: String(i.resume || i.sujet || "").slice(0, 400) };
+    const sz = JSON.stringify(entry).length;
+    if (hchars + sz > 3000 && echanges.length) break;
+    hchars += sz; echanges.push(entry);
+  }
+  const derniersEnvois = relevant.filter((i) => i.direction !== "entrant").slice(0, 2).map((i) => ({ date: i.date || "", objet: i.sujet || "", texte: String(i.resume || "").slice(0, 1200) }));
+  const historique = { echanges, derniersEnvois };
+  const engagements = [];
+  if (account && account.prochaineAction) engagements.push({ intitule: account.prochaineAction, date: account.dateAction || "" });
+  events.filter((e) => (contactId && e.contactId === contactId) || (siteId && e.siteId === siteId) || (accountId && e.accountId === accountId)).filter((e) => e.date && e.date >= nowIso).sort((a, b) => (a.date || "").localeCompare(b.date || "")).slice(0, 5).forEach((e) => engagements.push({ intitule: (e.titre || "Suivi") + (EVENT_TYPES[e.type] ? " (" + EVENT_TYPES[e.type].label + ")" : ""), date: e.date + (e.heure ? " " + e.heure : "") }));
+  const accDeals = deals.filter((d) => accountId ? d.accountId === accountId : (reachSite && d.livraisonSiteId === reachSite.id));
+  const devisEnCours = accDeals.filter((d) => d.type === "Devis").slice().sort((a, b) => (b.date || "").localeCompare(a.date || "")).slice(0, 3).map((d) => ({ ref: d.ref || "", date: d.date || "", statut: d.statut || "", montantHT: Math.round(d.montant || 0) }));
+  const commandes = accDeals.filter((d) => d.type === "Commande").slice().sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const derniereCommande = commandes[0] ? { date: commandes[0].date || "", lignes: (commandes[0].lines || []).slice(0, 8).map((l) => ({ designation: l.designation || "", qte: l.qte || 0 })) } : null;
+  const commercial = { devisEnCours, derniereCommande };
+  const ticketsOuverts = tickets.filter((t) => (accountId ? t.accountId === accountId : (reachSite && t.siteId === reachSite.id)) && (t.statut === "ouvert" || t.statut === "en_cours")).map((t) => ({ titre: t.titre || "", gravite: (SAV_GRAV[t.gravite] || {}).label || t.gravite || "", statut: (SAV_STATUT[t.statut] || {}).label || t.statut || "", ouvertDepuisJours: t.date ? Math.max(0, daysBetween(t.date, nowIso) || 0) : null }));
+  const sav = { ticketsOuverts, bloqueTonCommercial: ticketsOuverts.length > 0 };
+  const joursSem = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
+  const temporel = { date: nowIso, jour: joursSem[now.getDay()], heure: nowHM(), periode: periodeFromSettings(settings.vacancesScolaires, nowIso) };
+  const plage = { debut: settings.appelDebut || "09:00", fin: settings.appelFin || "18:00" };
+  const disponibilites = computeDisponibilites(reachSite, events, now, plage);
+  const gardeFous = [
+    "Ne jamais écrire « Made in France » / « fabriqué en France » ni alléguer une origine française du PRODUIT (production réalisée en Chine). En revanche, présenter PEN'UP 3D comme une marque française basée à Montauban est exact et autorisé.",
+    "Ne jamais alléguer un agrément Éducation Nationale ; formulation admise : « supports pédagogiques développés avec l'appui du Réseau Canopé ».",
+    "Ne pas qualifier le filament PCL de « biodégradable » (dire « biocompatible », ou « compostable » seulement si une certification est citée).",
+    "Ne pas présenter le Kit Mécanique comme disponible à la vente (certification CE/EN71 non obtenue).",
+    "Ne mentionner aucun mode haute température du stylo (seul le mode basse température existe).",
+    "Ne pas utiliser le logo ni le symbole de la République française.",
+  ];
+  let contexte = { emetteur, destinataire, etablissement, historique, engagements, commercial, sav, temporel, disponibilites, gardeFous, _tronque: false };
+  if (JSON.stringify(contexte).length > 12000) {
+    while (contexte.historique.echanges.length > 1 && JSON.stringify(contexte).length > 12000) contexte.historique.echanges.pop();
+    contexte._tronque = true;
+  }
+  return contexte;
+}
+// Prompt système de rédaction. Le contexte est transmis dans le message utilisateur, encadré par
+// <contexte>…</contexte>, suivi de <consigne mode="…">, du canal, du type et du ton.
+const SYS_REDACTION = `<identite>
+Tu rédiges un message professionnel POUR le collaborateur de PEN'UP 3D dont l'identité figure dans <contexte>.emetteur, À DESTINATION du contact figurant dans <contexte>.destinataire.
+Le destinataire est une personne EXTERNE à PEN'UP 3D : un client, un prospect, un partenaire. Ce n'est jamais un collègue. Ne le traite jamais comme un membre de l'équipe et ne lui parle jamais de l'organisation interne de PEN'UP 3D.
+Tu écris à la première personne du singulier, du point de vue de l'émetteur. Vouvoiement systématique.
+</identite>
+
+<mission>
+Produire un message prêt à être relu et envoyé, ancré dans l'historique réel de la relation, qui poursuit un objectif unique et se termine par une seule action attendue.
+</mission>
+
+<positionnement_marque>
+PEN'UP 3D est une marque française basée à Montauban (Tarn-et-Garonne). Tu peux le mettre en avant, en particulier en prospection (premier contact), comme élément de réassurance. Cela concerne la MARQUE et l'entreprise, jamais la fabrication : ne dis jamais que le produit est fabriqué en France (voir interdits).
+Privilégie la première personne du singulier (« je ») plutôt que le « nous » : l'émetteur est une personne identifiée, pas un service anonyme.
+</positionnement_marque>
+
+<regles_de_fond>
+1. N'affirme AUCUN fait qui ne figure pas dans <contexte> ou dans la consigne de l'utilisateur. Pas de prix, pas de délai, pas de disponibilité produit, pas de remise, pas de chiffre inventé.
+2. Ne propose aucune date ni aucun créneau qui ne figure pas dans <contexte>.disponibilites. Si cette liste est vide, propose un rappel sans fixer de date.
+3. Ne mentionne jamais une marge, un coefficient, un coût d'achat, un prix de cession, une note interne ou une évaluation du client.
+4. Utilise l'historique pour ancrer le message : rappelle le dernier échange et sa date si elle est pertinente. Ne répète pas les accroches et les formules déjà employées dans <contexte>.historique.derniersEnvois.
+5. Si un ticket SAV est ouvert, la reconnaissance du problème passe avant toute proposition commerciale.
+6. Si le contact n'a jamais répondu après plusieurs relances, change d'angle plutôt que d'insister sur le même argument, et propose une sortie simple (une réponse en un mot suffit).
+7. Si <contexte>.destinataire.typeAdresse vaut "generique", commence le corps par une ligne de routage du type "À l'attention de [civilité nom], [fonction]", et rends l'objet explicite sur l'expéditeur et le sujet.
+</regles_de_fond>
+
+<interdits_absolus>
+Ces mentions sont juridiquement fautives ou inexactes. Ne les écris jamais, même si l'utilisateur les emploie dans sa consigne.
+- "Made in France", "fabriqué en France", ou toute allégation d'origine française du produit. La production est réalisée en Chine.
+- "Agrément Éducation Nationale" ou toute allégation d'agrément public. Formulation admise : "supports pédagogiques développés avec l'appui du Réseau Canopé".
+- "Biodégradable" pour le filament PCL. Employer "biocompatible", ou "compostable" uniquement si une certification est citée dans le contexte.
+- Toute présentation du Kit Mécanique comme disponible à la vente : sa certification CE/EN71 n'est pas obtenue.
+- Toute mention d'un mode haute température du stylo : ce mode n'existe plus, le stylo ne dispose que du mode basse température.
+- Tout usage du logo ou du symbole de la République française.
+Si la consigne de l'utilisateur t'amène vers l'un de ces points, rédige sans la mention fautive et signale-le dans "alertes".
+</interdits_absolus>
+
+<style>
+Français professionnel, direct, sans emphase commerciale. Pas de tiret cadratin : emploie des virgules, des parenthèses, ou deux phrases.
+Pas de superlatifs ("révolutionnaire", "incontournable", "unique"). Pas de formules creuses ("je me permets de revenir vers vous", "en espérant que ce message vous trouve en bonne santé").
+Une seule idée par paragraphe. Une seule action demandée, en fin de message.
+Le ton demandé module le registre, il n'autorise jamais l'approximation factuelle.
+</style>
+
+<contraintes_canal>
+EMAIL : objet de 6 à 9 mots, informatif et non racoleur, sans point d'exclamation. Corps de 90 à 180 mots. Signature complète (nom, fonction, société, téléphone, adresse électronique).
+LINKEDIN : pas d'objet. Message de 60 à 110 mots, ton conversationnel, pas de signature. Si le champ "sousCanal" vaut "invitation", plafond strict de 280 caractères.
+SMS : 2 phrases maximum, 300 caractères maximum, pas d'objet, pas de lien sauf s'il figure dans la consigne, identification de l'expéditeur dès la première phrase (nom et société), pas de familiarité.
+</contraintes_canal>
+
+<traitement_de_la_consigne>
+Le champ "consigne" est fourni avec un mode.
+Mode "consigne" : c'est un brief, une intention à traduire en message. Tu rédiges entièrement.
+Mode "brouillon" : le texte est déjà mon message. Tu le réécris en conservant strictement mes idées, mes faits et mes engagements. Tu corriges la langue, la structure et le registre. Tu n'ajoutes aucun argument, aucune offre et aucune donnée que je n'ai pas écrite. Si mon brouillon contient une erreur factuelle par rapport au contexte, tu ne la corriges pas en silence : tu la signales dans "alertes".
+Mode "retouche" : un message précédent et une instruction de modification te sont fournis. Applique uniquement la modification demandée, sans réécrire le reste.
+</traitement_de_la_consigne>
+
+<format_sortie>
+Réponds UNIQUEMENT par un objet JSON valide, sans texte avant ni après, sans balises de code.
+{
+  "objet": "chaîne, vide si le canal n'en utilise pas",
+  "corps": "chaîne, sauts de ligne réels",
+  "variante_courte": "chaîne, version condensée d'environ 40 pour cent",
+  "creneaux_utilises": ["éléments repris de contexte.disponibilites, tableau vide sinon"],
+  "contexte_utilise": ["3 à 6 éléments du contexte réellement mobilisés, formulés en une ligne chacun"],
+  "alertes": ["risques, incohérences, mentions écartées, tableau vide si rien"]
+}
+</format_sortie>`;
+// Appel au relais IA + robustesse : extraction des blocs texte, retrait des délimiteurs de code,
+// parsage JSON avec seconde tentative de reformatage, et vérification des créneaux côté code.
+async function generateMessage({ contexte, consigne, mode, canal, sousCanal, type, ton, precedent, onUsage }) {
+  const parts = [
+    "<contexte>\n" + JSON.stringify(contexte, null, 2) + "\n</contexte>",
+    "<consigne mode=\"" + (mode || "consigne") + "\">\n" + (consigne || "") + "\n</consigne>",
+    "<canal>" + canal + (sousCanal ? (" (sousCanal=" + sousCanal + ")") : "") + "</canal>",
+    "<type>" + (type || "") + "</type>",
+    "<ton>" + (ton || "") + "</ton>",
+  ];
+  if (mode === "retouche" && precedent) parts.push("<message_precedent>\n" + precedent + "\n</message_precedent>");
+  const baseUser = parts.join("\n\n");
+  const call = async (suffix) => {
+    const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1500, temperature: 0.6, system: SYS_REDACTION, messages: [{ role: "user", content: baseUser + (suffix || "") }] }) });
+    if (!res.ok) throw new Error(await claudeErrorText(res));
+    const dt = await res.json();
+    if (dt && dt.usage && onUsage) onUsage(dt.usage);
+    return (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+  };
+  const extract = (raw) => {
+    let t = String(raw || "").trim();
+    t = t.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    const a = t.indexOf("{"), z = t.lastIndexOf("}");
+    if (a >= 0 && z > a) t = t.slice(a, z + 1);
+    return JSON.parse(t);
+  };
+  let raw = await call("");
+  let parsed = null;
+  try { parsed = extract(raw); }
+  catch (e1) {
+    try { raw = await call("\n\nTa réponse précédente n'était pas un JSON valide. Renvoie UNIQUEMENT l'objet JSON demandé (schéma <format_sortie>), sans texte ni balises de code."); parsed = extract(raw); }
+    catch (e2) { parsed = null; }
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return { ok: false, objet: "", corps: raw, variante_courte: "", creneaux_utilises: [], contexte_utilise: [], alertes: ["Réponse IA non structurée : texte brut affiché, à relire entièrement."], creneauxNonVerifies: [] };
+  }
+  const dispo = contexte.disponibilites || [];
+  const used = Array.isArray(parsed.creneaux_utilises) ? parsed.creneaux_utilises : [];
+  const creneauxNonVerifies = used.filter((c) => dispo.indexOf(c) < 0);
+  return { ok: true, objet: parsed.objet || "", corps: parsed.corps || "", variante_courte: parsed.variante_courte || "", creneaux_utilises: used, contexte_utilise: Array.isArray(parsed.contexte_utilise) ? parsed.contexte_utilise : [], alertes: Array.isArray(parsed.alertes) ? parsed.alertes : [], creneauxNonVerifies };
+}
 // Rédaction IA d'un message (e-mail, LinkedIn ou SMS) pour un destinataire d'un établissement client.
-// L'IA s'appuie sur le dossier (entreprise cliente, destinataire, historique daté, devis) ; les contacts
-// listés sont des employés du CLIENT (jamais des collègues de PEN'UP), et la temporalité est respectée.
-function MessageComposer({ account, site, contacts, contact, defaultContactId, interactions = [], deals = [], onUsage, onClose }) {
+// Trois zones : pré-rédaction (consigne ou brouillon), contexte transmis (consultable et filtrable),
+// aperçu éditable. Le destinataire peut être un contact réel ou le « Standard » téléphonique.
+function MessageComposer({ account, site, contacts, contact, defaultContactId, data, persist, onUsage, onClose }) {
   const list = (contacts && contacts.length) ? contacts : (contact ? [contact] : []);
+  const STD = { id: "__standard__", prenom: "", nom: "Standard / accueil", fonction: "Standard téléphonique", email: "", civilite: "", __standard: true };
+  const fullList = [...list, STD];
   const pickDefault = () => {
     if (defaultContactId && list.some((c) => c.id === defaultContactId)) return defaultContactId;
     if (contact && list.some((c) => c.id === contact.id)) return contact.id;
     const withEmail = list.find((c) => c.email); if (withEmail) return withEmail.id;
-    return list[0] ? list[0].id : "";
+    return list[0] ? list[0].id : STD.id;
   };
   const [recipientId, setRecipientId] = useState(pickDefault);
-  const recipient = list.find((c) => c.id === recipientId) || list[0] || null;
+  const recipient = fullList.find((c) => c.id === recipientId) || list[0] || STD;
+  const isStd = !!(recipient && recipient.__standard);
   const [canal, setCanal] = useState("email");
-  const [typeKey, setTypeKey] = useState("prospection");
-  const [obj, setObj] = useState(MSG_TYPES[0].obj);
-  const [tone, setTone] = useState("chaleureux");
-  const [busy, setBusy] = useState(false); const [subject, setSubject] = useState(""); const [out, setOut] = useState(""); const [copied, setCopied] = useState(false);
+  const [sousCanal, setSousCanal] = useState("");
+  const [type, setType] = useState("prospection");
+  const [ton, setTon] = useState("chaleureux");
+  const [forceSegment, setForceSegment] = useState("auto");
+  const [redaction, setRedaction] = useState("");
+  const [mode, setMode] = useState("consigne");
+  const [modeTouched, setModeTouched] = useState(false);
+  const [ctxOpen, setCtxOpen] = useState(false);
+  const [excluded, setExcluded] = useState(() => new Set());
+  const [busy, setBusy] = useState(false);
+  const [subject, setSubject] = useState("");
+  const [out, setOut] = useState("");
+  const [shortOut, setShortOut] = useState("");
+  const [usedCtx, setUsedCtx] = useState([]);
+  const [alertes, setAlertes] = useState([]);
+  const [edited, setEdited] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sentMsg, setSentMsg] = useState("");
+  const [refineOpen, setRefineOpen] = useState(false);
+  const [refineText, setRefineText] = useState("");
+  const indep = !!(account && !isGroupe(account));
   const estabName = (site && (site.label || site.adresse)) || (account && account.enseigne) || "Établissement";
-  const pickType = (t) => { setTypeKey(t.key); setObj(t.obj); };
-  // Contexte transmis à l'IA. On distingue clairement l'EXPÉDITEUR (PEN'UP) du CLIENT et de ses
-  // employés (l'équipe du revendeur), et on date l'historique pour que la temporalité soit juste.
-  const buildContext = () => {
-    const L = [];
-    L.push("Date du jour : " + TODAY() + ".");
-    L.push("");
-    L.push("EXPÉDITEUR : PEN'UP 3D — c'est NOUS (marque française de stylos 3D et de loisirs créatifs pour enfants). Nous écrivons à un revendeur.");
-    if (account) {
-      L.push("");
-      L.push("ENTREPRISE CLIENTE (le revendeur ciblé ; le destinataire y travaille) :");
-      L.push("- Enseigne : " + (account.enseigne || "—"));
-      if (account.nature && NATURE_META[account.nature]) L.push("- Activité : " + NATURE_META[account.nature].label);
-      if (account.stage) L.push("- Étape du cycle commercial : " + stageMeta(account.stage).label);
-      if (account.ville) L.push("- Ville : " + account.ville);
-      if (account.magasins) L.push("- Réseau : " + magasinLabel(account.magasins) + " (" + networkSeg(account.magasins).label + ")");
-      if (account.notes) L.push("- Notes internes (ne pas citer telles quelles) : " + account.notes);
-    }
-    if (site) L.push("", "ÉTABLISSEMENT CONCERNÉ : " + (site.label || "—") + ([site.adresse, site.ville].filter(Boolean).length ? " (" + [site.adresse, site.ville].filter(Boolean).join(", ") + ")" : ""));
-    if (list.length) {
-      L.push(""); L.push("ÉQUIPE DU CLIENT (employés du revendeur — ce ne sont PAS des collègues de PEN'UP) :");
-      list.forEach((c) => L.push("- " + fullName(c) + (c.fonction ? " · " + c.fonction : "") + (ROLE_META[c.role] ? " · " + ROLE_META[c.role].label : "") + (c.id === recipientId ? "   ← DESTINATAIRE de ce message" : "")));
-    }
-    if (recipient) {
-      L.push(""); L.push("DESTINATAIRE : " + fullName(recipient) + (recipient.fonction ? " (" + recipient.fonction + ")" : "") + " — employé du client.");
-      if (recipient.notes) L.push("- Notes sur le destinataire : " + recipient.notes);
-    }
-    const recent = (interactions || []).slice(0, 6);
-    if (recent.length) {
-      L.push(""); L.push("HISTORIQUE DES ÉCHANGES (du plus récent au plus ancien ; « reçu » = le client nous a écrit, « envoyé » = nous lui avons écrit ; les personnes nommées dans les résumés sont des employés du client) :");
-      recent.forEach((i) => { const tm = INT_META[i.type] || {}; L.push("- " + (i.date || "?") + " · " + (tm.label || i.type) + " " + (DIRECTIONS[i.direction] ? "(" + DIRECTIONS[i.direction].ctx + ")" : "") + (i.sujet ? " — " + i.sujet : "") + (i.resume ? " : " + i.resume : "")); });
-    } else {
-      L.push(""); L.push("HISTORIQUE DES ÉCHANGES : aucun échange enregistré — n'écris donc PAS « faisant suite à notre dernier échange/appel ».");
-    }
-    const rd = (deals || []).slice(0, 4);
-    if (rd.length) {
-      L.push(""); L.push("DEVIS / COMMANDES :");
-      rd.forEach((d) => L.push("- " + (d.date || "") + " · " + (d.type || "document") + " " + (d.ref || "") + " — " + eur(d.montant || 0) + (d.statut ? " (" + d.statut + ")" : "")));
-    }
-    return L.join("\n");
+  const logSiteId = (site && !indep) ? site.id : "";
+  const ctxAccountId = (account && account.id) || (recipient && recipient.accountId) || "";
+  const ctxContactId = (recipient && !isStd) ? recipient.id : "";
+  // Mode par défaut : brouillon si le texte ressemble déjà à un message rédigé.
+  const guessMode = (txt) => { const w = (txt || "").trim().split(/\s+/).filter(Boolean).length; if (w > 30) return "brouillon"; if (/\b(bonjour|madame|monsieur)\b/i.test(txt || "")) return "brouillon"; return "consigne"; };
+  useEffect(() => { if (!modeTouched) setMode(guessMode(redaction)); }, [redaction, modeTouched]);
+  // Contexte complet (fonction pure), recalculé quand la cible ou le canal change.
+  const fullCtx = useMemo(() => buildMessageContext({ data, contactId: ctxContactId, siteId: logSiteId, accountId: ctxAccountId, canal, now: new Date() }), [data, ctxContactId, logSiteId, ctxAccountId, canal]);
+  const RETAIL = { nom: "Matthis-Anaël PREVEDELLO", fonction: "Directeur des Opérations", societe: "PEN'UP 3D", email: "matthis-anael@penup3d.com", telephone: "06 95 50 37 68", positionnement: "Marque française basée à Montauban (Tarn-et-Garonne)", segment: "retail" };
+  const INSTIT = { nom: "PEN'UP 3D", fonction: "Pôle institutionnel / éducation", societe: "PEN'UP 3D", email: "contact@penup3d.com", telephone: "06 71 84 90 03", positionnement: "Marque française basée à Montauban (Tarn-et-Garonne)", segment: "institutionnel" };
+  const effCtx = useMemo(() => {
+    let c = { ...fullCtx };
+    if (forceSegment === "retail") c.emetteur = RETAIL;
+    else if (forceSegment === "institutionnel") c.emetteur = INSTIT;
+    if (isStd) c.destinataire = { civilite: "", nom: "Standard / accueil", fonction: "Standard téléphonique", email: "", typeAdresse: "generique" };
+    excluded.forEach((k) => { delete c[k]; });
+    return c;
+  }, [fullCtx, forceSegment, excluded, isStd]);
+  const charCount = useMemo(() => JSON.stringify(effCtx).length, [effCtx]);
+  const applyResult = (r) => {
+    setSubject(r.objet || (canal === "email" ? ("PEN'UP 3D — " + estabName) : ""));
+    setOut(r.corps || "");
+    setShortOut(r.variante_courte || "");
+    setUsedCtx(Array.isArray(r.contexte_utilise) ? r.contexte_utilise : []);
+    const al = Array.isArray(r.alertes) ? r.alertes.slice() : [];
+    if (r.creneauxNonVerifies && r.creneauxNonVerifies.length) al.unshift("Créneau non vérifié, à contrôler : " + r.creneauxNonVerifies.join(" ; "));
+    setAlertes(al); setEdited(false);
   };
-  const [sending, setSending] = useState(false); const [sentMsg, setSentMsg] = useState("");
-  const toneHint = (MSG_TONES.find((t) => t.key === tone) || MSG_TONES[0]).hint;
   const gen = async () => {
-    setBusy(true); setCopied(false); setSentMsg("");
-    try {
-      const baseRules = " Tu écris AU NOM de PEN'UP 3D (l'expéditeur). RÈGLE ABSOLUE : le destinataire et toutes les personnes listées sous « ÉQUIPE DU CLIENT » sont des employés du revendeur (le client) ; ce ne sont JAMAIS des collègues de PEN'UP. Ne présente jamais l'un d'eux comme « notre collègue », « notre équipe » ou un membre de PEN'UP, et ne lui attribue pas une action faite de notre côté. Respecte la temporalité : appuie-toi uniquement sur les dates réelles de l'historique fourni ; n'invente aucun appel, rendez-vous, envoi ou échange absent de l'historique ; n'emploie « faisant suite à notre appel/échange du … » que si un échange correspondant figure réellement dans l'historique (sinon, ouvre autrement). N'invente AUCUN chiffre, date, fait ni engagement absent du contexte. Adresse-toi directement au destinataire.";
-      const toneClause = " Adopte " + toneHint + ".";
-      let sys;
-      if (canal === "email") sys = "Tu rédiges un e-mail commercial B2B en français pour PEN'UP 3D, adressé à un revendeur (magasin de jouets). Concis (8 à 12 lignes)." + toneClause + " Tu t'APPUIES sur le contexte (entreprise cliente, destinataire, historique daté, devis) pour personnaliser avec des références naturelles et justes. Première ligne EXACTEMENT « Objet : … », puis une ligne vide, le corps, et une signature « L'équipe PEN'UP 3D »." + baseRules;
-      else if (canal === "linkedin") sys = "Tu rédiges un message LinkedIn court (4 à 6 lignes), personnalisé et cordial, en français, de la part de PEN'UP 3D vers un interlocuteur d'un magasin de jouets." + toneClause + " Pas d'objet, pas de « Objet : ». Tu t'APPUIES sur le contexte pour personnaliser." + baseRules;
-      else sys = "Tu rédiges un SMS commercial B2B en français pour PEN'UP 3D, très court (2 à 3 phrases, moins de 320 caractères), sans objet ni formule de politesse lourde, signé « PEN'UP 3D »." + toneClause + " Va à l'essentiel et propose une action simple (rappel, RDV, lien)." + baseRules;
-      const u = "CONTEXTE :\n" + buildContext() + "\n\nOBJECTIF DU MESSAGE : " + obj + "\n\nRédige le message pour le destinataire indiqué, en exploitant ce contexte.";
-      const res = await aiGenerate(sys, u, onUsage, canal === "sms" ? 280 : 800);
-      if (canal === "email") {
-        // Extraction robuste de l'objet : on cherche dans les premières lignes une ligne « Objet : … »
-        // (tolérante au gras markdown / préfixes), on récupère le sujet et on retire CETTE ligne du corps.
-        const lines = res.split(/\r?\n/);
-        let subj = "", idx = -1;
-        for (let i = 0; i < Math.min(lines.length, 3); i++) {
-          const m = lines[i].match(/^[\s*_#>]*objet\s*:\s*(.*)$/i);
-          if (m) { subj = (m[1] || "").replace(/\*\*|__/g, "").trim(); idx = i; break; }
-        }
-        let rest = res;
-        if (idx >= 0) { const arr = lines.slice(); arr.splice(idx, 1); rest = arr.join("\n"); }
-        setSubject(subj || ("PEN'UP 3D — " + estabName)); setOut(rest.replace(/^\s+/, "").trim());
-      } else { setSubject(""); setOut(res.trim()); }
-    } catch (e) { setOut("Génération IA indisponible ici (fonctionne dans l'app Claude)."); }
+    if (out && edited) { const ok = await appConfirm("Régénérer va écraser le message que vous avez modifié à la main. Continuer ?", { title: "Régénérer", confirmLabel: "Régénérer" }); if (!ok) return; }
+    setBusy(true); setSentMsg("");
+    try { const r = await generateMessage({ contexte: effCtx, consigne: redaction, mode, canal, sousCanal: canal === "linkedin" ? sousCanal : "", type, ton, onUsage }); applyResult(r); }
+    catch (e) { setAlertes(["Génération IA indisponible : " + (e && e.message ? e.message : String(e))]); }
     finally { setBusy(false); }
   };
-  const copy = () => { const txt = (canal === "email" && subject) ? ("Objet : " + subject + "\n\n" + out) : out; try { navigator.clipboard.writeText(txt); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {} };
-  // Envoi direct via la boîte Gmail connectée (matthis-anael@…), avec signature auto.
+  const refine = async () => {
+    if (!out || !refineText.trim()) return;
+    setBusy(true);
+    try { const r = await generateMessage({ contexte: effCtx, consigne: refineText, mode: "retouche", canal, sousCanal: canal === "linkedin" ? sousCanal : "", type, ton, precedent: (canal === "email" && subject ? ("Objet : " + subject + "\n\n") : "") + out, onUsage }); applyResult(r); setRefineOpen(false); setRefineText(""); }
+    catch (e) { setAlertes(["Affinage IA indisponible : " + (e && e.message ? e.message : String(e))]); }
+    finally { setBusy(false); }
+  };
+  const logInteraction = (canalKey) => {
+    if (!persist) return;
+    const it = { id: "int_msg_" + Date.now(), accountId: ctxAccountId, contactId: ctxContactId, siteId: logSiteId, type: canalKey, direction: "sortant", date: TODAY(), heure: nowHM(), sujet: subject || (MSG_TYPES.find((t) => t.key === type) || {}).label || "Message", resume: out, email: (canalKey === "email" && recipient) ? recipient.email : "", source: "composer" };
+    persist((p) => ({ ...p, interactions: [...(p.interactions || []), it] }));
+  };
+  const maybeProposeRelance = async () => {
+    if (!persist) return;
+    const days = type === "prospection" ? 7 : (type === "relance_devis" ? 4 : 0);
+    if (!days) return;
+    const dt = new Date(); dt.setDate(dt.getDate() + days); const diso = isoDay(dt);
+    const ok = await appConfirm("Programmer une relance le " + diso + " (dans " + days + " jours) ?", { title: "Relance", confirmLabel: "Programmer" });
+    if (!ok) return;
+    const ev = { id: "ev_" + Date.now(), date: diso, heure: "", titre: "Relance — " + (recipient ? fullName(recipient) : estabName), notes: "Programmée automatiquement après un message (" + canal + ").", type: "relance", color: (EVENT_TYPES.relance || EVENT_TYPES.autre || {}).color || "#F8B133", accountId: ctxAccountId, siteId: logSiteId, contactId: ctxContactId };
+    persist((p) => ({ ...p, events: [...(p.events || []), ev] }));
+    setSentMsg((m) => (m ? m + " " : "") + "Relance programmée le " + diso + ".");
+  };
   const sendViaGmail = async () => {
     if (!recipient || !recipient.email) { setSentMsg("❌ Le destinataire n'a pas d'adresse e-mail."); return; }
     setSending(true); setSentMsg("");
@@ -3448,34 +3743,88 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, i
       const res = await fetch("/api/gmail-send", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ to: recipient.email, subject: subject || ("PEN'UP 3D — " + estabName), body: out }) });
       const dt = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(dt.error || ("Erreur " + res.status));
-      setSentMsg("✅ E-mail envoyé à " + recipient.email);
+      logInteraction("email");
+      setSentMsg("✅ E-mail envoyé à " + recipient.email + " — échange journalisé.");
+      maybeProposeRelance();
     } catch (e) { setSentMsg("❌ Échec : " + (e && e.message ? e.message : String(e))); }
     finally { setSending(false); }
   };
+  const markSent = async () => { logInteraction(canal); setSentMsg("✅ Message marqué comme envoyé — échange journalisé."); maybeProposeRelance(); };
+  const copy = () => { const txt = (canal === "email" && subject) ? ("Objet : " + subject + "\n\n" + out) : out; try { navigator.clipboard.writeText(txt); setSentMsg("Copié dans le presse-papiers."); setTimeout(() => setSentMsg(""), 1400); } catch (e) {} };
   const recMail = recipient && recipient.email;
   const recMobile = recipient && (recipient.mobile || recipient.fixe);
   const smsHref = recMobile ? ("sms:" + String(recMobile).replace(/[^+\d]/g, "") + "?body=" + encodeURIComponent(out)) : null;
-  const mailHref = recMail ? ("mailto:" + recipient.email + "?subject=" + encodeURIComponent(subject || "") + "&body=" + encodeURIComponent(out)) : null;
+  const CTX_BLOCKS = [
+    { k: "emetteur", label: "Émetteur", lock: true },
+    { k: "destinataire", label: "Destinataire", lock: true },
+    { k: "etablissement", label: "Établissement", lock: true },
+    { k: "historique", label: "Historique des échanges" },
+    { k: "engagements", label: "Engagements / relances" },
+    { k: "commercial", label: "Devis & commandes" },
+    { k: "sav", label: "SAV" },
+    { k: "temporel", label: "Date & saisonnalité" },
+    { k: "disponibilites", label: "Créneaux d'appel" },
+    { k: "gardeFous", label: "Garde-fous marque", lock: true },
+  ];
+  const toggleExclude = (k) => setExcluded((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  const bodyLen = (out || "").length;
+  const limit = canal === "sms" ? 300 : (canal === "linkedin" && sousCanal === "invitation" ? 280 : 0);
   return (<Modal title={"Message IA — " + (recipient ? fullName(recipient) : estabName)} onClose={onClose} xl guard={false}>
-    <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>{MSG_CANALS.map((c) => { const Ic = c.Icon; const on = canal === c.key; return (<button key={c.key} type="button" onClick={() => setCanal(c.key)} style={{ flex: 1, minWidth: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "9px 10px", borderRadius: 11, border: "1px solid " + (on ? c.color : "var(--line)"), boxShadow: on ? "inset 0 0 0 1px " + c.color : "none", background: on ? c.color + "14" : "var(--card)", color: on ? c.color : "var(--muted)", fontWeight: 700, fontFamily: "inherit", fontSize: 13, cursor: "pointer" }}><Ic size={16} /> {c.label}</button>); })}</div>
-    <div className="row2">
-      <div className="fld"><label>Destinataire</label>{list.length > 1 ? <select value={recipientId} onChange={(e) => setRecipientId(e.target.value)}>{list.map((c) => <option key={c.id} value={c.id}>{fullName(c)}{c.fonction ? " — " + c.fonction : ""}</option>)}</select> : <input readOnly value={recipient ? fullName(recipient) : "—"} />}<span style={{ fontSize: 11, color: "var(--muted)" }}>{canal === "sms" ? (recMobile ? "📱 " + recMobile : "Aucun mobile renseigné") : canal === "email" ? (recMail ? "✉️ " + recipient.email : "Aucune adresse e-mail") : (recipient && recipient.linkedin ? "Profil LinkedIn renseigné" : "Recherche LinkedIn")}</span></div>
-      <div className="fld"><label>Objectif (adaptable)</label><input value={obj} onChange={(e) => setObj(e.target.value)} placeholder="Ex : présenter la gamme, relancer un devis…" /></div>
+    <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>{MSG_CANALS.map((c) => { const Ic = c.Icon; const on = canal === c.key; return (<button key={c.key} type="button" onClick={() => setCanal(c.key)} style={{ flex: 1, minWidth: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "8px 10px", borderRadius: 11, border: "1px solid " + (on ? c.color : "var(--line)"), boxShadow: on ? "inset 0 0 0 1px " + c.color : "none", background: on ? c.color + "14" : "var(--card)", color: on ? c.color : "var(--muted)", fontWeight: 700, fontFamily: "inherit", fontSize: 13, cursor: "pointer" }}><Ic size={16} /> {c.label}</button>); })}</div>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8, marginBottom: 6 }}>
+      <div className="fld"><label>Destinataire</label><select value={recipientId} onChange={(e) => setRecipientId(e.target.value)}>{fullList.map((c) => <option key={c.id} value={c.id}>{c.__standard ? "☎ Standard / accueil" : fullName(c) + (c.fonction ? " — " + c.fonction : "")}</option>)}</select></div>
+      <div className="fld"><label>Type de message</label><select value={type} onChange={(e) => setType(e.target.value)}>{MSG_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}</select></div>
+      <div className="fld"><label>Ton</label><select value={ton} onChange={(e) => setTon(e.target.value)}>{MSG_TONES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}</select></div>
+      <div className="fld"><label>Signature</label><select value={forceSegment} onChange={(e) => setForceSegment(e.target.value)}><option value="auto">Auto ({fullCtx.emetteur && fullCtx.emetteur.segment === "institutionnel" ? "institutionnel" : "retail"})</option><option value="retail">B2B retail (Matthis-Anaël)</option><option value="institutionnel">Institutionnel (contact@)</option></select></div>
     </div>
-    <div className="fld"><label>Type de message</label><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{MSG_TYPES.map((t) => <button key={t.key} type="button" className={cx("btn", "btn-s", typeKey === t.key ? "btn-p" : "btn-g")} onClick={() => pickType(t)} title={t.obj}>{t.label}</button>)}</div></div>
-    <div className="fld"><label>Ton du message</label><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{MSG_TONES.map((t) => <button key={t.key} type="button" className={cx("btn", "btn-s", tone === t.key ? "btn-p" : "btn-g")} onClick={() => setTone(t.key)} title={t.hint}>{t.label}</button>)}</div></div>
-    <div style={{ fontSize: 11, color: "var(--muted)", margin: "2px 0 8px", display: "inline-flex", alignItems: "center", gap: 5 }}><Sparkles size={12} /> L'IA s'appuie sur l'entreprise cliente, le destinataire et l'historique daté ({(interactions || []).length} échange{(interactions || []).length > 1 ? "s" : ""}, {(deals || []).length} document{(deals || []).length > 1 ? "s" : ""}). Les contacts du client ne sont pas des collègues de PEN'UP.</div>
-    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}><button className="btn btn-p" onClick={gen} disabled={busy}><Sparkles size={15} className={busy ? "spin" : ""} /> {busy ? "Rédaction…" : (out ? "Régénérer" : "Générer")}</button></div>
-    {out && <ChannelPreview canal={canal} recipient={recipient} estabName={estabName} subject={subject} setSubject={setSubject} out={out} setOut={setOut} />}
-    {out && <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-      {canal === "email" && recMail && <button className="btn btn-p" onClick={sendViaGmail} disabled={sending} title="Envoyer depuis la boîte Gmail connectée (signature auto)"><Send size={15} className={sending ? "spin" : ""} /> {sending ? "Envoi…" : "Envoyer via Gmail"}</button>}
-      {canal === "email" && mailHref && <a className="btn btn-g" href={mailHref}><Mail size={15} /> Client mail</a>}
-      {canal === "sms" && smsHref && <a className="btn btn-p" href={smsHref}><MessageSquare size={15} /> Ouvrir l'app SMS</a>}
-      {canal === "linkedin" && <a className="btn btn-p" href={recipient && recipient.linkedin ? ensureHttp(recipient.linkedin) : linkedinSearch(recipient || {}, account && account.enseigne)} target="_blank" rel="noreferrer"><Linkedin size={15} /> Ouvrir LinkedIn</a>}
-      <button className="btn btn-g" onClick={copy}><Copy size={15} /> {copied ? "Copié !" : "Copier"}</button>
-    </div>}
-    {sentMsg && <div style={{ fontSize: 12.5, fontWeight: 600, marginTop: 8, textAlign: "right", color: sentMsg.startsWith("❌") ? "var(--red)" : "var(--green)" }}>{sentMsg}</div>}
-    <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 10 }}>Brouillon IA — à relire avant envoi. « Envoyer via Gmail » nécessite l'intégration Gmail (voir Intégrations) ; « Ouvrir l'app SMS » ouvre l'application de messages de l'appareil.</p>
+    <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 10, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+      <span>{canal === "sms" ? (recMobile ? "📱 " + recMobile : "Aucun mobile renseigné") : canal === "email" ? (recMail ? "✉️ " + recipient.email : "Aucune adresse e-mail") : (recipient && recipient.linkedin ? "Profil LinkedIn renseigné" : "Recherche LinkedIn")}</span>
+      {canal === "email" && effCtx.destinataire && <span>Adresse : <strong>{effCtx.destinataire.typeAdresse === "generique" ? "générique (routage ajouté)" : "nominative"}</strong></span>}
+      {canal === "linkedin" && <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}><input type="checkbox" checked={sousCanal === "invitation"} onChange={(e) => setSousCanal(e.target.checked ? "invitation" : "")} style={{ width: "auto" }} /> Invitation (≤ 280 car.)</label>}
+    </div>
+    <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+      <button type="button" className={cx("btn", "btn-s", mode === "consigne" ? "btn-p" : "btn-g")} onClick={() => { setMode("consigne"); setModeTouched(true); }}>Consigne</button>
+      <button type="button" className={cx("btn", "btn-s", mode === "brouillon" ? "btn-p" : "btn-g")} onClick={() => { setMode("brouillon"); setModeTouched(true); }}>Mon brouillon à réécrire</button>
+    </div>
+    <div className="fld"><label>Ce que je veux dire</label><textarea rows={8} value={redaction} onChange={(e) => setRedaction(e.target.value)} placeholder={mode === "brouillon" ? "Collez ou écrivez votre message : l'IA le réécrit sans changer vos idées ni vos faits." : "Décrivez librement votre intention : l'objectif, le contexte, ce que vous voulez obtenir. L'IA rédige le message."} style={{ resize: "vertical", minHeight: 150 }} /></div>
+    <div style={{ border: "1px solid var(--line)", borderRadius: 12, marginBottom: 12, background: "var(--card)" }}>
+      <button type="button" onClick={() => setCtxOpen((v) => !v)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 12px", background: "transparent", border: 0, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, color: "var(--ink)" }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>{ctxOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />} Contexte transmis</span>
+        <span style={{ fontSize: 11.5, fontWeight: 600, color: charCount > 12000 ? "var(--red)" : "var(--muted)" }}>{charCount.toLocaleString("fr-FR")} caractères{fullCtx._tronque ? " · historique tronqué" : ""}</span>
+      </button>
+      {ctxOpen && <div style={{ borderTop: "1px solid var(--line)", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8, maxHeight: 320, overflowY: "auto" }}>
+        {CTX_BLOCKS.map((b) => { const val = fullCtx[b.k]; if (typeof val === "undefined") return null; const empty = val == null || (Array.isArray(val) && !val.length); const off = excluded.has(b.k); return (<div key={b.k} style={{ opacity: off ? .45 : 1 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, fontWeight: 700 }}>{b.lock ? <span style={{ width: 16, textAlign: "center", color: "var(--muted)" }}>•</span> : <input type="checkbox" checked={!off} onChange={() => toggleExclude(b.k)} style={{ width: 16, height: 16 }} />}{b.label}{empty ? <span style={{ fontWeight: 500, color: "var(--muted)" }}> · vide</span> : null}{b.lock ? <span style={{ fontWeight: 500, color: "var(--muted)", fontSize: 10.5 }}> (toujours transmis)</span> : null}</label>
+          {!off && !empty && <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 10.5, lineHeight: 1.45, margin: "4px 0 0 23px", color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>{JSON.stringify(b.k === "destinataire" ? (effCtx.destinataire || val) : val, null, 1)}</pre>}
+        </div>); })}
+      </div>}
+    </div>
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
+      <div style={{ fontSize: 11, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 5 }}><Sparkles size={12} /> {((fullCtx.historique && fullCtx.historique.echanges) || []).length} échange(s) · {((fullCtx.commercial && fullCtx.commercial.devisEnCours) || []).length} devis{(fullCtx.sav && fullCtx.sav.bloqueTonCommercial) ? " · ⚠ SAV ouvert" : ""}</div>
+      <div style={{ display: "flex", gap: 8 }}>
+        {out && <button className="btn btn-g" onClick={() => setRefineOpen((v) => !v)} disabled={busy}><Wand2 size={15} /> Affiner</button>}
+        <button className="btn btn-p" onClick={gen} disabled={busy}><Sparkles size={15} className={busy ? "spin" : ""} /> {busy ? "Rédaction…" : (out ? "Régénérer" : "Générer")}</button>
+      </div>
+    </div>
+    {refineOpen && <div className="fld" style={{ marginBottom: 10 }}><label>Instruction de retouche (le reste du message est conservé)</label><div style={{ display: "flex", gap: 8 }}><input value={refineText} onChange={(e) => setRefineText(e.target.value)} placeholder="Ex : raccourcir, ajouter une question sur les délais, ton plus direct…" onKeyDown={(e) => { if (e.key === "Enter") refine(); }} /><button className="btn btn-p" onClick={refine} disabled={busy || !refineText.trim()}>Appliquer</button></div></div>}
+    {(out || subject) && <>
+      <ChannelPreview canal={canal} recipient={recipient} estabName={estabName} subject={subject} setSubject={(v) => { setSubject(v); setEdited(true); }} out={out} setOut={(v) => { setOut(v); setEdited(true); }} />
+      <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginTop: 6, fontSize: 11.5 }}>
+        <span style={{ color: limit && bodyLen > limit ? "var(--red)" : "var(--muted)" }}>{bodyLen} caractère{bodyLen > 1 ? "s" : ""}{limit ? " / " + limit + (bodyLen > limit ? " — dépassé" : "") : ""}</span>
+        {shortOut && shortOut !== out && <button className="btn btn-g btn-s" onClick={() => { setOut(shortOut); setEdited(true); }}><Scissors size={13} /> Version courte</button>}
+      </div>
+      {!!usedCtx.length && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}><strong>Contexte mobilisé :</strong> {usedCtx.join(" · ")}</div>}
+      {!!alertes.length && <div style={{ marginTop: 10, border: "1px solid #f0c36d", background: "#fff7e6", borderRadius: 10, padding: "8px 11px" }}><div style={{ fontSize: 12, fontWeight: 800, color: "#9a6a00", display: "inline-flex", alignItems: "center", gap: 6 }}><AlertTriangle size={14} /> Alertes à vérifier</div><ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 12, color: "#7a5500" }}>{alertes.map((a, i) => <li key={i}>{a}</li>)}</ul></div>}
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+        {canal === "email" && recMail && <button className="btn btn-p" onClick={sendViaGmail} disabled={sending}><Send size={15} className={sending ? "spin" : ""} /> {sending ? "Envoi…" : "Envoyer via Gmail"}</button>}
+        {canal === "sms" && smsHref && <a className="btn btn-p" href={smsHref}><MessageSquare size={15} /> Ouvrir l'app SMS</a>}
+        {canal === "linkedin" && <a className="btn btn-p" href={recipient && recipient.linkedin ? ensureHttp(recipient.linkedin) : linkedinSearch(recipient || {}, account && account.enseigne)} target="_blank" rel="noreferrer"><Linkedin size={15} /> Ouvrir LinkedIn</a>}
+        {canal !== "email" && <button className="btn btn-g" onClick={markSent}><Check size={15} /> Marquer envoyé</button>}
+        <button className="btn btn-g" onClick={copy}><Copy size={15} /> Copier</button>
+      </div>
+      {sentMsg && <div style={{ fontSize: 12.5, fontWeight: 600, marginTop: 8, textAlign: "right", color: sentMsg.startsWith("❌") ? "var(--red)" : "var(--green)" }}>{sentMsg}</div>}
+    </>}
+    <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 10 }}>Brouillon IA — à relire avant envoi. Le contexte transmis est consultable et ajustable ci-dessus. « Envoyer via Gmail » nécessite l'intégration Gmail (voir Connexions).</p>
   </Modal>);
 }
 // Construit le dossier complet d'un compte (groupe / établissement) transmis au chat IA :
@@ -3763,7 +4112,8 @@ function ContactForm({ contact, accounts, contacts, onSave, known = [], sites = 
     {dup && <div className="dup-warn"><AlertTriangle size={15} /> Contact similaire existant : « {fullName(dup)} » {dup.email && `(${dup.email})`}. Vérifiez avant d'enregistrer pour éviter un doublon.</div>}
     <div className="fld"><label>Enseigne / établissement lié</label><EtabPicker accounts={accounts} sites={sites} accountId={f.accountId} siteId={f.siteId} onChange={(a, s) => setF((p) => ({ ...p, accountId: a, siteId: s }))} /></div>
     {apercu && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: -4, marginBottom: 2, display: "inline-flex", alignItems: "center", gap: 5 }}><MapPin size={12} />{apercu}{selSite && selSite.adresse ? " · " + selSite.adresse : ""}</div>}
-    <div className="row2"><div className="fld"><label>Rôle</label><select value={f.role} onChange={(e) => up("role", e.target.value)}>{Object.entries(ROLE_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div><div className="fld"><label>Fonction</label><Combo value={f.fonction} onChange={(v) => up("fonction", v)} options={FONCTIONS} placeholder="Chef(fe) de produit, Dirigeant(e)…" /></div></div>
+    <div className="row2"><div className="fld"><label>Civilité</label><select value={f.civilite || ""} onChange={(e) => up("civilite", e.target.value)}><option value="">— non précisée —</option><option value="Madame">Madame</option><option value="Monsieur">Monsieur</option></select></div><div className="fld"><label>Rôle</label><select value={f.role} onChange={(e) => up("role", e.target.value)}>{Object.entries(ROLE_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div></div>
+    <div className="fld"><label>Fonction</label><Combo value={f.fonction} onChange={(v) => up("fonction", v)} options={FONCTIONS} placeholder="Chef(fe) de produit, Dirigeant(e)…" /></div>
     <div className="fld"><label>Courriel</label><input value={f.email} onChange={(e) => up("email", e.target.value)} placeholder="prenom.nom@exemple.fr" /></div>
     <div className="row2"><div className="fld"><label>Mobile</label><PhoneInput value={f.mobile} onChange={(v) => up("mobile", v)} /></div><div className="fld"><label>Fixe</label><PhoneInput value={f.fixe} onChange={(v) => up("fixe", v)} /></div></div>
     <div className="fld"><label>LinkedIn</label><div style={{ display: "flex", gap: 6 }}><input value={f.linkedin} onChange={(e) => up("linkedin", e.target.value)} placeholder="URL du profil" /><a className="btn btn-g btn-s" href={linkedinSearch(f, ens)} target="_blank" rel="noreferrer" title="Rechercher sur LinkedIn"><Search size={14} /></a></div></div>
@@ -3851,7 +4201,7 @@ function Fiche({ c, account, data, myEmail, settings, deals, interactions, onBac
     {vcardOpen && (() => { const vcf = contactVCard(c, account); const orgVcf = companyVCard(account, data); const dlVcf = (text, filename) => { const blob = new Blob([text], { type: "text/vcard;charset=utf-8" }); const url = URL.createObjectURL(blob); const a2 = document.createElement("a"); a2.href = url; a2.download = filename; document.body.appendChild(a2); a2.click(); document.body.removeChild(a2); URL.revokeObjectURL(url); }; const dl = () => dlVcf(vcf, fullName(c).replace(/\s+/g, "_") + ".vcf"); const dlOrg = () => dlVcf(orgVcf, (account.enseigne || "societe").replace(/\s+/g, "_") + ".vcf"); return (<Modal title={"Carte de visite — " + fullName(c)} onClose={() => setVcardOpen(false)}>
       <div style={{ textAlign: "center" }}><img src={"https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=" + encodeURIComponent(vcf)} alt="QR contact" width={220} height={220} style={{ borderRadius: 12, border: "1px solid var(--line)" }} /><div style={{ fontSize: 12.5, color: "var(--muted)", margin: "10px 0 14px", lineHeight: 1.5 }}>Scannez ce QR code avec l'appareil photo de votre téléphone pour enregistrer {fullName(c)} dans vos contacts, ou téléchargez la fiche vCard.</div><div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}><button className="btn btn-p" onClick={dl}><Download size={15} /> Télécharger le contact</button>{orgVcf && <button className="btn btn-g" onClick={dlOrg} title={"Télécharger la société « " + account.enseigne + " » en vCard"}><Download size={15} /> Télécharger la société</button>}</div></div>
     </Modal>); })()}
-    {msgOpen && <MessageComposer account={account} contacts={[c, ...(c.accountId ? data.contacts.filter((x) => x.accountId === c.accountId && x.id !== c.id) : [])]} defaultContactId={c.id} interactions={interactions} deals={deals} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onClose={() => setMsgOpen(false)} />}
+    {msgOpen && <MessageComposer account={account} site={c.siteId ? (data.sites || []).find((x) => x.id === c.siteId) : null} contacts={[c, ...(c.accountId ? data.contacts.filter((x) => x.accountId === c.accountId && x.id !== c.id) : [])]} defaultContactId={c.id} data={data} persist={persist} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onClose={() => setMsgOpen(false)} />}
     {editModal}
   </div>);
 }
@@ -5931,6 +6281,24 @@ function Connexions({ data, persist, autoBackup }) {
         <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 6 }}>Ces seuils pilotent l'alerte du Calculateur. Coefficient = PVC TTC / PA HT. À TVA 20 %, la marge distributeur (HT) vaut 1 − 1,2/coef. Plancher B2B 2,2 (~45,5%) : c'est le minimum offert au distributeur pour rester attractif ; en dessous, le produit risque de ne pas être référencé (alerte). Repère haut 2,4 (~50%).</div>
         <div className="row2" style={{ marginTop: 12 }}><div className="fld"><label>Objectif CA HT signé / mois (€)</label><input type="number" step="100" value={settings.objCaMois || 0} onChange={(e) => persist((p) => ({ ...p, settings: { ...p.settings, objCaMois: +e.target.value || 0 } }))} /></div><div className="fld"><label>Objectif commandes signées / mois</label><input type="number" step="1" value={settings.objCmdMois || 0} onChange={(e) => persist((p) => ({ ...p, settings: { ...p.settings, objCmdMois: +e.target.value || 0 } }))} /></div></div>
         <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 6 }}>Objectifs affichés en jauges sur le tableau de bord (laisser à 0 pour masquer).</div>
+      </div>
+    </div>
+
+    <Section note="contexte de la rédaction IA des messages">Rédaction assistée</Section>
+    <div>
+      <div className="card">
+        <div className="fld"><label>Plage d'appel (créneaux proposés)</label>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <input type="time" value={settings.appelDebut || "09:00"} onChange={(e) => persist((p) => ({ ...p, settings: { ...p.settings, appelDebut: e.target.value || "09:00" } }))} style={{ maxWidth: 140 }} />
+            <span style={{ color: "var(--muted)" }}>à</span>
+            <input type="time" value={settings.appelFin || "18:00"} onChange={(e) => persist((p) => ({ ...p, settings: { ...p.settings, appelFin: e.target.value || "18:00" } }))} style={{ maxWidth: 140 }} />
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 6 }}>Fenêtre horaire personnelle pour proposer des créneaux d'appel dans les messages IA. Elle est croisée avec les horaires d'ouverture de l'établissement, hors week-ends, jours fériés et rendez-vous déjà pris dans l'agenda.</div>
+        </div>
+        <div className="fld" style={{ marginTop: 14 }}><label>Périodes / vacances scolaires (saisie annuelle)</label>
+          <textarea rows={4} value={settings.vacancesScolaires || ""} onChange={(e) => persist((p) => ({ ...p, settings: { ...p.settings, vacancesScolaires: e.target.value } }))} placeholder={"Une période par ligne : Libellé ; AAAA-MM-JJ ; AAAA-MM-JJ\nEx : Rentrée ; 2026-09-01 ; 2026-09-07\nNoël ; 2026-12-20 ; 2027-01-05"} />
+          <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 6 }}>Vide par défaut. Une période par ligne (un libellé et deux dates AAAA-MM-JJ). Si la date du jour tombe dans une période, elle est transmise à l'IA ; sinon aucune saisonnalité n'est évoquée. Aucune date n'est codée en dur dans l'application.</div>
+        </div>
       </div>
     </div>
 
