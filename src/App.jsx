@@ -575,6 +575,17 @@ function detachSiteToIndependent(p, siteId) {
   const rp = (arr) => (arr || []).map((x) => x.siteId === siteId ? { ...x, accountId: newId } : x);
   return { ...p, accounts: [...p.accounts, acc], sites: p.sites.map((x) => x.id === siteId ? { ...x, accountId: newId } : x), contacts: rp(p.contacts), deals: rp(p.deals), interactions: rp(p.interactions), events: rp(p.events) };
 }
+// Fusionne deux établissements (sites) : le perdant est absorbé, ses contacts, échanges, rendez-vous et
+// livraisons de commandes sont réaffectés au gagnant, dont on complète les champs vides. Aucune perte.
+function mergeSites(p, loserId, winnerId) {
+  if (loserId === winnerId) return p;
+  const loser = (p.sites || []).find((s) => s.id === loserId); const winner = (p.sites || []).find((s) => s.id === winnerId);
+  if (!loser || !winner) return p;
+  const merged = { ...winner };
+  ["adresse", "adresseLivraison", "ville", "typeSurface", "siret", "horaires", "contactId", "lat", "lng", "notes"].forEach((k) => { if ((merged[k] == null || merged[k] === "") && loser[k] != null && loser[k] !== "") merged[k] = loser[k]; });
+  const reassign = (arr) => (arr || []).map((x) => x.siteId === loserId ? { ...x, siteId: winnerId } : x);
+  return { ...p, sites: p.sites.filter((s) => s.id !== loserId).map((s) => s.id === winnerId ? merged : s), contacts: reassign(p.contacts), interactions: reassign(p.interactions), events: reassign(p.events), deals: (p.deals || []).map((d) => d.livraisonSiteId === loserId ? { ...d, livraisonSiteId: winnerId } : d) };
+}
 // Suivi de la dépense réelle des appels à l'API Claude faits PAR l'application (tarif Claude Sonnet 4).
 const CLAUDE_PRICE_USD = { in: 3, out: 15 }; // dollars par million de tokens (entrée / sortie)
 const CLAUDE_WEB_SEARCH_USD = 0.01; // dollars par recherche web (outil web_search : 10 $ / 1000 recherches)
@@ -2787,6 +2798,26 @@ function DoublonsModal({ data, persist, onClose }) {
     return out;
   })();
   const agroups = (() => { const m = {}; (data.accounts || []).forEach((a) => { const k = normStr(a.enseigne); if (k.length < 2) return; (m[k] = m[k] || []).push(a); }); return Object.values(m).filter((g) => g.length > 1); })();
+  const accById = {}; (data.accounts || []).forEach((a) => { accById[a.id] = a; });
+  // Doublons d'établissements (points de vente / sites), y compris au sein d'un même groupe : mêmes
+  // nom + ville (tolérant à la ville incluse dans le nom), même cœur de rue, ou même SIRET.
+  const sgroups = (() => {
+    const normSp = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+    const GEN = new Set(["boutique", "concept", "store", "magasin", "shop", "sas", "sarl", "eurl", "sasu", "sa", "ets", "etablissement", "etablissements", "le", "la", "les"]);
+    const ST_TYPES = new Set(["rue", "route", "rte", "avenue", "av", "boulevard", "bd", "chemin", "impasse", "imp", "allee", "allees", "place", "pl", "quai", "cours", "voie", "faubourg", "fg", "passage"]);
+    const ST_STOP = new Set(["zone", "zac", "za", "cc", "centre", "commercial", "commerciale", "batiment", "bat", "lieu", "dit", "lieudit", "galerie", "parc", "espace", "espaces", "residence", "bp", "cs", "cedex"]);
+    const streetCore = (addr) => { const t = normSp(addr).split(/\s+/).filter(Boolean); for (let i = 0; i < t.length - 1; i++) { if (/^\d+$/.test(t[i]) && ST_TYPES.has(t[i + 1])) { const nm = []; for (let j = i + 2; j < t.length && nm.length < 4; j++) { if (/\d/.test(t[j]) || ST_STOP.has(t[j])) break; nm.push(t[j]); } if (nm.length) return t[i] + " " + t[i + 1] + " " + nm.join(" "); } } return ""; };
+    const villeOf = (s) => { const l = parseLocality(s.adresse || ""); let v = normSp(l.ville); if (!v) { const a = accById[s.accountId]; if (a && a.ville) v = normSp(a.ville); } return { ville: v, cp: (l.cp || "").replace(/\D/g, "") }; };
+    const sigsOf = (s) => { const keys = []; const { ville, cp } = villeOf(s); const loc = ville || cp; const siret = String(s.siret || "").replace(/\D/g, ""); if (siret.length === 14) keys.push("T:" + siret); const sc = streetCore(s.adresse); if (sc && sc.split(" ").length >= 3 && loc) keys.push("R:" + sc + "|" + loc); const raw = normSp(s.label).split(/\s+/).filter((t) => t.length > 1 && !GEN.has(t)); if (raw.length >= 2 && loc) keys.push("N:" + raw.join(" ") + "|" + loc); if (loc && ville) { const strip = raw.filter((t) => !(t.length >= 3 && ville.includes(t))); if (strip.length >= 2 && strip.length < raw.length) keys.push("N:" + strip.join(" ") + "|" + loc); } return keys; };
+    const active = (data.sites || []).filter((s) => (s.type === "pdv" || s.type === "decision") && !s.archived);
+    const parent = {}; active.forEach((s) => { parent[s.id] = s.id; });
+    const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    const byKey = {};
+    active.forEach((s) => { sigsOf(s).forEach((k) => { if (byKey[k] != null) { const ra = find(byKey[k]), rb = find(s.id); if (ra !== rb) parent[ra] = rb; } else byKey[k] = s.id; }); });
+    const cl = {}; active.forEach((s) => { const r = find(s.id); (cl[r] = cl[r] || []).push(s); });
+    return Object.values(cl).filter((g) => g.length > 1);
+  })();
+  const mergeSGroup = (g) => { appConfirm("Fusionner ces " + g.length + " établissements « " + (g[0].label || "") + " » en un seul ? Contacts, devis, échanges et rendez-vous seront regroupés. (Annulable.)", { title: "Fusionner les établissements ?", confirmLabel: "Fusionner" }).then((ok) => { if (!ok) return; const score = (s) => ["adresse", "ville", "siret", "horaires", "contactId", "notes"].reduce((n, k) => n + ((s[k] != null && s[k] !== "") ? 1 : 0), 0); const w = g.slice().sort((a, b) => score(b) - score(a))[0]; persist((p) => { let np = p; g.forEach((s) => { if (s.id !== w.id) np = mergeSites(np, s.id, w.id); }); return np; }); }); };
   const mergeCGroup = (g) => { const w = g.slice().sort((a, b) => filled(b, ["email", "mobile", "fixe", "fonction"]) - filled(a, ["email", "mobile", "fixe", "fonction"]))[0]; persist((p) => { let np = p; g.forEach((c) => { if (c.id !== w.id) np = mergeContacts(np, c.id, w.id); }); return np; }); };
   const mergeAGroup = (g) => { appConfirm("Fusionner ces " + g.length + " comptes « " + (g[0].enseigne || "") + " » en un seul ? Sites, contacts, devis et échanges seront regroupés. (Annulable.)", { title: "Fusionner les comptes ?", confirmLabel: "Fusionner" }).then((ok) => { if (!ok) return; const w = g.slice().sort((a, b) => filled(b, ["siren", "logo", "ville", "code"]) - filled(a, ["siren", "logo", "ville", "code"]))[0]; persist((p) => { let np = p; g.forEach((a) => { if (a.id !== w.id) np = mergeAccounts(np, a.id, w.id); }); return np; }); }); };
   const row = (label, sub, onMerge) => (<div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 11px", border: "1px solid var(--line)", borderRadius: 11, background: "#fff" }}><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 700, fontSize: 13 }}>{label}</div><div style={{ fontSize: 11.5, color: "var(--muted)" }}>{sub}</div></div><button className="btn btn-p btn-s" onClick={onMerge}><GitBranch size={14} /> Fusionner</button></div>);
@@ -2794,6 +2825,8 @@ function DoublonsModal({ data, persist, onClose }) {
     <p style={{ fontSize: 12.5, color: "var(--muted)", marginTop: -4 }}>La fusion conserve la fiche la plus complète et y rattache le reste. Toute fusion est <strong>annulable</strong> via « Annuler » en haut.</p>
     <div className="sec-h" style={{ marginTop: 10 }}><h3 className="pu-display" style={{ margin: 0, fontSize: 14 }}>Enseignes / comptes</h3></div>
     {agroups.length === 0 ? <div className="empty">Aucun doublon d'enseigne.</div> : <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>{agroups.map((g, i) => row(g.map((a) => a.enseigne).join("  ·  "), g.length + " comptes au même nom", () => mergeAGroup(g)))}</div>}
+    <div className="sec-h" style={{ marginTop: 16 }}><h3 className="pu-display" style={{ margin: 0, fontSize: 14 }}>Établissements (points de vente)</h3></div>
+    {sgroups.length === 0 ? <div className="empty">Aucun doublon d'établissement.</div> : <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>{sgroups.map((g, i) => row(g.map((s) => s.label || "Établissement").join("  ·  "), g.length + " établissements au même endroit" + (accById[g[0].accountId] ? " · groupe " + accById[g[0].accountId].enseigne : ""), () => mergeSGroup(g)))}</div>}
     <div className="sec-h" style={{ marginTop: 16 }}><h3 className="pu-display" style={{ margin: 0, fontSize: 14 }}>Contacts</h3></div>
     {cgroups.length === 0 ? <div className="empty">Aucun doublon de contact.</div> : <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>{cgroups.map((g, i) => row(g.map((c) => fullName(c)).join("  ·  "), [g[0].email, g.length + " fiches"].filter(Boolean).join(" · "), () => mergeCGroup(g)))}</div>}
   </Modal>);
