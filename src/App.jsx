@@ -7206,7 +7206,9 @@ function presenceDay(rec) {
   if (!rec) return null;
   const motif = (rec.motif && PRESENCE_MOTIFS[rec.motif]) ? rec.motif : "presence";
   if (motif !== "presence") {
-    return { worked: PRESENCE_MOTIFS[motif].hours || 0, pause: false, motif, invalid: false };
+    const forfait = PRESENCE_MOTIFS[motif].hours || 0;
+    const worked = (rec.heures != null && rec.heures !== "") ? Math.max(0, Number(rec.heures) || 0) : forfait;
+    return { worked, pause: false, motif, invalid: false };
   }
   if (!rec.arrivee || !rec.depart) return null;
   const a = pMin(rec.arrivee), d = pMin(rec.depart);
@@ -7444,17 +7446,18 @@ function PointageEditor({ ds, rec, onSave, onDelete, onClose }) {
   const [depart, setDepart] = useState((rec && rec.depart) || "17:30");
   const [pause, setPause] = useState(rec ? rec.pause !== false : true);
   const [pauseMin, setPauseMin] = useState((rec && rec.pauseMin != null) ? rec.pauseMin : 30);
+  const [heures, setHeures] = useState((rec && rec.heures != null) ? rec.heures : (PRESENCE_MOTIFS[(rec && rec.motif && PRESENCE_MOTIFS[rec.motif]) ? rec.motif : "presence"].hours || 0));
   const we = isWeekendDs(ds);
   const isPresence = motif === "presence";
-  const st = presenceDay(isPresence ? { arrivee, depart, pause, pauseMin } : { motif });
+  const st = presenceDay(isPresence ? { arrivee, depart, pause, pauseMin } : { motif, heures });
   const target = we ? 0 : PRESENCE_TARGET;
   const over = st && !st.invalid ? st.worked - target : null;
   const dLabel = new Date(ds + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
   const col = over == null ? "var(--muted)" : over >= 0 ? "var(--green)" : "var(--amber)";
-  const save = () => onSave(isPresence ? { arrivee, depart, pause, pauseMin: pause ? (Number(pauseMin) || 0) : 0 } : { motif });
+  const save = () => onSave(isPresence ? { arrivee, depart, pause, pauseMin: pause ? (Number(pauseMin) || 0) : 0 } : { motif, heures });
   return (<Modal title={"Pointage — " + dLabel} onClose={onClose}>
     <div className="fld"><label>Type de journée</label>
-      <select value={motif} onChange={(e) => setMotif(e.target.value)}>{MOTIF_ORDER.map((k) => { const m = PRESENCE_MOTIFS[k]; return <option key={k} value={k}>{m.emoji + " " + m.label + (m.hours != null ? " — " + fmtDur(m.hours) : "")}</option>; })}</select>
+      <select value={motif} onChange={(e) => { const k = e.target.value; setMotif(k); if (k !== "presence") setHeures(PRESENCE_MOTIFS[k].hours || 0); }}>{MOTIF_ORDER.map((k) => { const m = PRESENCE_MOTIFS[k]; return <option key={k} value={k}>{m.emoji + " " + m.label}</option>; })}</select>
     </div>
     {isPresence ? (<>
       <div className="row2">
@@ -7469,7 +7472,19 @@ function PointageEditor({ ds, rec, onSave, onDelete, onClose }) {
       </div>
       {pause && <div className="fld"><label>Durée de la pause (minutes)</label><input type="number" min="0" step="5" value={pauseMin} onChange={(e) => setPauseMin(Math.max(0, +e.target.value))} /></div>}
     </>) : (
-      <div style={{ fontSize: 12.5, color: "var(--muted)", margin: "2px 0 4px", lineHeight: 1.5 }}>Journée « {PRESENCE_MOTIFS[motif].label} » : comptée forfaitairement {fmtDur(PRESENCE_MOTIFS[motif].hours)}{PRESENCE_MOTIFS[motif].hours === PRESENCE_TARGET ? " (objectif atteint, journée neutre)" : ""}. Pas d'horaires à saisir.</div>
+      <div className="fld">
+        <label>Heures comptées ce jour</label>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+          <button type="button" className={cx("btn", "btn-s", heures === PRESENCE_TARGET ? "btn-p" : "btn-g")} onClick={() => setHeures(PRESENCE_TARGET)}>Journée ({fmtDur(PRESENCE_TARGET)})</button>
+          <button type="button" className={cx("btn", "btn-s", heures === Math.round(PRESENCE_TARGET / 2) ? "btn-p" : "btn-g")} onClick={() => setHeures(Math.round(PRESENCE_TARGET / 2))}>Demi-journée</button>
+          <button type="button" className={cx("btn", "btn-s", heures === 0 ? "btn-p" : "btn-g")} onClick={() => setHeures(0)}>Aucune (0 h)</button>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input type="number" min="0" max="12" step="0.25" value={+(heures / 60).toFixed(2)} onChange={(e) => setHeures(Math.max(0, Math.round((+e.target.value || 0) * 60)))} style={{ maxWidth: 130 }} />
+          <span style={{ color: "var(--muted)", fontSize: 12.5 }}>heures</span>
+        </div>
+        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 6, lineHeight: 1.5 }}>Journée « {PRESENCE_MOTIFS[motif].label} » comptée pour {fmtDur(heures)}. Ajustez pour un rendez-vous plus court, une demi-journée d'absence ou de congé, etc.</div>
+      </div>
     )}
     <div className="calc-out" style={{ marginTop: 10, background: (over == null ? "#9aa6bd" : over >= 0 ? "#2bb673" : "#F8B133") + "18" }}>
       <span className="l">Temps compté{we ? " (week-end)" : " · objectif " + fmtDur(target)}</span>
