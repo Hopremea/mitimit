@@ -46,6 +46,51 @@ async function claudeErrorText(res) {
   return "HTTP " + res.status + (detail ? " — " + detail : "");
 }
 
+// ===== Suivi global des opérations IA =====
+// Registre singleton (hors cycle de vie React) : une opération IA continue même si le composant qui
+// l'a lancée est démonté (onglet fermé, modale quittée), et reste visible via un indicateur global.
+const aiJobs = {
+  jobs: new Map(), // id -> { id, label, done, total, _promise }
+  subs: new Set(),
+  _n: 0,
+  _notify() { this.subs.forEach((f) => { try { f(); } catch (e) {} }); },
+  subscribe(f) { this.subs.add(f); return () => this.subs.delete(f); },
+  list() { return [...this.jobs.values()]; },
+  count() { return this.jobs.size; },
+  has(id) { return this.jobs.has(id); },
+  get(id) { return this.jobs.get(id) || null; },
+  begin(id, label, total) { this.jobs.set(id, { id, label: label || "IA…", done: 0, total: total || 0 }); this._notify(); },
+  progress(id, done, total) { const j = this.jobs.get(id); if (j) { if (done != null) j.done = done; if (total != null) j.total = total; this._notify(); } },
+  end(id) { if (this.jobs.delete(id)) this._notify(); },
+  anon(label) { const id = "ai_" + (++this._n) + "_x"; this.begin(id, label); return id; },
+  // Lance une opération IA nommée qui survit au démontage. Si un job du même id tourne déjà, on ne le
+  // relance pas (on renvoie sa promesse en cours). Le runner reçoit une fonction de progression (done, total).
+  run(id, label, runner, total) {
+    const ex = this.jobs.get(id);
+    if (ex && ex._promise) return ex._promise;
+    this.begin(id, label, total);
+    const j = this.jobs.get(id);
+    const p = (async () => { try { return await runner((d, t) => this.progress(id, d, t)); } finally { this.end(id); } })();
+    if (j) j._promise = p;
+    return p;
+  },
+};
+function useAiJobs() {
+  const [, force] = useState(0);
+  useEffect(() => aiJobs.subscribe(() => force((x) => x + 1)), []);
+  return aiJobs;
+}
+// Indicateur global « IA en cours » affiché dans la barre du haut, visible sur tous les onglets.
+function AiJobsBadge() {
+  const jobs = useAiJobs();
+  const list = jobs.list();
+  if (!list.length) return null;
+  const withProg = list.find((j) => j.total > 0);
+  const label = list.length === 1 ? list[0].label : list.length + " opérations IA";
+  const prog = withProg && withProg.total ? " " + withProg.done + "/" + withProg.total : "";
+  return (<span title={list.map((j) => j.label + (j.total ? " (" + j.done + "/" + j.total + ")" : "")).join("\n")} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 700, color: "#fff", background: "#7c5cf0", border: "1px solid #7c5cf0", borderRadius: 20, padding: "5px 11px", whiteSpace: "nowrap" }}><Sparkles size={13} className="spin" />{label}{prog}</span>);
+}
+
 // Lecture du stock Shopify via le relais serveur /api/shopify (token Admin protege cote serveur).
 // action « test » : verifie la connexion. action « sync » : renvoie les variantes (SKU + quantite).
 async function shopifyApi(action, creds) {
@@ -2688,7 +2733,9 @@ function HorairesBulk({ data, persist, onClose }) {
     .sort((x, y) => (x.s.label || "").localeCompare(y.s.label || ""));
   const missing = stores.filter((o) => !String(o.s.horaires || "").trim());
   const [st, setSt] = useState({});
-  const [running, setRunning] = useState(false);
+  const jobs = useAiJobs();
+  const HJOB = "horaires:complete";
+  const running = jobs.has(HJOB);
   const persistUsage = (u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }));
   const applyHoraires = (id, h) => persist((p) => ({ ...p, sites: (p.sites || []).map((x) => x.id === id ? { ...x, horaires: h } : x) }));
   const searchOne = async (o) => {
@@ -2701,20 +2748,25 @@ function HorairesBulk({ data, persist, onClose }) {
       else setSt((s) => ({ ...s, [id]: { busy: false, msg: "Aucun horaire fiable trouvé — à saisir manuellement." } }));
     } catch (e) { setSt((s) => ({ ...s, [id]: { busy: false, msg: "Recherche IA indisponible ici (fonctionne dans l'app Claude)." } })); }
   };
-  const runAll = async () => {
-    setRunning(true);
-    for (const o of missing) {
-      if (st[o.s.id] && (st[o.s.id].applied || st[o.s.id].busy)) continue;
-      await searchOne(o);
-      await new Promise((r) => setTimeout(r, 250)); // léger délai entre appels pour rester raisonnable
-    }
-    setRunning(false);
+  // Lancement via le registre global : la recherche continue même si la modale est fermée, et
+  // l'indicateur « IA en cours » reste visible sur tous les onglets. Réouvrir la modale montre l'état.
+  const runAll = () => {
+    const targets = missing.filter((o) => !(st[o.s.id] && (st[o.s.id].applied || st[o.s.id].busy)));
+    if (!targets.length) return;
+    jobs.run(HJOB, "Compléter les horaires", async (prog) => {
+      let i = 0; prog(0, targets.length);
+      for (const o of targets) {
+        await searchOne(o);
+        prog(++i, targets.length);
+        await new Promise((r) => setTimeout(r, 250)); // léger délai entre appels pour rester raisonnable
+      }
+    }, targets.length);
   };
   const doneCount = Object.values(st).filter((x) => x && x.applied).length;
   return (<Modal title="Compléter les horaires (IA)" onClose={onClose} wide>
     <p style={{ fontSize: 12.5, color: "var(--muted)", marginTop: -4, lineHeight: 1.5 }}>Pour chaque établissement sans horaires, l'IA recherche les horaires d'ouverture (fiche Google / site officiel) et les <strong>applique directement</strong>. Vous pouvez lancer toute la liste en une fois, ou magasin par magasin. Les horaires restent modifiables sur chaque fiche.</p>
     <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", margin: "8px 0 12px" }}>
-      <button className="btn btn-p btn-s" onClick={runAll} disabled={running || missing.length === 0}><Sparkles size={14} className={running ? "spin" : ""} /> {running ? "Recherche en cours…" : "Rechercher & appliquer à tous (" + missing.length + ")"}</button>
+      <button className="btn btn-p btn-s" onClick={runAll} disabled={running || missing.length === 0}><Sparkles size={14} className={running ? "spin" : ""} /> {running ? ("Recherche en cours…" + (() => { const j = jobs.get(HJOB); return j && j.total ? " " + j.done + "/" + j.total : ""; })()) : "Rechercher & appliquer à tous (" + missing.length + ")"}</button>
       {doneCount > 0 && <span style={{ fontSize: 12, color: "var(--green)", fontWeight: 700 }}>{doneCount} appliqué{doneCount > 1 ? "s" : ""} ✓</span>}
     </div>
     {missing.length === 0 ? <div className="empty">Tous les établissements ont déjà des horaires. 🎉</div> : <div style={{ display: "flex", flexDirection: "column", gap: 7, maxHeight: 420, overflowY: "auto" }}>{missing.map((o) => { const s = st[o.s.id] || {}; return (<div key={o.s.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 11, background: "#fff" }}>
@@ -3200,20 +3252,26 @@ async function aiRephrase(text, persistUsage) {
 }
 // Génération de texte par l'IA (e-mail, message LinkedIn, suggestion d'action…).
 async function aiGenerate(system, user, persistUsage, maxTokens = 800) {
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] }) });
-  if (!res.ok) throw new Error(await claudeErrorText(res));
-  const dt = await res.json();
-  if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
-  return (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+  const jid = aiJobs.anon("Rédaction IA");
+  try {
+    const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] }) });
+    if (!res.ok) throw new Error(await claudeErrorText(res));
+    const dt = await res.json();
+    if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
+    return (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+  } finally { aiJobs.end(jid); }
 }
 // Chat IA multi-tours : conserve l'historique de la conversation (messages user/assistant) avec un
 // prompt système porteur du contexte. Réutilise le relais /api/claude (jeton Clerk, clé jamais exposée).
 async function aiChat(system, messages, persistUsage, maxTokens = 700) {
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: maxTokens, system, messages }) });
-  if (!res.ok) throw new Error(await claudeErrorText(res));
-  const dt = await res.json();
-  if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
-  return (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+  const jid = aiJobs.anon("Assistant IA");
+  try {
+    const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: maxTokens, system, messages }) });
+    if (!res.ok) throw new Error(await claudeErrorText(res));
+    const dt = await res.json();
+    if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
+    return (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+  } finally { aiJobs.end(jid); }
 }
 // Suggestion IA d'une prochaine action commerciale à partir du contexte d'un compte.
 async function aiSuggestAction(ctxObj, persistUsage) {
@@ -3611,11 +3669,14 @@ async function generateMessage({ contexte, consigne, mode, canal, sousCanal, typ
   if (mode === "retouche" && precedent) parts.push("<message_precedent>\n" + precedent + "\n</message_precedent>");
   const baseUser = parts.join("\n\n");
   const call = async (suffix) => {
-    const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1500, temperature: 0.6, system: SYS_REDACTION, messages: [{ role: "user", content: baseUser + (suffix || "") }] }) });
-    if (!res.ok) throw new Error(await claudeErrorText(res));
-    const dt = await res.json();
-    if (dt && dt.usage && onUsage) onUsage(dt.usage);
-    return (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+    const jid = aiJobs.anon("Message IA");
+    try {
+      const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1500, temperature: 0.6, system: SYS_REDACTION, messages: [{ role: "user", content: baseUser + (suffix || "") }] }) });
+      if (!res.ok) throw new Error(await claudeErrorText(res));
+      const dt = await res.json();
+      if (dt && dt.usage && onUsage) onUsage(dt.usage);
+      return (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+    } finally { aiJobs.end(jid); }
   };
   const extract = (raw) => {
     let t = String(raw || "").trim();
@@ -5487,18 +5548,22 @@ function Prospection({ data, persist, go }) {
     setEdit(null);
   };
   const mapsUrl = (p) => "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent([p.nom, p.adresse, p.cp, p.ville].filter(Boolean).join(" "));
-  const runAI = async () => {
+  const runAI = () => {
+    if (aiJobs.has("prospects:search")) return;
     setBusy(true); setAiErr(null); setAiMsg(null);
-    try {
-      const { stores: arr, usage } = await aiSearchStores(zone.trim() || "France", kind);
-      const seen = new Set(data.prospects.map((p) => (p.nom + "|" + p.ville).toLowerCase())); const today = TODAY(); const add = [];
-      arr.forEach((r) => { const nom = (r.nom || r.enseigne || "").trim(); if (!nom) return; const key = (nom + "|" + (r.ville || "")).toLowerCase(); if (seen.has(key)) return; seen.add(key); const ct = r.contact || {};
-        add.push({ id: "p_" + Date.now() + "_" + add.length, nom, enseigne: r.enseigne || "", type: ["cooperative", "chaine", "franchise", "independant", "specialiste", "gss", "autre"].includes(r.type) ? r.type : "autre", format: "", adresse: r.adresse || "", ville: r.ville || "", cp: r.cp || "", departement: r.departement || "", region: r.region || "", telephone: r.telephone || "", site: r.site || "", email: "", statut: "a_qualifier", potentiel: "", notes: r.notes || "", source: "Recherche IA · " + today, accountId: null, createdAt: today, siren: r.siren || "", siret: r.siret || "", raisonSociale: r.raisonSociale || "", formeJuridique: r.formeJuridique || "", contactPrenom: ct.prenom || "", contactNom: ct.nom || "", contactFonction: ct.fonction || "", contactEmail: ct.email || "", contactTel: ct.telephone || "", contactSource: ct.source || "" }); });
-      persist((d) => ({ ...d, prospects: add.length ? [...add, ...d.prospects] : d.prospects, claudeUsage: addUsage(d.claudeUsage, usage) }));
-      if (add.length) { setQ(""); setFType("tous"); setFRegion("tous"); setFlashIds(new Set(add.map((a) => a.id))); }
-      setAiMsg(add.length ? add.length + " prospect(s) ajouté(s) au listing, statut « À qualifier ». À vérifier avant action." : "Aucun nouveau prospect (déjà présents ou aucun résultat exploitable).");
-    } catch (e) { const m = String((e && e.message) || e); const slow = /50[24]|delai|timeout|aborted|abort/i.test(m); setAiErr(slow ? "La recherche IA a mis trop de temps à répondre (elle interroge le web et les registres officiels en direct). Réessaie, ou précise une zone plus petite / un établissement précis pour accélérer." : ("Recherche IA momentanément indisponible (" + m + "). Réessaie dans un instant.")); }
-    finally { setBusy(false); }
+    // Registre global : la recherche continue même si l'on quitte l'onglet, et reste visible partout.
+    aiJobs.run("prospects:search", "Recherche de prospects", async () => {
+      try {
+        const { stores: arr, usage } = await aiSearchStores(zone.trim() || "France", kind);
+        const seen = new Set(data.prospects.map((p) => (p.nom + "|" + p.ville).toLowerCase())); const today = TODAY(); const add = [];
+        arr.forEach((r) => { const nom = (r.nom || r.enseigne || "").trim(); if (!nom) return; const key = (nom + "|" + (r.ville || "")).toLowerCase(); if (seen.has(key)) return; seen.add(key); const ct = r.contact || {};
+          add.push({ id: "p_" + Date.now() + "_" + add.length, nom, enseigne: r.enseigne || "", type: ["cooperative", "chaine", "franchise", "independant", "specialiste", "gss", "autre"].includes(r.type) ? r.type : "autre", format: "", adresse: r.adresse || "", ville: r.ville || "", cp: r.cp || "", departement: r.departement || "", region: r.region || "", telephone: r.telephone || "", site: r.site || "", email: "", statut: "a_qualifier", potentiel: "", notes: r.notes || "", source: "Recherche IA · " + today, accountId: null, createdAt: today, siren: r.siren || "", siret: r.siret || "", raisonSociale: r.raisonSociale || "", formeJuridique: r.formeJuridique || "", contactPrenom: ct.prenom || "", contactNom: ct.nom || "", contactFonction: ct.fonction || "", contactEmail: ct.email || "", contactTel: ct.telephone || "", contactSource: ct.source || "" }); });
+        persist((d) => ({ ...d, prospects: add.length ? [...add, ...d.prospects] : d.prospects, claudeUsage: addUsage(d.claudeUsage, usage) }));
+        if (add.length) { setQ(""); setFType("tous"); setFRegion("tous"); setFlashIds(new Set(add.map((a) => a.id))); }
+        setAiMsg(add.length ? add.length + " prospect(s) ajouté(s) au listing, statut « À qualifier ». À vérifier avant action." : "Aucun nouveau prospect (déjà présents ou aucun résultat exploitable).");
+      } catch (e) { const m = String((e && e.message) || e); const slow = /50[24]|delai|timeout|aborted|abort/i.test(m); setAiErr(slow ? "La recherche IA a mis trop de temps à répondre (elle interroge le web et les registres officiels en direct). Réessaie, ou précise une zone plus petite / un établissement précis pour accélérer." : ("Recherche IA momentanément indisponible (" + m + "). Réessaie dans un instant.")); }
+      finally { setBusy(false); }
+    });
   };
   const hasFilter = q || fType !== "tous" || fRegion !== "tous";
   const card = (p) => { const tm = PROSPECT_TYPES[p.type] || PROSPECT_TYPES.autre; const sm = PROSPECT_STATUT[p.statut] || PROSPECT_STATUT.a_qualifier; const pm = POTENTIEL_META[p.potentiel]; return (
@@ -8077,6 +8142,7 @@ export default function App() {
             const m = SS[syncState] || SS.saved; const Ic = m.I;
             return <span title="État de la synchronisation des données" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 700, color: "#fff", background: m.c, border: "1px solid " + m.c, borderRadius: 20, padding: "5px 11px", whiteSpace: "nowrap" }}><Ic size={13} className={syncState === "saving" ? "spin" : undefined} />{m.l}</span>;
           })()}
+          <AiJobsBadge />
           <button className="btn btn-ghost btn-s" onClick={() => setCmdkOpen(true)} title="Recherche (Ctrl/Cmd+K)"><Search size={15} /> Rechercher <span style={{ fontSize: 10, opacity: .6, marginLeft: 4 }}>⌘K</span></button>
           {canUndo && <button className="btn btn-ghost btn-s" onClick={undo} title="Annuler la dernière modification (suppression, édition, ajout…) et revenir à l'état précédent"><Undo2 size={15} /> Annuler</button>}
           <button className="btn btn-ghost btn-s" onClick={exportAll} title="Exporter toutes les données"><Download size={15} /> Sauvegarde</button>
