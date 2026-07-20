@@ -5655,6 +5655,8 @@ function Prospection({ data, persist, go }) {
   // Approfondir la recherche IA sur la fiche prospect ouverte : complète les champs encore vides.
   const [pfBusy, setPfBusy] = useState(false); const [pfMsg, setPfMsg] = useState(null);
   const pfElapsed = useElapsed(pfBusy);
+  // Message de la fusion des doublons : affiché près de la barre d'outils (pas sous la recherche IA).
+  const [dupMsg, setDupMsg] = useState(null);
   // Enrichissement en masse de toutes les fiches (priorité e-mails + téléphones), en tâche de fond.
   const [enrichMsg, setEnrichMsg] = useState(null);
   const jobsP = useAiJobs();
@@ -5815,8 +5817,8 @@ function Prospection({ data, persist, go }) {
   const openMergeDoublons = () => {
     const dc = computeDupClusters();
     const cm = computeCrossMatches();
-    if (!dc.length && !cm.length) { setAiMsg(null); setAiErr("Aucun doublon détecté (entre prospects, ou entre un prospect et un établissement existant)."); setTimeout(() => setAiErr(null), 4500); return; }
-    setDupOpen({ clusters: dc, cross: cm });
+    if (!dc.length && !cm.length) { setDupMsg({ ok: false, t: "Aucun doublon détecté (entre prospects, ou entre un prospect et un établissement existant)." }); setTimeout(() => setDupMsg(null), 5000); return; }
+    setDupMsg(null); setDupOpen({ clusters: dc, cross: cm });
   };
   // Fusionne uniquement les groupes sélectionnés : on garde la fiche la plus complète, on complète ses
   // champs manquants depuis les autres, on retient le statut le plus avancé et on cumule les notes.
@@ -5874,7 +5876,7 @@ function Prospection({ data, persist, go }) {
     const parts = [];
     if (r.extra) parts.push(r.extra + " doublon(s) prospection fusionné(s)");
     if (nX) parts.push(nX + " prospect(s) rattaché(s) à un établissement existant et supprimé(s)");
-    setAiErr(null); setAiMsg(parts.length ? parts.join(" · ") + "." : "Aucune fusion appliquée."); setTimeout(() => setAiMsg(null), 5500);
+    setDupMsg({ ok: !!parts.length, t: parts.length ? parts.join(" · ") + "." : "Aucune fusion appliquée." }); setTimeout(() => setDupMsg(null), 6000);
   };
   const NATURE_FROM_TYPE = { cooperative: "CA", chaine: "CA", franchise: "FC", independant: "MI", specialiste: "MI", gss: "CA", autre: "DV" };
   const convert = (p) => {
@@ -5991,6 +5993,7 @@ function Prospection({ data, persist, go }) {
         <button className="btn btn-p" onClick={() => setEdit({ id: "p_" + Date.now(), nom: "", enseigne: "", type: "autre", format: "", adresse: "", ville: "", cp: "", departement: "", region: "", telephone: "", site: "", email: "", statut: "a_qualifier", potentiel: "", notes: "", source: "Saisie manuelle", accountId: null, createdAt: TODAY() })}><Plus size={16} /> Ajouter un prospect</button>
       </div>
     </div>
+    {dupMsg && <div className="card" style={{ borderLeft: "4px solid " + (dupMsg.ok ? "var(--green)" : "#9aa6bd"), marginBottom: 12, fontSize: 12.5 }}>{dupMsg.t}</div>}
     {enrichMsg && <div className="card" style={{ borderLeft: "4px solid " + (enrichMsg.ok ? "var(--green)" : "var(--red)"), marginBottom: 12, fontSize: 12.5 }}>{enrichMsg.t}</div>}
     <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>{list.length} prospect(s){list.length !== activeCount ? " sur " + activeCount : ""} · groupés par {gd.label.toLowerCase()}</div>
     {list.length === 0 ? <div className="card empty">Aucun prospect ne correspond.</div> : groups.map((g) => { const m = gd.meta ? gd.meta(g.key) : null; const lbl = m ? m.label : g.key; const col = m ? m.color : "#9aa6bd"; return (
