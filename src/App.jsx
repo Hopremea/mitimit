@@ -4070,7 +4070,7 @@ function PreviewCard({ x, y, data }) {
 }
 function AccountInteractionForm({ contactId, accountId, contacts, onCancel, onSave, interaction, onUsage, onPlanEvents }) {
   const initCt = (contacts || []).find((c) => c.id === (interaction ? interaction.contactId : contactId));
-  const [f, setF] = useState(interaction ? { ...interaction } : { id: "i_" + Date.now(), accountId, contactId: contactId || "", siteId: (initCt && initCt.siteId) || "", type: "appel", direction: "sortant", date: new Date().toISOString().slice(0, 10), heure: new Date().toTimeString().slice(0, 5), sujet: "", resume: "" });
+  const [f, setF] = useState(interaction ? { ...interaction } : { id: "i_" + Date.now(), accountId, contactId: contactId || "", siteId: (initCt && initCt.siteId) || "", type: "appel", direction: "sortant", date: new Date().toISOString().slice(0, 10), heure: new Date().toTimeString().slice(0, 5), sujet: "", resume: "", interlocuteur: contactId ? "" : "Standard" });
   const up = (k, v) => setF((p) => ({ ...p, [k]: v }));
   // Choisir un contact rattache l'échange à son établissement (site) : il apparaîtra sur la fiche
   // de l'établissement, et sur celle du groupe si l'établissement en fait partie.
