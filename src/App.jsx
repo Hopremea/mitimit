@@ -4078,7 +4078,7 @@ function AccountInteractionForm({ contactId, accountId, contacts, onCancel, onSa
   return (<>
     <div className="row2"><div className="fld"><label>Type</label><select value={f.type} onChange={(e) => up("type", e.target.value)}>{Object.entries(INT_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div></div>
     <div className="row2"><div className="fld"><label>Heure</label><input type="time" value={f.heure || ""} onChange={(e) => up("heure", e.target.value)} /></div><div className="fld" /></div>
-    <div className="row2"><div className="fld"><label>Sens</label><select value={f.direction} onChange={(e) => up("direction", e.target.value)}><option value="sortant">Sortant</option><option value="entrant">Entrant</option><option value="sortant_rejete">Sortant (rejeté)</option></select></div><div className="fld"><label>Contact</label><select value={f.contactId} onChange={(e) => onContact(e.target.value)}><option value="">Aucun précis</option>{contacts.map((c) => <option key={c.id} value={c.id}>{fullName(c)}</option>)}</select></div></div>
+    <div className="row2"><div className="fld"><label>Sens</label><select value={f.direction} onChange={(e) => up("direction", e.target.value)}><option value="sortant">Sortant</option><option value="entrant">Entrant</option><option value="sortant_rejete">Sortant (rejeté)</option></select></div><div className="fld"><label>Contact</label><select value={f.interlocuteur === "Standard" ? "__std__" : f.contactId} onChange={(e) => { const v = e.target.value; if (v === "__std__") { setF((p) => ({ ...p, contactId: "", interlocuteur: "Standard" })); } else { const ct = (contacts || []).find((c) => c.id === v); setF((p) => ({ ...p, contactId: v, siteId: ct && ct.siteId ? ct.siteId : (p.siteId || ""), interlocuteur: "" })); } }}><option value="">Aucun précis</option><option value="__std__">☎ Standard (standard téléphonique)</option>{contacts.map((c) => <option key={c.id} value={c.id}>{fullName(c)}</option>)}</select></div></div>
     <div className="fld"><label>Sujet</label><Combo value={f.sujet} onChange={(v) => up("sujet", v)} options={SUJET_PRESETS} placeholder="Choisir ou saisir l'objet de l'échange" /></div>
     <ResumeField value={f.resume} onChange={(v) => up("resume", v)} onUsage={onUsage} rows={3} baseDate={f.date} onPlan={onPlanEvents ? (evs) => onPlanEvents(evs, f) : undefined} />
     <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}><button className="btn btn-ghost" onClick={onCancel}>Annuler</button><button className="btn btn-p" onClick={() => onSave(f)} disabled={!f.sujet}>Enregistrer</button></div>
@@ -7354,8 +7354,8 @@ function InteractionView({ interaction: it, data, go, onClose, onEdit }) {
       <div style={{ fontWeight: 800, fontSize: 15 }}>{(it.source === "gmail" ? decodeEntities(it.sujet) : it.sujet) || "Échange"}</div>
       {it.resume ? <div style={{ fontSize: 13.5, lineHeight: 1.6, marginTop: 8, whiteSpace: "pre-wrap", maxHeight: 360, overflowY: "auto" }}>{it.source === "gmail" ? decodeEntities(it.resume) : it.resume}</div> : <div className="empty" style={{ padding: 14 }}>Aucun compte rendu saisi.</div>}
     </div>
-    {(ct || site || account) && <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
-      {ct && <button className="lnk" style={lnkStyle} onClick={() => nav(() => go("repertoire", ct.id))}><User size={14} /> {fullName(ct)}</button>}
+    {(ct || it.interlocuteur || site || account) && <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
+      {ct ? <button className="lnk" style={lnkStyle} onClick={() => nav(() => go("repertoire", ct.id))}><User size={14} /> {fullName(ct)}</button> : (it.interlocuteur ? <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, color: "var(--muted)" }}><User size={14} /> {it.interlocuteur}</span> : null)}
       {site && <button className="lnk" style={lnkStyle} onClick={() => nav(() => go("accounts", null, site.id))}><Store size={14} /> {site.label || site.adresse || "Établissement"}</button>}
       {!site && account && <button className="lnk" style={lnkStyle} onClick={() => nav(() => go("accounts", account.id))}><Building2 size={14} /> {account.enseigne}</button>}
     </div>}
@@ -7382,7 +7382,7 @@ function InteractionThread({ interactions, data, onView, onEdit, onDelete, showC
           {!rejected && (inbound ? <ArrowDownLeft size={12} color="var(--green)" /> : <ArrowUpRight size={12} color="var(--blue)" />)}
           {it.source === "gmail" && <span className="gtag">Gmail</span>}{it.sourced && <span className="srctag" title="Importé automatiquement depuis la boîte Gmail connectée (trace fidèle)">sourcé</span>}
           <span className="tnum" style={{ color: "var(--muted)" }}>{it.date}{it.heure ? " · " + it.heure : ""}</span>
-          {ct && <span style={{ color: "var(--muted)" }}>· {fullName(ct)}</span>}
+          {(ct || it.interlocuteur) && <span style={{ color: "var(--muted)" }}>· {ct ? fullName(ct) : it.interlocuteur}</span>}
           {it.email && <span className="crow-email" style={{ color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 3, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={it.email}><Mail size={11} style={{ flexShrink: 0 }} />{it.email}</span>}
           <span className="msg-actions">
             <button className="iconbtn" onClick={() => onView(it)} title="Voir l'échange"><Eye size={13} /></button>
