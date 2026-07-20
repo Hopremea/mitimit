@@ -5655,6 +5655,52 @@ function Prospection({ data, persist, go }) {
   // Approfondir la recherche IA sur la fiche prospect ouverte : complète les champs encore vides.
   const [pfBusy, setPfBusy] = useState(false); const [pfMsg, setPfMsg] = useState(null);
   const pfElapsed = useElapsed(pfBusy);
+  // Enrichissement en masse de toutes les fiches (priorité e-mails + téléphones), en tâche de fond.
+  const [enrichMsg, setEnrichMsg] = useState(null);
+  const jobsP = useAiJobs();
+  const enriching = jobsP.has("prospects:enrich");
+  const enrichJob = jobsP.get("prospects:enrich");
+  const enrichAll = () => {
+    if (aiJobs.has("prospects:enrich")) return;
+    const targets = prospects.filter((p) => !p.accountId && (p.nom || p.enseigne || "").trim());
+    if (!targets.length) { setEnrichMsg({ ok: false, t: "Aucun prospect à enrichir." }); return; }
+    const missing = targets.filter((p) => !(p.email || "").trim() || !(p.telephone || "").trim());
+    const rest = targets.filter((p) => (p.email || "").trim() && (p.telephone || "").trim());
+    const queue = [...missing, ...rest]; // priorité aux fiches sans e-mail / téléphone
+    appConfirm("Enrichir " + queue.length + " fiche(s) prospect via recherche web IA, en priorité les e-mails et téléphones manquants ? Cela peut prendre plusieurs minutes et consomme des crédits. Rien n'est inventé, à vérifier ensuite.", { title: "Enrichir toutes les fiches", confirmLabel: "Lancer" }).then((ok) => {
+      if (!ok) return;
+      let nMail = 0, nTel = 0;
+      setEnrichMsg(null);
+      aiJobs.run("prospects:enrich", "Enrichir les prospects", async (prog) => {
+        let done = 0; prog(0, queue.length);
+        for (const p of queue) {
+          try {
+            const r = await aiEnrichProspect(p, (u) => persist((d) => ({ ...d, claudeUsage: addUsage(d.claudeUsage, u) })));
+            if (r.contactEmail && !(p.email || "").trim()) nMail++;
+            if ((r.telephone || r.contactTel) && !(p.telephone || "").trim()) nTel++;
+            persist((d) => ({ ...d, prospects: d.prospects.map((x) => {
+              if (x.id !== p.id) return x;
+              const patch = {}; const setIf = (k, v) => { if (v && !String(x[k] || "").trim()) patch[k] = v; };
+              // Priorité : e-mail du magasin (depuis le contact trouvé) et téléphone.
+              if (r.contactEmail && !(x.email || "").trim()) patch.email = r.contactEmail;
+              const tel = r.telephone || r.contactTel || ""; if (tel && !(x.telephone || "").trim()) patch.telephone = tel;
+              setIf("contactEmail", r.contactEmail); setIf("contactTel", r.contactTel);
+              setIf("site", r.site); setIf("facebook", r.facebook); setIf("instagram", r.instagram);
+              setIf("siren", r.siren); setIf("siret", r.siret); setIf("raisonSociale", r.raisonSociale); setIf("formeJuridique", r.formeJuridique);
+              setIf("adresse", r.adresse); setIf("cp", r.cp); setIf("ville", r.ville); setIf("departement", r.departement); setIf("region", r.region);
+              setIf("contactPrenom", r.contactPrenom); setIf("contactNom", r.contactNom); setIf("contactFonction", r.contactFonction);
+              if (r.contactSource && !String(x.contactSource || "").trim()) patch.contactSource = r.contactSource;
+              setIf("notes", r.notes);
+              return Object.keys(patch).length ? { ...x, ...patch } : x;
+            }) }));
+          } catch (e) {}
+          done++; prog(done, queue.length);
+          await new Promise((res) => setTimeout(res, 200));
+        }
+        setEnrichMsg({ ok: true, t: "Enrichissement terminé : " + nMail + " e-mail(s) et " + nTel + " téléphone(s) ajoutés sur " + queue.length + " fiche(s). À vérifier (rien d'inventé)." });
+      });
+    });
+  };
   const enrichProspect = async () => {
     if (!edit || !((edit.nom || edit.enseigne || "").trim())) { setPfMsg({ ok: false, t: "Renseignez d'abord le nom du prospect." }); return; }
     setPfBusy(true); setPfMsg(null);
@@ -5939,11 +5985,13 @@ function Prospection({ data, persist, go }) {
         {hasFilter && <button className="btn btn-ghost btn-s" onClick={() => { setQ(""); setFType("tous"); setFRegion("tous"); }}><X size={13} /> Effacer</button>}
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button className="btn btn-ai" onClick={enrichAll} disabled={enriching} title="Compléter automatiquement toutes les fiches prospect via recherche web, en priorité les e-mails et téléphones manquants (tâche de fond)"><Sparkles size={16} className={enriching ? "spin" : ""} /> {enriching ? ("Enrichissement… " + (enrichJob && enrichJob.total ? enrichJob.done + "/" + enrichJob.total : "")) : "Enrichir les fiches"}</button>
         <button className="btn btn-ai" onClick={() => setMailingOpen(true)} title="Générer une vague de mails de premier contact personnalisés (angles vrais) et créer des brouillons Gmail"><Mail size={16} /> Mailing</button>
         <button className="btn btn-ghost" onClick={openMergeDoublons} title="Détecter les prospects en double (même SIRET, même adresse, ou même SIREN + ville), les passer en revue et choisir ceux à fusionner"><Copy size={16} /> Fusionner les doublons</button>
         <button className="btn btn-p" onClick={() => setEdit({ id: "p_" + Date.now(), nom: "", enseigne: "", type: "autre", format: "", adresse: "", ville: "", cp: "", departement: "", region: "", telephone: "", site: "", email: "", statut: "a_qualifier", potentiel: "", notes: "", source: "Saisie manuelle", accountId: null, createdAt: TODAY() })}><Plus size={16} /> Ajouter un prospect</button>
       </div>
     </div>
+    {enrichMsg && <div className="card" style={{ borderLeft: "4px solid " + (enrichMsg.ok ? "var(--green)" : "var(--red)"), marginBottom: 12, fontSize: 12.5 }}>{enrichMsg.t}</div>}
     <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>{list.length} prospect(s){list.length !== activeCount ? " sur " + activeCount : ""} · groupés par {gd.label.toLowerCase()}</div>
     {list.length === 0 ? <div className="card empty">Aucun prospect ne correspond.</div> : groups.map((g) => { const m = gd.meta ? gd.meta(g.key) : null; const lbl = m ? m.label : g.key; const col = m ? m.color : "#9aa6bd"; return (
       <div key={g.key} style={{ marginBottom: 20 }}>
