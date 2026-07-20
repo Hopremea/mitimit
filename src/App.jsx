@@ -1039,10 +1039,19 @@ function identityKeys(o) {
   const coreName = (() => { const toks = norm(o.nom || o.enseigne).split(/\s+/).filter((t) => t.length > 1 && !GEN.has(t)); return toks.length ? toks.join(" ") : norm(o.nom || o.enseigne); })();
   if (siret.length === 14) keys.push("T:" + siret);
   if (a.length >= 6) keys.push("A:" + a);
-  if (siren.length === 9 && ville && coreName) keys.push("S:" + siren + "|" + ville + "|" + coreName);
+  if (siren.length === 9 && ville) { keys.push("S:" + siren + "|" + ville); if (coreName) keys.push("S:" + siren + "|" + ville + "|" + coreName); }
   const sc = streetCore(o.adresse);
   if (sc && sc.split(" ").length >= 3) { if (loc) keys.push("R:" + sc + "|" + loc); else keys.push("R:" + sc); }
   [o.nom, o.enseigne].forEach((v) => { const toks = normSp(v).split(/\s+/).filter((t) => t.length > 1 && !GEN.has(t)); if (toks.length >= 2 && loc) keys.push("N:" + toks.join(" ") + "|" + loc); if (loc && ville) { const strip = toks.filter((t) => !(t.length >= 3 && ville.includes(t))); if (strip.length >= 2 && strip.length < toks.length) keys.push("N:" + strip.join(" ") + "|" + loc); } });
+  // Signaux « évidents » : e-mail identique (hors boîtes génériques), téléphone identique, gérant + ville.
+  const GEN_MAIL = new Set(["contact", "info", "infos", "standard", "accueil", "service", "serviceclient", "bonjour", "hello", "commande", "commandes", "direction", "secretariat", "magasin", "boutique"]);
+  const email = String(o.email || o.contactEmail || "").trim().toLowerCase();
+  const em = email.match(/^([^@\s]+)@[^@\s]+\.[^@\s]+$/);
+  if (em && !GEN_MAIL.has(em[1].replace(/[._\-0-9]/g, ""))) keys.push("E:" + email);
+  const tel = digits(o.telephone || o.contactTel);
+  if (tel.length >= 9 && tel.length <= 15) keys.push("P:" + tel.slice(-9));
+  const ger = normSp(o.contactNom).split(/\s+/).filter((t) => t.length > 1);
+  if (ger.length && ville) keys.push("G:" + ger.join("") + "|" + ville);
   return keys;
 }
 // ===== Mailing de prospection : angles factuels vrais + prompt + génération =====
@@ -5655,6 +5664,8 @@ function Prospection({ data, persist, go }) {
   // Approfondir la recherche IA sur la fiche prospect ouverte : complète les champs encore vides.
   const [pfBusy, setPfBusy] = useState(false); const [pfMsg, setPfMsg] = useState(null);
   const pfElapsed = useElapsed(pfBusy);
+  // Message de la fusion des doublons : affiché près de la barre d'outils (pas sous la recherche IA).
+  const [dupMsg, setDupMsg] = useState(null);
   // Enrichissement en masse de toutes les fiches (priorité e-mails + téléphones), en tâche de fond.
   const [enrichMsg, setEnrichMsg] = useState(null);
   const jobsP = useAiJobs();
@@ -5767,6 +5778,7 @@ function Prospection({ data, persist, go }) {
     const normSp = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
     const digits = (s) => String(s || "").replace(/\D/g, "");
     const GENERIC = new Set(["boutique", "concept", "store", "magasin", "shop", "sas", "sarl", "eurl", "sasu", "sa", "ets", "etablissement", "etablissements", "the", "la", "le", "les"]);
+    const GEN_MAIL = new Set(["contact", "info", "infos", "standard", "accueil", "service", "serviceclient", "bonjour", "hello", "commande", "commandes", "direction", "secretariat", "magasin", "boutique"]);
     const nameCore = (p) => { const toks = norm(p.nom || p.enseigne).split(/\s+/).filter((t) => t.length > 1 && !GENERIC.has(t)); return toks.length ? toks.join(" ") : norm(p.nom || p.enseigne); };
     const localityOf = (p) => { let ville = norm(p.ville); let cp = digits(p.cp); if ((!ville || !cp) && p.adresse) { const loc = parseLocality(p.adresse); if (!ville) ville = norm(loc.ville); if (!cp) cp = digits(loc.cp); } return { ville, cp }; };
     // Cœur de rue « numéro + type + nom » extrait de l'adresse, tolérant aux préfixes (« Les Espaces de… »)
@@ -5781,10 +5793,18 @@ function Prospection({ data, persist, go }) {
       const { ville, cp } = localityOf(p); const loc = ville || cp; const a = norm(p.adresse);
       if (siret.length === 14) keys.push("T:" + siret);
       if (a.length >= 6) keys.push("A:" + a);
-      if (siren.length === 9 && ville && nameCore(p)) keys.push("S:" + siren + "|" + ville + "|" + nameCore(p));
+      if (siren.length === 9 && ville) { keys.push("S:" + siren + "|" + ville); if (nameCore(p)) keys.push("S:" + siren + "|" + ville + "|" + nameCore(p)); }
       const sc = streetCore(p.adresse);
       if (sc && sc.split(" ").length >= 3) { if (loc) keys.push("R:" + sc + "|" + loc); else keys.push("R:" + sc); }
       [p.nom, p.enseigne].forEach((v) => { const toks = normSp(v).split(/\s+/).filter((t) => t.length > 1 && !GENERIC.has(t)); if (toks.length >= 2 && loc) keys.push("N:" + toks.join(" ") + "|" + loc); });
+      // Signaux « évidents » : e-mail identique (hors boîtes génériques), téléphone identique, gérant + ville.
+      const email = String(p.email || p.contactEmail || "").trim().toLowerCase();
+      const em = email.match(/^([^@\s]+)@[^@\s]+\.[^@\s]+$/);
+      if (em && !GEN_MAIL.has(em[1].replace(/[._\-0-9]/g, ""))) keys.push("E:" + email);
+      const tel = digits(p.telephone || p.contactTel);
+      if (tel.length >= 9 && tel.length <= 15) keys.push("P:" + tel.slice(-9));
+      const ger = normSp(p.contactNom).split(/\s+/).filter((t) => t.length > 1);
+      if (ger.length && ville) keys.push("G:" + ger.join("") + "|" + ville);
       return keys;
     };
     const active = prospects.filter((p) => !p.accountId); // on ne propose pas de fusionner des fiches déjà converties
@@ -5804,19 +5824,22 @@ function Prospection({ data, persist, go }) {
   const computeCrossMatches = () => {
     const accById = {}; (data.accounts || []).forEach((a) => { accById[a.id] = a; });
     const archivedAcc = new Set((data.accounts || []).filter((a) => a.archived).map((a) => a.id));
+    const ctByAcc = {}, ctBySite = {}; (data.contacts || []).forEach((c) => { if (c.accountId) (ctByAcc[c.accountId] = ctByAcc[c.accountId] || []).push(c); if (c.siteId) (ctBySite[c.siteId] = ctBySite[c.siteId] || []).push(c); });
+    const pickCt = (arr) => (arr && arr.length) ? (arr.find((c) => c.principal) || arr[0]) : null;
+    const ctFields = (c) => c ? { contactEmail: c.email || "", contactTel: c.mobile || c.fixe || "", contactNom: c.nom || "" } : {};
     const estabs = [];
-    (data.accounts || []).forEach((a) => { if (a.archived || isGroupe(a)) return; estabs.push({ kind: "account", id: a.id, label: a.enseigne || "Établissement", acc: a, keys: identityKeys({ nom: a.enseigne, enseigne: a.enseigne, adresse: a.adressePostale || a.adresseLivraison, ville: a.ville, siren: a.siren }) }); });
-    (data.sites || []).forEach((s) => { if (s.archived || (s.type !== "pdv" && s.type !== "decision") || archivedAcc.has(s.accountId)) return; const acc = accById[s.accountId]; estabs.push({ kind: "site", id: s.id, accountId: s.accountId, acc, label: s.label || (acc && acc.enseigne) || "Établissement", keys: identityKeys({ nom: s.label, enseigne: acc ? acc.enseigne : "", adresse: s.adresse, ville: s.ville, cp: s.cp, siret: s.siret, siren: acc ? acc.siren : "" }) }); });
+    (data.accounts || []).forEach((a) => { if (a.archived || isGroupe(a)) return; estabs.push({ kind: "account", id: a.id, label: a.enseigne || "Établissement", acc: a, keys: identityKeys({ nom: a.enseigne, enseigne: a.enseigne, adresse: a.adressePostale || a.adresseLivraison, ville: a.ville, siren: a.siren, ...ctFields(pickCt(ctByAcc[a.id])) }) }); });
+    (data.sites || []).forEach((s) => { if (s.archived || (s.type !== "pdv" && s.type !== "decision") || archivedAcc.has(s.accountId)) return; const acc = accById[s.accountId]; estabs.push({ kind: "site", id: s.id, accountId: s.accountId, acc, label: s.label || (acc && acc.enseigne) || "Établissement", keys: identityKeys({ nom: s.label, enseigne: acc ? acc.enseigne : "", adresse: s.adresse, ville: s.ville, cp: s.cp, siret: s.siret, siren: acc ? acc.siren : "", ...ctFields(pickCt(ctBySite[s.id]) || pickCt(ctByAcc[s.accountId])) }) }); });
     const keyMap = {}; estabs.forEach((e) => { e.keys.forEach((k) => { if (keyMap[k] == null) keyMap[k] = e; }); });
     const out = [];
-    prospects.filter((p) => !p.accountId).forEach((p) => { const pk = identityKeys({ nom: p.nom, enseigne: p.enseigne, adresse: p.adresse, ville: p.ville, cp: p.cp, siret: p.siret, siren: p.siren }); for (const k of pk) { if (keyMap[k]) { out.push({ prospect: p, target: keyMap[k] }); break; } } });
+    prospects.filter((p) => !p.accountId).forEach((p) => { const pk = identityKeys({ nom: p.nom, enseigne: p.enseigne, adresse: p.adresse, ville: p.ville, cp: p.cp, siret: p.siret, siren: p.siren, email: p.email, contactEmail: p.contactEmail, telephone: p.telephone, contactTel: p.contactTel, contactNom: p.contactNom }); for (const k of pk) { if (keyMap[k]) { out.push({ prospect: p, target: keyMap[k] }); break; } } });
     return out;
   };
   const openMergeDoublons = () => {
     const dc = computeDupClusters();
     const cm = computeCrossMatches();
-    if (!dc.length && !cm.length) { setAiMsg(null); setAiErr("Aucun doublon détecté (entre prospects, ou entre un prospect et un établissement existant)."); setTimeout(() => setAiErr(null), 4500); return; }
-    setDupOpen({ clusters: dc, cross: cm });
+    if (!dc.length && !cm.length) { setDupMsg({ ok: false, t: "Aucun doublon détecté (entre prospects, ou entre un prospect et un établissement existant)." }); setTimeout(() => setDupMsg(null), 5000); return; }
+    setDupMsg(null); setDupOpen({ clusters: dc, cross: cm });
   };
   // Fusionne uniquement les groupes sélectionnés : on garde la fiche la plus complète, on complète ses
   // champs manquants depuis les autres, on retient le statut le plus avancé et on cumule les notes.
@@ -5874,7 +5897,7 @@ function Prospection({ data, persist, go }) {
     const parts = [];
     if (r.extra) parts.push(r.extra + " doublon(s) prospection fusionné(s)");
     if (nX) parts.push(nX + " prospect(s) rattaché(s) à un établissement existant et supprimé(s)");
-    setAiErr(null); setAiMsg(parts.length ? parts.join(" · ") + "." : "Aucune fusion appliquée."); setTimeout(() => setAiMsg(null), 5500);
+    setDupMsg({ ok: !!parts.length, t: parts.length ? parts.join(" · ") + "." : "Aucune fusion appliquée." }); setTimeout(() => setDupMsg(null), 6000);
   };
   const NATURE_FROM_TYPE = { cooperative: "CA", chaine: "CA", franchise: "FC", independant: "MI", specialiste: "MI", gss: "CA", autre: "DV" };
   const convert = (p) => {
@@ -5991,6 +6014,7 @@ function Prospection({ data, persist, go }) {
         <button className="btn btn-p" onClick={() => setEdit({ id: "p_" + Date.now(), nom: "", enseigne: "", type: "autre", format: "", adresse: "", ville: "", cp: "", departement: "", region: "", telephone: "", site: "", email: "", statut: "a_qualifier", potentiel: "", notes: "", source: "Saisie manuelle", accountId: null, createdAt: TODAY() })}><Plus size={16} /> Ajouter un prospect</button>
       </div>
     </div>
+    {dupMsg && <div className="card" style={{ borderLeft: "4px solid " + (dupMsg.ok ? "var(--green)" : "#9aa6bd"), marginBottom: 12, fontSize: 12.5 }}>{dupMsg.t}</div>}
     {enrichMsg && <div className="card" style={{ borderLeft: "4px solid " + (enrichMsg.ok ? "var(--green)" : "var(--red)"), marginBottom: 12, fontSize: 12.5 }}>{enrichMsg.t}</div>}
     <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>{list.length} prospect(s){list.length !== activeCount ? " sur " + activeCount : ""} · groupés par {gd.label.toLowerCase()}</div>
     {list.length === 0 ? <div className="card empty">Aucun prospect ne correspond.</div> : groups.map((g) => { const m = gd.meta ? gd.meta(g.key) : null; const lbl = m ? m.label : g.key; const col = m ? m.color : "#9aa6bd"; return (
