@@ -1039,7 +1039,7 @@ function identityKeys(o) {
   const coreName = (() => { const toks = norm(o.nom || o.enseigne).split(/\s+/).filter((t) => t.length > 1 && !GEN.has(t)); return toks.length ? toks.join(" ") : norm(o.nom || o.enseigne); })();
   if (siret.length === 14) keys.push("T:" + siret);
   if (a.length >= 6) keys.push("A:" + a);
-  if (siren.length === 9 && ville && coreName) keys.push("S:" + siren + "|" + ville + "|" + coreName);
+  if (siren.length === 9 && ville) { keys.push("S:" + siren + "|" + ville); if (coreName) keys.push("S:" + siren + "|" + ville + "|" + coreName); }
   const sc = streetCore(o.adresse);
   if (sc && sc.split(" ").length >= 3) { if (loc) keys.push("R:" + sc + "|" + loc); else keys.push("R:" + sc); }
   [o.nom, o.enseigne].forEach((v) => { const toks = normSp(v).split(/\s+/).filter((t) => t.length > 1 && !GEN.has(t)); if (toks.length >= 2 && loc) keys.push("N:" + toks.join(" ") + "|" + loc); if (loc && ville) { const strip = toks.filter((t) => !(t.length >= 3 && ville.includes(t))); if (strip.length >= 2 && strip.length < toks.length) keys.push("N:" + strip.join(" ") + "|" + loc); } });
@@ -5781,7 +5781,7 @@ function Prospection({ data, persist, go }) {
       const { ville, cp } = localityOf(p); const loc = ville || cp; const a = norm(p.adresse);
       if (siret.length === 14) keys.push("T:" + siret);
       if (a.length >= 6) keys.push("A:" + a);
-      if (siren.length === 9 && ville && nameCore(p)) keys.push("S:" + siren + "|" + ville + "|" + nameCore(p));
+      if (siren.length === 9 && ville) { keys.push("S:" + siren + "|" + ville); if (nameCore(p)) keys.push("S:" + siren + "|" + ville + "|" + nameCore(p)); }
       const sc = streetCore(p.adresse);
       if (sc && sc.split(" ").length >= 3) { if (loc) keys.push("R:" + sc + "|" + loc); else keys.push("R:" + sc); }
       [p.nom, p.enseigne].forEach((v) => { const toks = normSp(v).split(/\s+/).filter((t) => t.length > 1 && !GENERIC.has(t)); if (toks.length >= 2 && loc) keys.push("N:" + toks.join(" ") + "|" + loc); });
