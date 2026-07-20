@@ -1216,7 +1216,7 @@ function verifyProspectMail(parsed, angles) {
 }
 // Génère un mail de prospection pour un prospect, à partir de ses angles. Parsing JSON robuste (2 essais),
 // pied de mail d'opposition ajouté côté code, et vérification des affirmations.
-async function generateProspectMail({ prospect, angles, consigne, mode, precedent, instruction, onUsage }) {
+async function generateProspectMail({ prospect, angles, consigne, ton, mode, precedent, instruction, onUsage }) {
   const p = prospect || {};
   const magasin = { nom: p.nom || p.enseigne || "", ville: p.ville || "", type: (PROSPECT_TYPES[p.type] || {}).label || "", enseigne: p.enseigne || "", contact: [p.contactPrenom, p.contactNom].filter(Boolean).join(" ") };
   const anglesPayload = {
@@ -1232,6 +1232,7 @@ async function generateProspectMail({ prospect, angles, consigne, mode, preceden
     "<magasin>\n" + JSON.stringify(magasin, null, 2) + "\n</magasin>",
     "<consigne_globale>" + (consigne || "proposer un court échange pour présenter la gamme") + "</consigne_globale>",
   ];
+  if (ton && String(ton).trim()) parts.push("<ton>Adopte " + String(ton).trim() + ". Ce registre module le style, il n'autorise jamais une affirmation fausse ni une entorse aux règles ci-dessus.</ton>");
   if (mode === "retouche" && precedent) parts.push("<message_precedent>\n" + precedent + "\n</message_precedent>", "<instruction_de_retouche>" + (instruction || "") + "</instruction_de_retouche>\nApplique UNIQUEMENT cette modification, en conservant le reste et le même schéma JSON de sortie.");
   const baseUser = parts.join("\n\n");
   const call = async (suffix) => {
@@ -6081,6 +6082,9 @@ function ProspectMailing({ data, persist, onClose }) {
   const [statuts, setStatuts] = useState(() => new Set(["a_contacter"]));
   const [showTreated, setShowTreated] = useState(false);
   const [consigne, setConsigne] = useState("proposer un court échange pour présenter la gamme");
+  const [tones, setTones] = useState(() => new Set(["professionnel"]));
+  const toggleTone = (k) => setTones((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const tonStr = () => [...tones].map((k) => (MSG_TONES.find((t) => t.key === k) || {}).hint).filter(Boolean).join(" et ");
   const [sel, setSel] = useState(() => new Set());
   const [cards, setCards] = useState([]);
   const [confirmReseau, setConfirmReseau] = useState(false);
@@ -6111,6 +6115,7 @@ function ProspectMailing({ data, persist, onClose }) {
   const generate = () => {
     if (running || !selectedRows.length) return;
     const rows = selectedRows.slice();
+    const tstr = tonStr();
     setCards([]);
     jobs.run("mailing:wave", "Mailing prospection", async (prog) => {
       let done = 0; prog(0, rows.length); const acc = [];
@@ -6120,7 +6125,7 @@ function ProspectMailing({ data, persist, onClose }) {
         } else {
           try {
             const cons = a.objectif_type === "referencement" ? consigne : "";
-            const r = await generateProspectMail({ prospect: p, angles: a, consigne: cons, onUsage });
+            const r = await generateProspectMail({ prospect: p, angles: a, consigne: cons, ton: tstr, onUsage });
             acc.push({ id: p.id, prospect: p, angles: a, objet: r.objet, corps: r.corps, objectif: r.objectif, angle_utilise: r.angle_utilise, confiance: r.confiance, alertes: r.alertes, edited: false, done: false, blocked: false });
           } catch (e) {
             acc.push({ id: p.id, prospect: p, angles: a, objet: "", corps: "Génération indisponible : " + ((e && e.message) || e), objectif: a.objectif_type, angle_utilise: "", confiance: "a_revoir", alertes: ["Erreur de génération."], edited: false, done: false, blocked: false });
@@ -6146,7 +6151,7 @@ function ProspectMailing({ data, persist, onClose }) {
   const runGen = async (c, opts) => {
     updateCard(c.id, { busy: true });
     try {
-      const r = await generateProspectMail({ prospect: c.prospect, angles: c.angles, consigne: c.angles.objectif_type === "referencement" ? consigne : "", mode: opts && opts.instruction ? "retouche" : undefined, precedent: opts && opts.instruction ? ((c.objet ? "Objet : " + c.objet + "\n\n" : "") + c.corps) : undefined, instruction: opts && opts.instruction, onUsage });
+      const r = await generateProspectMail({ prospect: c.prospect, angles: c.angles, consigne: c.angles.objectif_type === "referencement" ? consigne : "", ton: tonStr(), mode: opts && opts.instruction ? "retouche" : undefined, precedent: opts && opts.instruction ? ((c.objet ? "Objet : " + c.objet + "\n\n" : "") + c.corps) : undefined, instruction: opts && opts.instruction, onUsage });
       updateCard(c.id, { busy: false, objet: r.objet || c.objet, corps: r.corps, confiance: r.confiance, alertes: r.alertes, angle_utilise: r.angle_utilise, edited: false, refineOpen: false, refineText: "" });
     } catch (e) { updateCard(c.id, { busy: false, sendMsg: "❌ IA indisponible" }); }
   };
@@ -6166,6 +6171,7 @@ function ProspectMailing({ data, persist, onClose }) {
       <div className="fld"><label>Statut</label><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{["a_qualifier", "a_contacter"].map((k) => { const on = statuts.has(k); return (<button key={k} type="button" className={cx("btn", "btn-s", on ? "btn-p" : "btn-g")} onClick={() => toggleStatut(k)}>{PROSPECT_STATUT[k].label}</button>); })}<label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--muted)", cursor: "pointer" }}><input type="checkbox" checked={showTreated} onChange={(e) => setShowTreated(e.target.checked)} style={{ width: "auto" }} /> réafficher déjà traités</label></div></div>
     </div>
     <div className="fld"><label>Consigne de vague (action visée, pour les mails de référencement)</label><input value={consigne} onChange={(e) => setConsigne(e.target.value)} placeholder="Ex : proposer un échange en visio, envoyer le catalogue, un coffret d'essai…" /><span style={{ fontSize: 11, color: "var(--muted)" }}>Ignorée pour les prospects en objectif « identifier le contact » (chaîne, GSS…), où l'action est imposée.</span></div>
+    <div className="fld"><label>Ton (cumulable)</label><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{MSG_TONES.map((t) => { const on = tones.has(t.key); return (<button key={t.key} type="button" className={cx("btn", "btn-s", on ? "btn-p" : "btn-g")} onClick={() => toggleTone(t.key)} title={t.hint}>{t.label}</button>); })}</div><span style={{ fontSize: 11, color: "var(--muted)" }}>Cochez un ou plusieurs tons ; ils se combinent. Aucun ton coché : registre neutre. Le ton n'autorise jamais d'affirmation fausse.</span></div>
     <div style={{ border: "1px solid var(--line)", borderRadius: 12, maxHeight: 240, overflowY: "auto", margin: "6px 0 10px" }}>
       {filtered.length === 0 ? <div className="empty" style={{ padding: 16 }}>Aucun prospect ne correspond aux filtres.</div> : filtered.map(({ p, a }) => { const on = sel.has(p.id); const noMail = !(p.email || "").trim(); return (
         <label key={p.id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 11px", borderBottom: "1px solid var(--line)", cursor: "pointer", opacity: a.risque === "bloquant" ? 0.6 : 1 }}>
