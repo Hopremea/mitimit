@@ -1043,6 +1043,15 @@ function identityKeys(o) {
   const sc = streetCore(o.adresse);
   if (sc && sc.split(" ").length >= 3) { if (loc) keys.push("R:" + sc + "|" + loc); else keys.push("R:" + sc); }
   [o.nom, o.enseigne].forEach((v) => { const toks = normSp(v).split(/\s+/).filter((t) => t.length > 1 && !GEN.has(t)); if (toks.length >= 2 && loc) keys.push("N:" + toks.join(" ") + "|" + loc); if (loc && ville) { const strip = toks.filter((t) => !(t.length >= 3 && ville.includes(t))); if (strip.length >= 2 && strip.length < toks.length) keys.push("N:" + strip.join(" ") + "|" + loc); } });
+  // Signaux « évidents » : e-mail identique (hors boîtes génériques), téléphone identique, gérant + ville.
+  const GEN_MAIL = new Set(["contact", "info", "infos", "standard", "accueil", "service", "serviceclient", "bonjour", "hello", "commande", "commandes", "direction", "secretariat", "magasin", "boutique"]);
+  const email = String(o.email || o.contactEmail || "").trim().toLowerCase();
+  const em = email.match(/^([^@\s]+)@[^@\s]+\.[^@\s]+$/);
+  if (em && !GEN_MAIL.has(em[1].replace(/[._\-0-9]/g, ""))) keys.push("E:" + email);
+  const tel = digits(o.telephone || o.contactTel);
+  if (tel.length >= 9 && tel.length <= 15) keys.push("P:" + tel.slice(-9));
+  const ger = normSp(o.contactNom).split(/\s+/).filter((t) => t.length > 1);
+  if (ger.length && ville) keys.push("G:" + ger.join("") + "|" + ville);
   return keys;
 }
 // ===== Mailing de prospection : angles factuels vrais + prompt + génération =====
@@ -5769,6 +5778,7 @@ function Prospection({ data, persist, go }) {
     const normSp = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
     const digits = (s) => String(s || "").replace(/\D/g, "");
     const GENERIC = new Set(["boutique", "concept", "store", "magasin", "shop", "sas", "sarl", "eurl", "sasu", "sa", "ets", "etablissement", "etablissements", "the", "la", "le", "les"]);
+    const GEN_MAIL = new Set(["contact", "info", "infos", "standard", "accueil", "service", "serviceclient", "bonjour", "hello", "commande", "commandes", "direction", "secretariat", "magasin", "boutique"]);
     const nameCore = (p) => { const toks = norm(p.nom || p.enseigne).split(/\s+/).filter((t) => t.length > 1 && !GENERIC.has(t)); return toks.length ? toks.join(" ") : norm(p.nom || p.enseigne); };
     const localityOf = (p) => { let ville = norm(p.ville); let cp = digits(p.cp); if ((!ville || !cp) && p.adresse) { const loc = parseLocality(p.adresse); if (!ville) ville = norm(loc.ville); if (!cp) cp = digits(loc.cp); } return { ville, cp }; };
     // Cœur de rue « numéro + type + nom » extrait de l'adresse, tolérant aux préfixes (« Les Espaces de… »)
@@ -5787,6 +5797,14 @@ function Prospection({ data, persist, go }) {
       const sc = streetCore(p.adresse);
       if (sc && sc.split(" ").length >= 3) { if (loc) keys.push("R:" + sc + "|" + loc); else keys.push("R:" + sc); }
       [p.nom, p.enseigne].forEach((v) => { const toks = normSp(v).split(/\s+/).filter((t) => t.length > 1 && !GENERIC.has(t)); if (toks.length >= 2 && loc) keys.push("N:" + toks.join(" ") + "|" + loc); });
+      // Signaux « évidents » : e-mail identique (hors boîtes génériques), téléphone identique, gérant + ville.
+      const email = String(p.email || p.contactEmail || "").trim().toLowerCase();
+      const em = email.match(/^([^@\s]+)@[^@\s]+\.[^@\s]+$/);
+      if (em && !GEN_MAIL.has(em[1].replace(/[._\-0-9]/g, ""))) keys.push("E:" + email);
+      const tel = digits(p.telephone || p.contactTel);
+      if (tel.length >= 9 && tel.length <= 15) keys.push("P:" + tel.slice(-9));
+      const ger = normSp(p.contactNom).split(/\s+/).filter((t) => t.length > 1);
+      if (ger.length && ville) keys.push("G:" + ger.join("") + "|" + ville);
       return keys;
     };
     const active = prospects.filter((p) => !p.accountId); // on ne propose pas de fusionner des fiches déjà converties
@@ -5806,12 +5824,15 @@ function Prospection({ data, persist, go }) {
   const computeCrossMatches = () => {
     const accById = {}; (data.accounts || []).forEach((a) => { accById[a.id] = a; });
     const archivedAcc = new Set((data.accounts || []).filter((a) => a.archived).map((a) => a.id));
+    const ctByAcc = {}, ctBySite = {}; (data.contacts || []).forEach((c) => { if (c.accountId) (ctByAcc[c.accountId] = ctByAcc[c.accountId] || []).push(c); if (c.siteId) (ctBySite[c.siteId] = ctBySite[c.siteId] || []).push(c); });
+    const pickCt = (arr) => (arr && arr.length) ? (arr.find((c) => c.principal) || arr[0]) : null;
+    const ctFields = (c) => c ? { contactEmail: c.email || "", contactTel: c.mobile || c.fixe || "", contactNom: c.nom || "" } : {};
     const estabs = [];
-    (data.accounts || []).forEach((a) => { if (a.archived || isGroupe(a)) return; estabs.push({ kind: "account", id: a.id, label: a.enseigne || "Établissement", acc: a, keys: identityKeys({ nom: a.enseigne, enseigne: a.enseigne, adresse: a.adressePostale || a.adresseLivraison, ville: a.ville, siren: a.siren }) }); });
-    (data.sites || []).forEach((s) => { if (s.archived || (s.type !== "pdv" && s.type !== "decision") || archivedAcc.has(s.accountId)) return; const acc = accById[s.accountId]; estabs.push({ kind: "site", id: s.id, accountId: s.accountId, acc, label: s.label || (acc && acc.enseigne) || "Établissement", keys: identityKeys({ nom: s.label, enseigne: acc ? acc.enseigne : "", adresse: s.adresse, ville: s.ville, cp: s.cp, siret: s.siret, siren: acc ? acc.siren : "" }) }); });
+    (data.accounts || []).forEach((a) => { if (a.archived || isGroupe(a)) return; estabs.push({ kind: "account", id: a.id, label: a.enseigne || "Établissement", acc: a, keys: identityKeys({ nom: a.enseigne, enseigne: a.enseigne, adresse: a.adressePostale || a.adresseLivraison, ville: a.ville, siren: a.siren, ...ctFields(pickCt(ctByAcc[a.id])) }) }); });
+    (data.sites || []).forEach((s) => { if (s.archived || (s.type !== "pdv" && s.type !== "decision") || archivedAcc.has(s.accountId)) return; const acc = accById[s.accountId]; estabs.push({ kind: "site", id: s.id, accountId: s.accountId, acc, label: s.label || (acc && acc.enseigne) || "Établissement", keys: identityKeys({ nom: s.label, enseigne: acc ? acc.enseigne : "", adresse: s.adresse, ville: s.ville, cp: s.cp, siret: s.siret, siren: acc ? acc.siren : "", ...ctFields(pickCt(ctBySite[s.id]) || pickCt(ctByAcc[s.accountId])) }) }); });
     const keyMap = {}; estabs.forEach((e) => { e.keys.forEach((k) => { if (keyMap[k] == null) keyMap[k] = e; }); });
     const out = [];
-    prospects.filter((p) => !p.accountId).forEach((p) => { const pk = identityKeys({ nom: p.nom, enseigne: p.enseigne, adresse: p.adresse, ville: p.ville, cp: p.cp, siret: p.siret, siren: p.siren }); for (const k of pk) { if (keyMap[k]) { out.push({ prospect: p, target: keyMap[k] }); break; } } });
+    prospects.filter((p) => !p.accountId).forEach((p) => { const pk = identityKeys({ nom: p.nom, enseigne: p.enseigne, adresse: p.adresse, ville: p.ville, cp: p.cp, siret: p.siret, siren: p.siren, email: p.email, contactEmail: p.contactEmail, telephone: p.telephone, contactTel: p.contactTel, contactNom: p.contactNom }); for (const k of pk) { if (keyMap[k]) { out.push({ prospect: p, target: keyMap[k] }); break; } } });
     return out;
   };
   const openMergeDoublons = () => {
