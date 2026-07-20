@@ -6527,13 +6527,14 @@ const PRESENCE_MOTIFS = {
   presence:    { label: "Présence au local",     hours: null,           color: "#3F60AA", emoji: "🏢" },
   cours:       { label: "Journée de cours",      hours: PRESENCE_TARGET, color: "#7c5cf0", emoji: "🎓" },
   teletravail: { label: "Télétravail",           hours: PRESENCE_TARGET, color: "#3F60AA", emoji: "🏠" },
+  rdv:         { label: "Rendez-vous",            hours: PRESENCE_TARGET, color: "#A855F7", emoji: "🤝" },
   conges:      { label: "Congés",                hours: PRESENCE_TARGET, color: "#2bb673", emoji: "🌴" },
   rtt:         { label: "RTT",                    hours: PRESENCE_TARGET, color: "#2bb673", emoji: "🗓️" },
   ferie:       { label: "Jour férié",            hours: PRESENCE_TARGET, color: "#F8B133", emoji: "🎉" },
   maladie:     { label: "Congé maladie",         hours: PRESENCE_TARGET, color: "#FF5A45", emoji: "🤒" },
   absence:     { label: "Absence non rémunérée", hours: 0,               color: "#9aa6bd", emoji: "➖" },
 };
-const MOTIF_ORDER = ["presence", "cours", "teletravail", "conges", "rtt", "ferie", "maladie", "absence"];
+const MOTIF_ORDER = ["presence", "cours", "teletravail", "rdv", "conges", "rtt", "ferie", "maladie", "absence"];
 const pMin = (t) => { if (!t || !/^\d{1,2}:\d{2}$/.test(t)) return null; const [h, m] = t.split(":").map(Number); return h * 60 + m; };
 const fmtDur = (min, opts = {}) => { const v = Math.round(min || 0); const sign = v < 0 ? "−" : (opts.plus && v > 0 ? "+" : ""); const a = Math.abs(v); const h = Math.floor(a / 60), m = a % 60; return sign + (m ? `${h} h ${String(m).padStart(2, "0")}` : `${h} h`); };
 const isoLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
