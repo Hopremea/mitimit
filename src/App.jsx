@@ -1112,12 +1112,16 @@ function computeProspectAngles({ prospect, accounts, sites, interactions, hq, no
   const reseauRegion = { available: reseauRegionCount >= 1, count: reseauRegionCount };
   const bestAngle = reseauEnseigne.available ? "reseau_enseigne" : (proximite !== "aucune" ? "proximite" : (reseauRegion.available ? "reseau_region" : "adequation_produit"));
   const risqueMotif = !hasEmail ? "Pas d'adresse e-mail exploitable" : (!hasName || (!hasEnseigne && !realType)) ? "Identification trop incertaine (ni enseigne, ni type de commerce précis)" : "";
-  return { proximite, reseauEnseigne, reseauRegion, adequationProduit: true, objectif_type, registre_type, risque, risqueMotif, bestAngle, dept: pDept, inOcc };
+  // Mode de contact selon la proximité : à moins d'~1h30 de route (voisins/secteur) → passage en magasin ; sinon appel/visio.
+  const contactMode = (proximite === "voisins" || proximite === "secteur") ? "visite" : "appel_visio";
+  return { proximite, reseauEnseigne, reseauRegion, adequationProduit: true, objectif_type, registre_type, risque, risqueMotif, bestAngle, contactMode, dept: pDept, inOcc };
 }
 // Prompt système de rédaction des mails de prospection (à recopier tel quel).
 const SYS_PROSPECTION = `<identite>
 Tu rédiges un mail de premier contact de prospection POUR Matthis-Anaël Prevedello, Directeur des Opérations de PEN'UP 3D (matthis-anael@penup3d.com, 06 95 50 37 68), À DESTINATION d'un point de vente qui ne connaît pas encore la marque.
-Le destinataire est une personne externe, jamais un collègue. Première personne du singulier, vouvoiement.
+Le destinataire est une personne externe, jamais un collègue. Vouvoiement.
+Écris à la PREMIÈRE PERSONNE DU SINGULIER (« je »), de façon personnelle et humaine ; évite le « nous » d'entreprise impersonnel (un « nous » ponctuel pour parler de l'équipe reste possible).
+Mentionne systématiquement, avec naturel, que PEN'UP 3D est une jeune marque française basée à Montauban.
 </identite>
 
 <mission>
@@ -1139,6 +1143,26 @@ Le champ registre_type oriente le ton et l'argument, sans jamais autoriser une a
 - Coopérative : liberté d'assortiment de l'adhérent, produit local.
 - Chaîne via centrale ou grande surface : sobriété, on cherche le bon interlocuteur, pas la vente immédiate.
 </registre_selon_type>
+
+<action_de_contact>
+Le champ contact_mode fourni détermine l'action concrète proposée, pour les mails de référencement :
+- "visite" : le magasin est à moins d'environ 1h30 de route de Montauban. Je propose de passer en magasin pour une démonstration rapide du stylo.
+- "appel_visio" : plus loin. Je propose un court appel, ou une visio, pour une démonstration.
+Cette action concrète prime pour conclure ; la consigne globale (catalogue, coffret d'essai) peut être offerte en complément. Pour un objectif "identifier_contact", ignore contact_mode et demande simplement le bon interlocuteur en centrale.
+</action_de_contact>
+
+<personnalisation>
+Rends chaque mail personnel et chaleureux, sans jamais rien inventer :
+- Fais référence à l'ACTIVITÉ du magasin (son type de commerce, son univers jouets / loisirs créatifs).
+- Glisse un clin d'oeil SOBRE et juste à sa ville, seulement s'il est naturel ; n'invente aucun fait sur la ville.
+- Registre humain et affectif : une jeune marque française à taille humaine, basée à Montauban, un stylo 3D à filament basse température, ludique et pédagogique, pour les enfants dès 6 ans. N'invente aucun chiffre précis (effectif, ancienneté) qui ne serait pas fourni.
+- Trouve un LIEN D'ACCROCHE crédible et VRAI, choisi selon les angles fournis :
+  · boutique indépendante ou concept store : "je privilégie le travail avec des boutiques indépendantes comme la vôtre".
+  · enseigne avec angle reseau_enseigne : la collaboration déjà existante avec d'autres magasins de l'enseigne, en agrégat (jamais un nom précis).
+  · proximité de niveau voisins ou secteur : le fait d'être quasi voisins, ou dans le même secteur, depuis Montauban.
+  · à défaut : l'adéquation entre le produit et ce type de magasin, dans cette ville.
+N'emploie que des accroches adossées à un angle réellement fourni dans <angles_disponibles>.
+</personnalisation>
 
 <regle_cardinale>
 Tu ne disposes, pour personnaliser, que des angles fournis dans <angles_disponibles>. Chacun est vrai et vérifié.
@@ -1226,6 +1250,7 @@ async function generateProspectMail({ prospect, angles, consigne, ton, mode, pre
     adequation_produit: { type: magasin.type, ville: magasin.ville },
     objectif_type: angles.objectif_type,
     registre_type: angles.registre_type,
+    contact_mode: angles.contactMode,
   };
   const parts = [
     "<angles_disponibles>\n" + JSON.stringify(anglesPayload, null, 2) + "\n</angles_disponibles>",
