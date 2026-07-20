@@ -5385,11 +5385,30 @@ function Prospection({ data, persist, go }) {
   // adresse, OU même SIREN + ville + nom proche (mots génériques « boutique/concept/store… » ignorés).
   const computeDupClusters = () => {
     const norm = (s) => normStr(s || "");
+    // normStr retire aussi les espaces : ici on garde une variante espacée pour tokeniser (rue, nom).
+    const normSp = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
     const digits = (s) => String(s || "").replace(/\D/g, "");
     const GENERIC = new Set(["boutique", "concept", "store", "magasin", "shop", "sas", "sarl", "eurl", "sasu", "sa", "ets", "etablissement", "etablissements", "the", "la", "le", "les"]);
     const nameCore = (p) => { const toks = norm(p.nom || p.enseigne).split(/\s+/).filter((t) => t.length > 1 && !GENERIC.has(t)); return toks.length ? toks.join(" ") : norm(p.nom || p.enseigne); };
     const localityOf = (p) => { let ville = norm(p.ville); let cp = digits(p.cp); if ((!ville || !cp) && p.adresse) { const loc = parseLocality(p.adresse); if (!ville) ville = norm(loc.ville); if (!cp) cp = digits(loc.cp); } return { ville, cp }; };
-    const sigOf = (p) => { const keys = []; const siret = digits(p.siret); const siren = digits(p.siren); const { ville } = localityOf(p); const a = norm(p.adresse); if (siret.length === 14) keys.push("T:" + siret); if (a.length >= 6) keys.push("A:" + a); if (siren.length === 9 && ville && nameCore(p)) keys.push("S:" + siren + "|" + ville + "|" + nameCore(p)); return keys; };
+    // Cœur de rue « numéro + type + nom » extrait de l'adresse, tolérant aux préfixes (« Les Espaces de… »)
+    // et suffixes (« D4 », « Zone Commerciale… ») : rapproche deux adresses formulées différemment.
+    const STREET_TYPES = new Set(["rue", "route", "rte", "avenue", "av", "boulevard", "bd", "chemin", "impasse", "imp", "allee", "allees", "place", "pl", "quai", "cours", "voie", "faubourg", "fg", "passage", "montee", "chaussee"]);
+    const STREET_STOP = new Set(["zone", "zac", "za", "cc", "centre", "commercial", "commerciale", "batiment", "bat", "lieu", "dit", "lieudit", "galerie", "parc", "espace", "espaces", "residence", "bp", "cs", "cedex"]);
+    const streetCore = (addr) => { const toks = normSp(addr).split(/\s+/).filter(Boolean); for (let i = 0; i < toks.length - 1; i++) { if (/^\d+$/.test(toks[i]) && STREET_TYPES.has(toks[i + 1])) { const name = []; for (let j = i + 2; j < toks.length && name.length < 4; j++) { const t = toks[j]; if (/\d/.test(t) || STREET_STOP.has(t)) break; name.push(t); } if (name.length) return toks[i] + " " + toks[i + 1] + " " + name.join(" "); } } return ""; };
+    // Signaux d'identité : SIRET, adresse exacte, SIREN+ville+nom, cœur de rue (+localité), et nom+localité.
+    const sigOf = (p) => {
+      const keys = [];
+      const siret = digits(p.siret); const siren = digits(p.siren);
+      const { ville, cp } = localityOf(p); const loc = ville || cp; const a = norm(p.adresse);
+      if (siret.length === 14) keys.push("T:" + siret);
+      if (a.length >= 6) keys.push("A:" + a);
+      if (siren.length === 9 && ville && nameCore(p)) keys.push("S:" + siren + "|" + ville + "|" + nameCore(p));
+      const sc = streetCore(p.adresse);
+      if (sc && sc.split(" ").length >= 3) { if (loc) keys.push("R:" + sc + "|" + loc); else keys.push("R:" + sc); }
+      [p.nom, p.enseigne].forEach((v) => { const toks = normSp(v).split(/\s+/).filter((t) => t.length > 1 && !GENERIC.has(t)); if (toks.length >= 2 && loc) keys.push("N:" + toks.join(" ") + "|" + loc); });
+      return keys;
+    };
     const active = prospects.filter((p) => !p.accountId); // on ne propose pas de fusionner des fiches déjà converties
     const parent = {}; active.forEach((p) => { parent[p.id] = p.id; });
     const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
@@ -5405,7 +5424,7 @@ function Prospection({ data, persist, go }) {
   const bestOfCluster = (g) => g.slice().sort((a, b) => prosScore(b) - prosScore(a))[0];
   const openMergeDoublons = () => {
     const dc = computeDupClusters();
-    if (!dc.length) { setAiMsg(null); setAiErr("Aucun doublon détecté (même SIRET, même adresse, ou même SIREN + ville)."); setTimeout(() => setAiErr(null), 4500); return; }
+    if (!dc.length) { setAiMsg(null); setAiErr("Aucun doublon détecté (même SIRET, même rue, même SIREN, ou même nom dans la même ville)."); setTimeout(() => setAiErr(null), 4500); return; }
     setDupOpen(dc);
   };
   // Fusionne uniquement les groupes sélectionnés : on garde la fiche la plus complète, on complète ses
