@@ -618,7 +618,7 @@ const RAW = [
   ["PU3D-FIL-TRANSLUCIDE","Bobines Fil'Up Translucide X3",30,9.99],["PU3D-FIL-VERT","Bobines Fil'Up Vert X3",45,9.99],
   ["PU3D-FIL-VERT-FLUO","Bobines Fil'Up Vert fluo X3",31,9.99],["PU3D-FIL-VIOLET","Bobines Fil'Up Violet X3",55,9.99],
   ["PU3D-FIL-VIOLET-LAVANDE","Bobines Fil'Up Lavande X3",29,9.99],["PU3D-KIT-MECANIQUE","Kit Mécanique",0,39.99],
-  ["PU3D-LIVRET-DECOUVERTE","Livret Découverte (coffret)",2,14.99],["PU3D-LIVRET-EXPERT3D","Livret Expert 3D",108,19.99],
+  ["PU3D-LIVRET-DECOUVERTE","Livret Découverte",2,14.99],["PU3D-LIVRET-EXPERT3D","Livret Expert 3D",108,19.99],
   ["PU3D-PACK-COMPLET","Pack Complet",3424,99.99],["PU3D-PACK-DECOUVERTE","Pack Découverte",0,69.99],
   ["PU3D-POCHOIRS-PADUP","Pochoirs Pad'Up",1092,14.99],["PU3D-STYLO","Stylo Pen'Up 3D",91,49.99],
 ];
@@ -785,6 +785,7 @@ function normalize(d) {
   delete d.settings.coefMin;
   if (!d.settings.coefBasisTTC) { d.settings.coefTarget = Math.round((d.settings.coefTarget || 1.8) * 1.2 * 100) / 100; d.settings.coefMax = Math.round((d.settings.coefMax || 2.0) * 1.2 * 100) / 100; if (d.settings.coefTarget < 2.2) d.settings.coefTarget = 2.2; if (d.settings.coefMax <= d.settings.coefTarget) d.settings.coefMax = Math.round((d.settings.coefTarget + 0.2) * 100) / 100; d.settings.coefBasisTTC = true; }
   if (!d.settings._tarif2026) { d.products = (d.products || []).map((p) => p.code === "PU3D-KIT-MECA" ? { ...p, code: "PU3D-KIT-MECANIQUE" } : p); d.settings._tarif2026 = true; }
+  if (!d.settings._livretRename) { d.products = (d.products || []).map((p) => p.code === "PU3D-LIVRET-DECOUVERTE" ? { ...p, designation: "Livret Découverte" } : p); d.deals = (d.deals || []).map((dl) => ({ ...dl, lines: (dl.lines || []).map((l) => l.code === "PU3D-LIVRET-DECOUVERTE" ? { ...l, designation: "Livret Découverte" } : l) })); d.settings._livretRename = true; }
   // Réconciliation unique : les contacts des établissements déjà archivés sont archivés à leur tour.
   if (!d.settings._contactArchiveSync) { const arch = new Set((d.accounts || []).filter((a) => a.archived).map((a) => a.id)); d.contacts = (d.contacts || []).map((c) => (arch.has(c.accountId) && !c.archived) ? { ...c, archived: true } : c); d.settings._contactArchiveSync = true; }
   if (!d.settings._kind) { d.accounts = (d.accounts || []).map((a) => a.kind ? a : { ...a, kind: isCentraleOuChaine(a) ? "groupe" : "établissement" }); d.settings._kind = true; }
