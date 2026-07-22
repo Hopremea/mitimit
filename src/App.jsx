@@ -1443,6 +1443,18 @@ const statusOf = (p) => p.dispo <= 0 ? "rupture" : p.dispo <= p.seuil ? "bas" : 
 function nextRef(type, deals) { const pre = type === "Facture" ? "FA" : type === "Commande" ? "CMD" : "DV"; const y = new Date().getFullYear(); const rx = new RegExp("^" + pre + "-" + y + "-(\\d+)$"); const mx = (deals || []).reduce((m, d) => { const mt = rx.exec(d.ref || ""); return mt ? Math.max(m, parseInt(mt[1], 10)) : m; }, 0); return `${pre}-${y}-${String(mx + 1).padStart(3, "0")}`; }
 // Nom affiché d'un document : code client (si connu) + référence. Calculé au rendu, n'altère pas la référence stockée.
 function docRef(d, account) { const c = account && account.code ? account.code + "-" : ""; return c + ((d && d.ref) || ""); }
+// Compte porteur d'un document : le compte rattaché au deal, sinon — quand ce lien manque — le compte
+// de l'établissement (site) lié au document ou à la livraison. Permet d'afficher l'indicatif magasin
+// (ex. « MI-1 ») dans la référence même si le deal ne pointe que sur un établissement.
+function dealAccount(data, d) {
+  if (!d || !data) return null;
+  const direct = (data.accounts || []).find((a) => a.id === d.accountId);
+  if (direct) return direct;
+  const sid = d.siteId || d.livraisonSiteId;
+  const site = sid ? (data.sites || []).find((s) => s.id === sid) : null;
+  if (site && site.accountId) { const a = (data.accounts || []).find((x) => x.id === site.accountId); if (a) return a; }
+  return null;
+}
 function pdvForecast(data) {
   const map = {};
   (data.deals || []).filter((d) => d.type === "Commande" && (d.statut === "livre" || d.statut === "accepte" || d.statut === "expediee")).forEach((d) => { (d.lines || []).forEach((l) => { const k = d.accountId + "|" + l.code; if (!map[k]) map[k] = { accountId: d.accountId, code: l.code, designation: l.designation, qte: 0, last: "" }; map[k].qte += l.qte || 0; if ((d.date || "") > map[k].last) map[k].last = d.date; }); });
@@ -4793,13 +4805,13 @@ function Deals({ data, persist, go, focus }) {
       {list.length === 0 ? <tr><td colSpan={9} className="empty">Aucun document {hasFilter && "correspondant aux filtres"}.</td></tr> : (() => {
         const GD = { statut: { get: (d) => d.statut || "brouillon", meta: (v) => DEAL_STATUS[v] || DEAL_STATUS.brouillon, order: Object.keys(DEAL_STATUS) }, enseigne: { get: (d) => dealClient(d) }, type: { get: (d) => d.type || "—" }, mois: { get: (d) => (d.date || "").slice(0, 7) || "Sans date" } };
         const gd = GD[grp] || GD.statut;
-        const drow = (d) => { const st = DEAL_STATUS[d.statut] || DEAL_STATUS.brouillon; return (<tr key={d.id} style={sel.has(d.id) ? { background: "rgba(63,96,170,.06)" } : undefined}><td style={{ textAlign: "center" }}><input type="checkbox" checked={sel.has(d.id)} onChange={() => toggleSel(d.id)} style={{ width: 16, height: 16, margin: 0, cursor: "pointer" }} /></td><td style={{ fontWeight: 700 }}>{docRef(d, accOf(d.accountId))}</td><td><span className="lnk" onClick={() => go("accounts", d.accountId)}>{dealClient(d)}</span></td><td>{d.type}</td><td className="tnum">{d.date}</td><td><Badge color={st.color}>{st.label}</Badge></td><td style={{ textAlign: "right" }} className="tnum">{num(d.qte)}</td><td style={{ textAlign: "right", fontWeight: 700 }} className="tnum">{eur(d.montant)}</td><td style={{ textAlign: "right", whiteSpace: "nowrap" }}><button className="iconbtn" title="Aperçu / imprimer" onClick={() => setPreview(d)}><Eye size={15} /></button> <button className="iconbtn" title="Modifier" onClick={() => setEdit(d)}><Pencil size={15} /></button> <button className="iconbtn" title="Supprimer" onClick={() => del(d.id)}><Trash2 size={15} /></button></td></tr>); };
+        const drow = (d) => { const st = DEAL_STATUS[d.statut] || DEAL_STATUS.brouillon; return (<tr key={d.id} style={sel.has(d.id) ? { background: "rgba(63,96,170,.06)" } : undefined}><td style={{ textAlign: "center" }}><input type="checkbox" checked={sel.has(d.id)} onChange={() => toggleSel(d.id)} style={{ width: 16, height: 16, margin: 0, cursor: "pointer" }} /></td><td style={{ fontWeight: 700 }}>{docRef(d, dealAccount(data, d))}</td><td><span className="lnk" onClick={() => go("accounts", d.accountId)}>{dealClient(d)}</span></td><td>{d.type}</td><td className="tnum">{d.date}</td><td><Badge color={st.color}>{st.label}</Badge></td><td style={{ textAlign: "right" }} className="tnum">{num(d.qte)}</td><td style={{ textAlign: "right", fontWeight: 700 }} className="tnum">{eur(d.montant)}</td><td style={{ textAlign: "right", whiteSpace: "nowrap" }}><button className="iconbtn" title="Aperçu / imprimer" onClick={() => setPreview(d)}><Eye size={15} /></button> <button className="iconbtn" title="Modifier" onClick={() => setEdit(d)}><Pencil size={15} /></button> <button className="iconbtn" title="Supprimer" onClick={() => del(d.id)}><Trash2 size={15} /></button></td></tr>); };
         return groupList(list, gd, dir).map((g) => { const m = gd.meta ? gd.meta(g.key) : null; const col = m ? m.color : "#9aa6bd"; const lbl = m ? m.label : g.key; const somme = g.items.reduce((s, d) => s + (d.montant || 0), 0); return (<React.Fragment key={g.key}><tr><td colSpan={7} style={{ background: col + "1f", borderLeft: "3px solid " + col, padding: "8px 12px" }}><span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 800 }} className="pu-display"><span style={{ width: 10, height: 10, borderRadius: 3, background: col, display: "inline-block" }} />{lbl}<span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>· {g.items.length}</span></span></td><td style={{ background: col + "1f", textAlign: "right", fontWeight: 800, padding: "8px 12px" }} className="tnum pu-display">{eur(somme)}</td><td style={{ background: col + "1f" }}></td></tr>{g.items.map(drow)}</React.Fragment>); });
       })()}
     </tbody></table></div></div>
     {edit && <Modal title={edit.ref + " — " + edit.type} onClose={() => setEdit(null)} xl><DealForm deal={edit} accounts={accounts} products={products} sites={data.sites} onSave={(d) => { save(d); setEdit(null); }} onPreview={(d) => { save(d); setEdit(null); setPreview({ ...d, montant: dealMontant(d.lines), qte: dealQte(d.lines) }); }} /></Modal>}
     {imp && <Modal title="Importer une commande" onClose={() => setImp(false)} wide><ImportCommande accounts={accounts} products={products} onCreate={importToDraft} onUsage={(u) => persist((d) => ({ ...d, claudeUsage: addUsage(d.claudeUsage, u) }))} /></Modal>}
-    {preview && <DevisPreview deal={preview} account={accOf(preview.accountId)} settings={settings} products={products} data={data} onClose={() => setPreview(null)} />}
+    {preview && <DevisPreview deal={preview} account={dealAccount(data, preview)} settings={settings} products={products} data={data} onClose={() => setPreview(null)} />}
   </div>);
 }
 // Pad de signature tactile/souris (canvas) : le client signe au doigt, la signature est stockée en
@@ -7078,9 +7090,9 @@ function PipelineKanban({ data, persist, go, embedded }) {
     <div className="kan kan-deals">
       {STAGES_K.map((s) => (<div key={s.id} className="col" onDragOver={(e) => onDragOver(e, s.id)} onDrop={(e) => onDrop(e, s.id)} style={dragCol === s.id && dragId ? { background: s.color + "1f", outline: `2px dashed ${s.color}`, outlineOffset: -2 } : undefined}>
         <div className="col-h"><i className="dot" style={{ background: s.color }} />{s.label}<span className="cnt">{cntBy(s.id)} · {eur(totalBy(s.id))}</span></div>
-        {data.deals.filter((d) => d.statut === s.id).sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((d) => { const a = accOf(d.accountId); const cli = dealClient(d); return (
+        {data.deals.filter((d) => d.statut === s.id).sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((d) => { const a = dealAccount(data, d); const cli = dealClient(d); return (
           <div key={d.id} className="deal-card" draggable onDragStart={(e) => { dwell.hide(); onDragStart(e, d.id); }} onDragEnd={onDragEnd} onClick={() => go("deals", d.id)} {...dwell.bind(() => { const ds = DEAL_STATUS[d.statut] || DEAL_STATUS.brouillon; return { title: docRef(d, a) || d.ref || d.type, subtitle: cli, badge: ds.label, badgeColor: ds.color, accent: s.color, rows: [{ label: "Type", value: d.type }, { label: "Date", value: d.date }, { label: "Montant", value: eur(d.montant) }, { label: "Statut", value: ds.label }] }; })} style={{ borderLeft: `4px solid ${s.color}`, opacity: dragId === d.id ? 0.4 : 1, cursor: "grab" }}>
-            <h5>{d.ref || d.type}</h5>
+            <h5>{docRef(d, a) || d.ref || d.type}</h5>
             <div className="deal-meta"><Building2 size={11} />{cli}</div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
               <span className="deal-meta">{d.date || "—"}</span>
