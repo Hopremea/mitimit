@@ -265,7 +265,10 @@ const NATURE_ORDER = ["CA", "FC", "MI", "AS", "DI", "DV"];
 const FORMES_JURIDIQUES = ["SAS", "SASU", "SARL", "EURL", "SA", "SA coopérative", "SNC", "Société civile (SCI, SCM…)", "Entreprise individuelle (EI)", "Micro-entreprise", "Association loi 1901", "GIE", "Établissement public", "Société monégasque (RCI)"];
 // Mappage des comptes du seed initial vers leur nature (pour l'attribution rétroactive)
 const SEED_NATURE = { acc_cultura: "CA", acc_kingjouet: "CA", acc_fnac: "CA", acc_joueclub: "CA", acc_eenymeeny: "MI", acc_sourire: "AS" };
-const isClientCode = (c) => typeof c === "string" && /^[A-Z]{2}-\d{3,}$/.test(c);
+// Un code client valide = 2 lettres (nature) + tiret + au moins un chiffre. On accepte 1 chiffre ou plus
+// pour respecter les codes saisis à la main (ex. « MI-1 ») : ils ne seront pas réattribués automatiquement.
+const isClientCode = (c) => typeof c === "string" && /^[A-Z]{2}-\d+$/.test(c);
+const isFranchiseCode = (c) => typeof c === "string" && /^FC-\d+$/.test(c);
 // Devine la nature d'un compte qui n'en a pas encore (seed connu, puis indice typeSurface, sinon DV)
 function guessNature(a) {
   if (a.nature && NATURE_META[a.nature]) return a.nature;
@@ -770,12 +773,12 @@ function normalize(d) {
   {
     const groupIds = new Set(d.accounts.filter((a) => isGroupe(a)).map((a) => a.id));
     let mx = 0;
-    const scan = (code) => { if (typeof code === "string" && /^FC-\d{3,}$/.test(code)) { const n = parseInt(code.split("-")[1], 10); if (n > mx) mx = n; } };
+    const scan = (code) => { if (isFranchiseCode(code)) { const n = parseInt(code.split("-")[1], 10); if (n > mx) mx = n; } };
     d.accounts.forEach((a) => scan(a.code));
     (d.sites || []).forEach((s) => scan(s.code));
     d.sites = (d.sites || []).map((s) => {
       if (s.type === "pdv" && groupIds.has(s.accountId)) {
-        if (typeof s.code === "string" && /^FC-\d{3,}$/.test(s.code)) return s;
+        if (isFranchiseCode(s.code)) return s;
         mx += 1; return { ...s, code: "FC-" + String(mx).padStart(3, "0") };
       }
       return s;
@@ -1478,7 +1481,7 @@ function dealAccount(data, d) {
 function dealDocCode(data, d) {
   const sid = d && (d.siteId || d.livraisonSiteId);
   const site = sid ? (data.sites || []).find((s) => s.id === sid) : null;
-  if (site && site.type === "pdv" && typeof site.code === "string" && /^FC-\d{3,}$/.test(site.code)) {
+  if (site && site.type === "pdv" && isFranchiseCode(site.code)) {
     const acc = (data.accounts || []).find((a) => a.id === site.accountId);
     if (acc && isGroupe(acc)) return site.code;
   }
@@ -3265,7 +3268,10 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
   // Le siège (type="decision") du groupe reste "CA".
   const isFranchise = !!(grp && s.type === "pdv");
   const siteNature = isFranchise ? "FC" : (acc && acc.nature) || "DV";
-  const estabCode = isFranchise ? (s.code || "") : "";
+  // Code affiché sur la fiche : code franchisé (porté par le site) pour un pdv de groupe, sinon le code
+  // du compte pour un établissement indépendant. Le siège d'un groupe montre le code du groupe.
+  const estabCode = isFranchise ? (s.code || "") : (indep && acc ? (acc.code || "") : (grp && s.type === "decision" && acc ? (acc.code || "") : ""));
+  const canEditCode = isFranchise || (indep && !!acc);
   const st = acc ? (siteNature === "FC" ? { label: "Franchisé", color: "#7c5cf0" } : stageMeta(acc.stage)) : stageMeta("prospect");
   const tm = SITE_TYPES[s.type] || SITE_TYPES.pdv;
   const col = siteColor(s, acc || {});
@@ -3283,6 +3289,15 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
   const [addInt, setAddInt] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
+  const [codeEdit, setCodeEdit] = useState(null);
+  // Enregistre un code client saisi à la main : sur le SITE pour un franchisé (code propre au pdv),
+  // sur le COMPTE pour un établissement indépendant. Normalisé en MAJUSCULES ; vide = code effacé.
+  const saveCode = () => {
+    const v = (codeEdit || "").trim().toUpperCase().replace(/\s+/g, "");
+    if (isFranchise) persist((p) => ({ ...p, sites: (p.sites || []).map((x) => x.id === s.id ? { ...x, code: v } : x) }));
+    else if (indep && acc) persist((p) => ({ ...p, accounts: p.accounts.map((x) => x.id === acc.id ? { ...x, code: v } : x) }));
+    setCodeEdit(null);
+  };
   const [intEdit, setIntEdit] = useState(null);
   const [dealEdit, setDealEdit] = useState(null);
   const [eventEdit, setEventEdit] = useState(null);
@@ -3376,7 +3391,7 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
         <EntityPhoto value={s.photo || ""} onChange={(url) => saveSite({ ...s, photo: url })} initials={(s.label || "É").slice(0, 1).toUpperCase()} bg={col} size={64} enseigne={[s.label, acc && acc.enseigne, s.adresse].filter(Boolean).join(" ")} groupLogo={acc && acc.logo} fallback={acc && acc.logo} persistUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} />
         <div style={{ flex: 1, minWidth: 220 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}><svg width="22" height="22" viewBox="-12 -16 24 26" style={{ flexShrink: 0 }}><path d={shapePath(tm.shape)} fill={col} stroke="#fff" strokeWidth={1.5} /></svg><h2 className="pu-display" style={{ margin: 0, fontSize: 22 }}>{s.label || "Établissement"}</h2>{estabCode && <span className="tnum" style={{ fontSize: 12.5, fontWeight: 800, color: "#7c5cf0", background: "#7c5cf01f", borderRadius: 8, padding: "3px 9px", letterSpacing: ".03em" }}>{estabCode}</span>}<Badge color={s.type === "decision" ? "#7c5cf0" : "#F8B133"}>{s.type === "decision" ? "Siège" : "Établissement"}</Badge>{acc && <Badge color={st.color}>{st.label}</Badge>}{loy.ca12 > 0 && <span title={"CA HT signé sur 12 mois : " + eur(loy.ca12) + (loy.next ? " · encore " + eur(loy.toNext) + " pour le palier " + loy.next.label : " · palier maximum")}><Badge color={loy.tier.color}>🏅 Fidélité {loy.tier.label}</Badge></span>}</div>{loy.ca12 > 0 && loy.next && <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 6 }}>Fidélité : {eur(loy.ca12)} sur 12 mois — encore <strong style={{ color: loy.next.color }}>{eur(loy.toNext)}</strong> pour atteindre le palier {loy.next.label}.</div>}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}><svg width="22" height="22" viewBox="-12 -16 24 26" style={{ flexShrink: 0 }}><path d={shapePath(tm.shape)} fill={col} stroke="#fff" strokeWidth={1.5} /></svg><h2 className="pu-display" style={{ margin: 0, fontSize: 22 }}>{s.label || "Établissement"}</h2>{codeEdit !== null ? <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><input autoFocus value={codeEdit} onChange={(e) => setCodeEdit(e.target.value.toUpperCase())} onKeyDown={(e) => { if (e.key === "Enter") saveCode(); if (e.key === "Escape") setCodeEdit(null); }} placeholder="MI-1" style={{ width: 92, padding: "4px 8px", border: "1px solid var(--line)", borderRadius: 8, fontWeight: 700, fontFamily: "inherit", letterSpacing: ".04em" }} /><button className="iconbtn" title="Valider" onClick={saveCode}><Check size={14} /></button><button className="iconbtn" title="Annuler" onClick={() => setCodeEdit(null)}><X size={14} /></button></span> : <>{estabCode && <span className="tnum" style={{ fontSize: 12.5, fontWeight: 800, color: "#7c5cf0", background: "#7c5cf01f", borderRadius: 8, padding: "3px 9px", letterSpacing: ".03em" }}>{estabCode}</span>}{canEditCode && <button className="iconbtn" title={estabCode ? "Modifier le code client" : "Attribuer un code client"} onClick={() => setCodeEdit(estabCode || "")} style={{ width: 26, height: 26 }}><Pencil size={12} /></button>}</>}<Badge color={s.type === "decision" ? "#7c5cf0" : "#F8B133"}>{s.type === "decision" ? "Siège" : "Établissement"}</Badge>{acc && <Badge color={st.color}>{st.label}</Badge>}{loy.ca12 > 0 && <span title={"CA HT signé sur 12 mois : " + eur(loy.ca12) + (loy.next ? " · encore " + eur(loy.toNext) + " pour le palier " + loy.next.label : " · palier maximum")}><Badge color={loy.tier.color}>🏅 Fidélité {loy.tier.label}</Badge></span>}</div>{loy.ca12 > 0 && loy.next && <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 6 }}>Fidélité : {eur(loy.ca12)} sur 12 mois — encore <strong style={{ color: loy.next.color }}>{eur(loy.toNext)}</strong> pour atteindre le palier {loy.next.label}.</div>}
           {grp && <div style={{ marginTop: 7, fontSize: 13 }}><span style={{ color: "var(--muted)" }}>Groupe : </span><span className="lnk" style={{ fontWeight: 700 }} onClick={() => onGoAccount(acc.id)}>{grp.enseigne}</span>{!isFranchise && acc.code ? <span className="tnum" style={{ color: "var(--muted)" }}> · {acc.code}</span> : null}</div>}
           {indep && <div style={{ marginTop: 7, fontSize: 12.5, color: "var(--muted)" }}>Établissement indépendant{acc.siren ? " · SIREN " + acc.siren : ""}{acc.formeJuridique ? " · " + acc.formeJuridique : ""}{acc.nature && NATURE_META[acc.nature] ? " · " + NATURE_META[acc.nature].label : ""}</div>}
           {(s.type === "pdv" || s.type === "decision") && (() => { const groups = data.accounts.filter((x) => isGroupe(x)); const cur = (grp && acc) ? acc.id : "indep"; const onChange = (val) => { if (val === cur) return; if (val === "indep") { if (grp) persist((p) => detachSiteToIndependent(p, s.id)); } else if (indep && acc) persist((p) => attachAccountToGroup(p, acc.id, val)); else if (grp) persist((p) => moveSiteToGroup(p, s.id, val)); }; return (<div style={{ marginTop: 9, display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}><span style={{ fontSize: 12, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 4 }}><Link2 size={13} /> Rattachement</span><select value={cur} onChange={(e) => onChange(e.target.value)} style={{ padding: "5px 9px", border: "1px solid var(--line)", borderRadius: 8, fontFamily: "inherit", fontSize: 12.5, background: "#fff" }}><option value="indep">— Indépendant (aucun groupe) —</option>{groups.map((g) => <option key={g.id} value={g.id}>{g.enseigne}</option>)}</select></div>); })()}
@@ -4442,7 +4457,7 @@ function AccountForm({ acc, accounts, onSave, known = [], onUsage }) {
     <div className="fld"><label>Étape de l'entonnoir</label><select value={f.stage} disabled={f.stageAuto !== false} onChange={(e) => { up("stage", e.target.value); up("stageAuto", false); }}>{STAGES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select><label style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12, color: "var(--muted)", marginTop: 7, fontWeight: 600, cursor: "pointer" }}><input type="checkbox" checked={f.stageAuto !== false} onChange={(e) => up("stageAuto", !!e.target.checked)} style={{ width: "auto" }} /> Classer automatiquement selon l'avancement (échanges, RDV, commandes)</label>{f.stageAuto !== false && <span style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 3 }}>L'étape avance toute seule (jamais en arrière) et se met à jour à chaque enregistrement. Décochez pour la fixer à la main.</span>}</div>
     <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}><button type="button" className="btn btn-ai btn-s" onClick={autofill} disabled={aiBusy || !f.enseigne} title="Compléter forme juridique, SIREN, ville et adresse à partir des registres officiels (ne remplit que les champs vides)"><Sparkles size={14} className={aiBusy ? "spin" : ""} /> {aiBusy ? ("Recherche… " + fmtElapsed(aiElapsed)) : "Compléter les champs vides avec l'IA"}</button></div>
     {aiMsg && <div style={{ fontSize: 12, lineHeight: 1.5, padding: "8px 11px", borderRadius: 9, background: aiMsg.ok ? "#eef6ee" : "#fbf0ee", border: "1px solid " + (aiMsg.ok ? "#bfe0c0" : "#f0c8c0") }}>{aiMsg.t}</div>}
-    <div className="row2"><div className="fld"><label>Nature du client (définit le code)</label><select value={f.nature || ""} onChange={(e) => up("nature", e.target.value)}><option value="">— à préciser —</option>{NATURE_ORDER.map((k) => <option key={k} value={k}>{k} · {NATURE_META[k].label}</option>)}</select></div><div className="fld"><label>Code client</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input value={f.code || ""} readOnly placeholder={isClientCode(f.code) ? "" : "attribué à l'enregistrement"} style={{ fontWeight: 700, letterSpacing: ".04em", background: "var(--bg)" }} />{isClientCode(f.code) && <button type="button" className="btn btn-g btn-s" onClick={regen} title="Recalculer le code à partir de la nature actuelle (à n'utiliser que pour corriger une erreur de classification)"><RefreshCw size={13} /></button>}</div><span style={{ fontSize: 11, color: "var(--muted)" }}>Figé à la création. Modifier la nature ne change pas le code, sauf via le bouton de recalcul.</span></div></div>
+    <div className="row2"><div className="fld"><label>Nature du client (définit le code)</label><select value={f.nature || ""} onChange={(e) => up("nature", e.target.value)}><option value="">— à préciser —</option>{NATURE_ORDER.map((k) => <option key={k} value={k}>{k} · {NATURE_META[k].label}</option>)}</select></div><div className="fld"><label>Code client</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input value={f.code || ""} onChange={(e) => up("code", e.target.value.toUpperCase())} placeholder={isClientCode(f.code) ? "" : "attribué à l'enregistrement"} style={{ fontWeight: 700, letterSpacing: ".04em" }} /><button type="button" className="btn btn-g btn-s" onClick={regen} title="Recalculer le code à partir de la nature actuelle (numéro suivant libre)"><RefreshCw size={13} /></button></div><span style={{ fontSize: 11, color: "var(--muted)" }}>Modifiable à la main (ex. « MI-1 »). Le bouton recalcule le prochain code libre pour la nature choisie. Un code personnalisé n'est jamais réattribué automatiquement.</span></div></div>
     <div className="row2"><div className="fld"><label>Forme juridique</label><Combo value={f.formeJuridique || ""} onChange={(v) => up("formeJuridique", v)} options={FORMES_JURIDIQUES} placeholder="SAS, SARL, association loi 1901…" /></div><div className="fld"><label>SIREN (entité juridique, 9 chiffres)</label><input value={f.siren || ""} onChange={(e) => up("siren", e.target.value)} placeholder="9 chiffres, ou n° RNA (W + 9 chiffres) pour une association" /><span style={{ fontSize: 11, color: "var(--muted)" }}>Identité de la personne morale, reprise sur les documents. Le SIRET (établissement) se renseigne au niveau de l'établissement.</span></div></div>
     {accountKind(f) === "groupe" && <div className="fld"><label>Nombre d'établissements du groupe</label><input type="number" value={f.magasins ?? ""} onChange={(e) => up("magasins", +e.target.value)} /></div>}
     <div style={{ marginTop: -4 }}><Badge color={seg.color}>{seg.label}</Badge></div>
