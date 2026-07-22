@@ -7053,6 +7053,17 @@ function PipelineKanban({ data, persist, go, embedded }) {
     { id: "refuse", label: "Refusé", color: "#FF5A45" },
   ];
   const accOf = (id) => data.accounts.find((a) => a.id === id);
+  // Libellé client d'un document : nom de l'ÉTABLISSEMENT (site lié au document / à la livraison) en
+  // priorité, sinon l'enseigne du compte, sinon l'établissement d'un indépendant sans enseigne.
+  const findS = (id) => id ? (data.sites || []).find((s) => s.id === id) : null;
+  const dealClient = (d) => {
+    const site = findS(d.siteId) || findS(d.livraisonSiteId);
+    if (site && site.label) return site.label;
+    const a = accOf(d.accountId);
+    if (a && a.enseigne) return a.enseigne;
+    if (a && !isGroupe(a)) { const s = (data.sites || []).find((x) => x.accountId === a.id && (x.type === "pdv" || x.type === "decision")); if (s && s.label) return s.label; }
+    return "—";
+  };
   const moveDeal = (dealId, newStatut) => persist((p) => ({ ...p, deals: p.deals.map((d) => d.id === dealId ? { ...d, statut: newStatut } : d) }));
   const totalBy = (st) => data.deals.filter((d) => d.statut === st).reduce((s, d) => s + (d.montant || 0), 0);
   const cntBy = (st) => data.deals.filter((d) => d.statut === st).length;
@@ -7067,10 +7078,10 @@ function PipelineKanban({ data, persist, go, embedded }) {
     <div className="kan kan-deals">
       {STAGES_K.map((s) => (<div key={s.id} className="col" onDragOver={(e) => onDragOver(e, s.id)} onDrop={(e) => onDrop(e, s.id)} style={dragCol === s.id && dragId ? { background: s.color + "1f", outline: `2px dashed ${s.color}`, outlineOffset: -2 } : undefined}>
         <div className="col-h"><i className="dot" style={{ background: s.color }} />{s.label}<span className="cnt">{cntBy(s.id)} · {eur(totalBy(s.id))}</span></div>
-        {data.deals.filter((d) => d.statut === s.id).sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((d) => { const a = accOf(d.accountId); return (
-          <div key={d.id} className="deal-card" draggable onDragStart={(e) => { dwell.hide(); onDragStart(e, d.id); }} onDragEnd={onDragEnd} onClick={() => go("deals", d.id)} {...dwell.bind(() => { const ds = DEAL_STATUS[d.statut] || DEAL_STATUS.brouillon; return { title: docRef(d, a) || d.ref || d.type, subtitle: a ? a.enseigne : "—", badge: ds.label, badgeColor: ds.color, accent: s.color, rows: [{ label: "Type", value: d.type }, { label: "Date", value: d.date }, { label: "Montant", value: eur(d.montant) }, { label: "Statut", value: ds.label }] }; })} style={{ borderLeft: `4px solid ${s.color}`, opacity: dragId === d.id ? 0.4 : 1, cursor: "grab" }}>
+        {data.deals.filter((d) => d.statut === s.id).sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((d) => { const a = accOf(d.accountId); const cli = dealClient(d); return (
+          <div key={d.id} className="deal-card" draggable onDragStart={(e) => { dwell.hide(); onDragStart(e, d.id); }} onDragEnd={onDragEnd} onClick={() => go("deals", d.id)} {...dwell.bind(() => { const ds = DEAL_STATUS[d.statut] || DEAL_STATUS.brouillon; return { title: docRef(d, a) || d.ref || d.type, subtitle: cli, badge: ds.label, badgeColor: ds.color, accent: s.color, rows: [{ label: "Type", value: d.type }, { label: "Date", value: d.date }, { label: "Montant", value: eur(d.montant) }, { label: "Statut", value: ds.label }] }; })} style={{ borderLeft: `4px solid ${s.color}`, opacity: dragId === d.id ? 0.4 : 1, cursor: "grab" }}>
             <h5>{d.ref || d.type}</h5>
-            <div className="deal-meta"><Building2 size={11} />{a ? a.enseigne : "—"}</div>
+            <div className="deal-meta"><Building2 size={11} />{cli}</div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
               <span className="deal-meta">{d.date || "—"}</span>
               <span className="deal-amount">{eur(d.montant)}</span>
