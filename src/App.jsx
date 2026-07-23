@@ -8704,6 +8704,21 @@ export default function App() {
     if (snap) setCanUndo(true);
   }, []);
   const undo = useCallback(() => { if (!undoRef.current) return; const snap = undoRef.current; undoRef.current = null; setCanUndo(false); persist(() => snap, { snapshot: false }); }, [persist]);
+  // Vide l'écriture Supabase en attente dès que l'onglet est masqué ou fermé (avant tout rechargement) :
+  // évite qu'une modification récente (validation d'événement, réglage…) soit perdue si l'écriture
+  // débouncée n'a pas encore eu lieu, le pull au rechargement écrasant sinon le local par la version serveur.
+  useEffect(() => {
+    const flush = () => {
+      if (!supabaseEnabled || !supabase) return;
+      if (!pendingWrite.current && !saveTimer.current) return;
+      if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+      try { const raw = localStorage.getItem(KEY); if (raw) { supabase.from("cockpit_state").upsert({ id: "shared", data: JSON.parse(raw), updated_at: new Date().toISOString() }, { onConflict: "id" }); pendingWrite.current = false; } } catch (e) { }
+    };
+    const onVis = () => { if (document.visibilityState === "hidden") flush(); };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("pagehide", flush);
+    return () => { document.removeEventListener("visibilitychange", onVis); window.removeEventListener("pagehide", flush); };
+  }, []);
   // Planification automatique des suites au calendrier depuis le résumé des échanges.
   // Chaque échange (nouveau OU ancien) qui possède un résumé non encore analysé est lu par
   // l'IA, qui en déduit les événements à planifier (visio datée, relance après envoi de doc…).
@@ -8713,12 +8728,17 @@ export default function App() {
   useEffect(() => {
     if (loading) return;
     if (autoScanRef.current.running || autoScanRef.current.failed) return;
+    // Échanges ayant DÉJÀ produit des événements : on les marque « scannés » sans réappeler l'IA, pour ne
+    // jamais recréer un événement existant (ce qui écraserait une validation « Fait » par un doublon non fait).
+    const already = new Set((data.events || []).filter((e) => e.fromInteraction).map((e) => e.fromInteraction));
     const pending = (data.interactions || []).filter((it) => it && it.resume && it.resume.trim() && !it._eventsScanned);
     if (pending.length === 0) return;
+    const preScanned = pending.filter((it) => already.has(it.id)).map((it) => it.id);
+    const toProcess = pending.filter((it) => !already.has(it.id));
     autoScanRef.current.running = true;
     (async () => {
-      const batch = pending.slice(0, 8);
-      const collected = []; const scannedIds = []; let usageAcc = null;
+      const batch = toProcess.slice(0, 8);
+      const collected = []; const scannedIds = [...preScanned]; let usageAcc = null;
       try {
         for (const it of batch) {
           const acc = (data.accounts || []).find((x) => x.id === it.accountId);
@@ -8730,12 +8750,17 @@ export default function App() {
         }
       } catch (e) { autoScanRef.current.failed = true; } // IA indisponible : on réessaiera à la prochaine session
       if (scannedIds.length) {
-        persist((p) => ({
-          ...p,
-          events: [...(p.events || []), ...collected],
-          interactions: (p.interactions || []).map((x) => scannedIds.includes(x.id) ? { ...x, _eventsScanned: true } : x),
-          claudeUsage: usageAcc ? addUsage(p.claudeUsage, usageAcc) : p.claudeUsage,
-        }), { snapshot: false });
+        persist((p) => {
+          const existingIds = new Set((p.events || []).map((e) => e.id));
+          const existingFrom = new Set((p.events || []).filter((e) => e.fromInteraction).map((e) => e.fromInteraction));
+          const toAdd = collected.filter((e) => !existingIds.has(e.id) && !existingFrom.has(e.fromInteraction));
+          return {
+            ...p,
+            events: [...(p.events || []), ...toAdd],
+            interactions: (p.interactions || []).map((x) => scannedIds.includes(x.id) ? { ...x, _eventsScanned: true } : x),
+            claudeUsage: usageAcc ? addUsage(p.claudeUsage, usageAcc) : p.claudeUsage,
+          };
+        }, { snapshot: false });
       }
       autoScanRef.current.running = false;
     })();
