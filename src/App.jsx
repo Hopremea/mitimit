@@ -7483,23 +7483,37 @@ function FraisKm({ data, persist }) {
   // Jours de trajet par défaut = jours de présence pointés ce mois (motif présence avec horaires).
   const presDays = useMemo(() => { const pre = new Date().toISOString().slice(0, 7); return Object.entries(data.pointages || {}).filter(([ds, r]) => ds.startsWith(pre) && r && (!r.motif || r.motif === "presence") && r.arrivee && r.depart).length; }, [data.pointages]);
   const [jours, setJours] = useState(presDays);
-  const [pDest, setPDest] = useState(""); const [pKm, setPKm] = useState(""); const [pEss, setPEss] = useState(0); const [pPea, setPPea] = useState(0); const [pAutre, setPAutre] = useState(0);
+  const [pDate, setPDate] = useState(TODAY()); const [pDest, setPDest] = useState(""); const [pKm, setPKm] = useState(""); const [pEss, setPEss] = useState(0); const [pPea, setPPea] = useState(0); const [pAutre, setPAutre] = useState(0);
   const e = Number(essence) || 0, p = Number(peage) || 0, mult = ar ? 2 : 1;
   const coutJour = (e + p) * mult; const totalMois = coutJour * (Number(jours) || 0);
   const pTotal = (Number(pEss) || 0) + (Number(pPea) || 0) + (Number(pAutre) || 0);
   const memoriser = () => persist((pp) => ({ ...pp, settings: { ...pp.settings, fraisEssence: e, fraisPeage: p, fraisAR: ar } }));
   const monthName = new Date().toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+  // Déplacements ponctuels enregistrés (RDV, salons…) : liste persistée, cumulée par mois.
+  const monthPref = new Date().toISOString().slice(0, 7);
+  const deplAll = data.deplacements || [];
+  const deplMois = deplAll.filter((d) => (d.date || "").startsWith(monthPref)).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const deplTotalMois = deplMois.reduce((s, d) => s + ((Number(d.essence) || 0) + (Number(d.peage) || 0) + (Number(d.autre) || 0)), 0);
+  const enregistrerDepl = () => {
+    if (pTotal <= 0 && !pKm && !pDest.trim()) return;
+    const rec = { id: "dp_" + Date.now(), date: pDate || TODAY(), dest: pDest.trim(), km: Number(pKm) || 0, essence: Number(pEss) || 0, peage: Number(pPea) || 0, autre: Number(pAutre) || 0 };
+    persist((pp) => ({ ...pp, deplacements: [rec, ...(pp.deplacements || [])] }));
+    setPDest(""); setPKm(""); setPEss(0); setPPea(0); setPAutre(0); setPDate(TODAY());
+  };
+  const supprimerDepl = (id) => persist((pp) => ({ ...pp, deplacements: (pp.deplacements || []).filter((d) => d.id !== id) }));
+  const fraisDomicile = coutJour * presDays;
+  const grandFrais = fraisDomicile + deplTotalMois;
   return (<div>
     {/* Synthèse liée au pointage : chaque journée de présence pointée = 1 aller-retour domicile-travail. */}
     <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--green)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
       <div>
-        <div style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3 }}>Frais domicile-travail · <span style={{ textTransform: "capitalize" }}>{monthName}</span></div>
-        <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3, lineHeight: 1.5 }}>{presDays} journée(s) de présence pointée(s) × {eur2(coutJour)}{ar ? " (aller-retour)" : ""} — frais réels. La <strong>prime versée en paie = 50 %</strong> des frais.</div>
+        <div style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3 }}>Frais kilométriques · <span style={{ textTransform: "capitalize" }}>{monthName}</span></div>
+        <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3, lineHeight: 1.5 }}>Domicile-travail : {presDays} journée(s) × {eur2(coutJour)}{ar ? " (A/R)" : ""} = <strong>{eur2(fraisDomicile)}</strong>{deplTotalMois > 0 ? <> · Déplacements ponctuels ({deplMois.length}) : <strong>{eur2(deplTotalMois)}</strong></> : null}. La <strong>prime versée en paie = 50 %</strong> des frais.</div>
       </div>
       <div style={{ textAlign: "right" }}>
         <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3 }}>Frais</div>
-        <div className="pu-display tnum" style={{ fontSize: 28, color: "var(--green)", fontWeight: 900, lineHeight: 1 }}>{eur2(coutJour * presDays)}</div>
-        <div style={{ fontSize: 12.5, color: "var(--blue)", fontWeight: 800, marginTop: 3 }}>Prime (50 %) : {eur2(coutJour * presDays * PRIME_KM_RATE)}</div>
+        <div className="pu-display tnum" style={{ fontSize: 28, color: "var(--green)", fontWeight: 900, lineHeight: 1 }}>{eur2(grandFrais)}</div>
+        <div style={{ fontSize: 12.5, color: "var(--blue)", fontWeight: 800, marginTop: 3 }}>Prime (50 %) : {eur2(grandFrais * PRIME_KM_RATE)}</div>
       </div>
     </div>
     <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
@@ -7530,11 +7544,12 @@ function FraisKm({ data, persist }) {
         </div>
       </div>
     ) : (
-      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", alignItems: "start" }}>
+      <><div className="grid" style={{ gridTemplateColumns: "1fr 1fr", alignItems: "start" }}>
         <div className="card"><div className="sec-h"><h3 className="pu-display">Déplacement ponctuel</h3></div>
-          <div className="fld" style={{ marginBottom: 8 }}><label>Destination / motif (facultatif)</label><input value={pDest} onChange={(ev) => setPDest(ev.target.value)} placeholder="RDV client, salon…" /></div>
+          <div className="row2" style={{ marginBottom: 8 }}><div className="fld"><label>Date</label><input type="date" value={pDate} onChange={(ev) => setPDate(ev.target.value)} /></div><div className="fld"><label>Destination / motif (facultatif)</label><input value={pDest} onChange={(ev) => setPDest(ev.target.value)} placeholder="RDV client, salon…" /></div></div>
           <div className="row2" style={{ marginBottom: 8 }}><div className="fld"><label>Distance (km, facultatif)</label><input type="number" step="1" value={pKm} onChange={(ev) => setPKm(ev.target.value)} /></div><div className="fld"><label>⛽ Essence (€)</label><input type="number" step="0.01" value={pEss} onChange={(ev) => setPEss(ev.target.value)} /></div></div>
           <div className="row2"><div className="fld"><label>🛣️ Péage (€)</label><input type="number" step="0.01" value={pPea} onChange={(ev) => setPPea(ev.target.value)} /></div><div className="fld"><label>Autres frais (€)</label><input type="number" step="0.01" value={pAutre} onChange={(ev) => setPAutre(ev.target.value)} /></div></div>
+          <div style={{ marginTop: 12 }}><button className="btn btn-p" onClick={enregistrerDepl} disabled={pTotal <= 0 && !pKm && !pDest.trim()}><Save size={14} /> Enregistrer ce déplacement</button></div>
         </div>
         <div className="card" style={{ borderTop: "3px solid var(--blue)" }}><div className="sec-h"><h3 className="pu-display">Total du déplacement</h3></div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>
@@ -7546,6 +7561,9 @@ function FraisKm({ data, persist }) {
           <div className="calc-out" style={{ background: "#eef2fb", marginTop: 8 }}><span className="l">Prime versée (50 % des frais)</span><span className="b pu-display tnum" style={{ color: "var(--blue)" }}>{eur2(pTotal * PRIME_KM_RATE)}</span></div>
         </div>
       </div>
+      <div className="card" style={{ marginTop: 14 }}><div className="sec-h"><h3 className="pu-display" style={{ textTransform: "capitalize" }}>Déplacements enregistrés · {monthName}</h3>{deplTotalMois > 0 && <span style={{ fontSize: 12.5, fontWeight: 800 }}><span style={{ color: "var(--green)" }}>{eur2(deplTotalMois)}</span> · prime <span style={{ color: "var(--blue)" }}>{eur2(deplTotalMois * PRIME_KM_RATE)}</span></span>}</div>
+        {deplMois.length === 0 ? <div className="empty">Aucun déplacement ponctuel enregistré ce mois. Renseignez-en un ci-dessus puis « Enregistrer ».</div> : <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Date</th><th>Destination / motif</th><th style={{ textAlign: "right" }}>Km</th><th style={{ textAlign: "right" }}>Frais réels</th><th style={{ textAlign: "right" }}>Prime (50 %)</th><th></th></tr></thead><tbody>{deplMois.map((d) => { const t = (Number(d.essence) || 0) + (Number(d.peage) || 0) + (Number(d.autre) || 0); return (<tr key={d.id}><td className="tnum">{d.date}</td><td>{d.dest || "—"}</td><td style={{ textAlign: "right" }} className="tnum">{d.km ? d.km : "—"}</td><td style={{ textAlign: "right", fontWeight: 700, color: "var(--green)" }} className="tnum">{eur2(t)}</td><td style={{ textAlign: "right", color: "var(--blue)" }} className="tnum">{eur2(t * PRIME_KM_RATE)}</td><td style={{ textAlign: "right" }}><button className="iconbtn" title="Supprimer" onClick={() => supprimerDepl(d.id)}><Trash2 size={14} /></button></td></tr>); })}</tbody></table></div>}
+      </div></>
     )}
   </div>);
 }
