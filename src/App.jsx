@@ -7483,9 +7483,22 @@ function FraisKm({ data, persist }) {
   const [essence, setEssence] = useState(s.fraisEssence != null ? s.fraisEssence : 8);
   const [peage, setPeage] = useState(s.fraisPeage != null ? s.fraisPeage : 3.2);
   const [ar, setAr] = useState(s.fraisAR !== false);
-  // Jours de trajet par défaut = jours de présence pointés ce mois (motif présence avec horaires).
+  // Ré-synchronise les montants avec les réglages mémorisés dès que ceux-ci arrivent (le chargement des
+  // données peut se produire après le premier rendu). Tant que l'utilisateur n'a rien saisi (fraisTouched),
+  // les champs suivent la valeur enregistrée — sinon l'affichage restait bloqué sur la valeur par défaut.
+  const [fraisTouched, setFraisTouched] = useState(false);
+  useEffect(() => {
+    if (fraisTouched) return;
+    if (s.fraisEssence != null) setEssence(s.fraisEssence);
+    if (s.fraisPeage != null) setPeage(s.fraisPeage);
+    setAr(s.fraisAR !== false);
+  }, [s.fraisEssence, s.fraisPeage, s.fraisAR, fraisTouched]);
+  // Jours de trajet = jours de présence au local pointés ce mois. Chaque jour au bureau incrémente
+  // automatiquement le compteur (sauf si l'utilisateur a saisi un nombre à la main via joursTouched).
   const presDays = useMemo(() => { const pre = new Date().toISOString().slice(0, 7); return Object.entries(data.pointages || {}).filter(([ds, r]) => ds.startsWith(pre) && r && (!r.motif || r.motif === "presence") && r.arrivee && r.depart).length; }, [data.pointages]);
   const [jours, setJours] = useState(presDays);
+  const [joursTouched, setJoursTouched] = useState(false);
+  useEffect(() => { if (!joursTouched) setJours(presDays); }, [presDays, joursTouched]);
   const [pDate, setPDate] = useState(TODAY()); const [pDest, setPDest] = useState(""); const [pKm, setPKm] = useState(""); const [pEss, setPEss] = useState(0); const [pPea, setPPea] = useState(0); const [pAutre, setPAutre] = useState(0);
   const e = Number(essence) || 0, p = Number(peage) || 0, mult = ar ? 2 : 1;
   const coutJour = (e + p) * mult; const totalMois = coutJour * (Number(jours) || 0);
@@ -7528,10 +7541,10 @@ function FraisKm({ data, persist }) {
     {mode === "domicile" ? (
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", alignItems: "start" }}>
         <div className="card"><div className="sec-h"><h3 className="pu-display">Trajet quotidien domicile ↔ travail</h3></div>
-          <div className="row2" style={{ marginBottom: 8 }}><div className="fld"><label>⛽ Essence (€ / trajet)</label><input type="number" step="0.01" value={essence} onChange={(ev) => setEssence(ev.target.value)} /></div><div className="fld"><label>🛣️ Péage (€ / trajet)</label><input type="number" step="0.01" value={peage} onChange={(ev) => setPeage(ev.target.value)} /></div></div>
-          <div className="fld" style={{ marginBottom: 8 }}><label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", fontWeight: 600 }}><input type="checkbox" checked={ar} onChange={(ev) => setAr(ev.target.checked)} style={{ width: 16, height: 16, accentColor: "var(--blue)" }} /> Aller-retour (× 2)</label></div>
-          <div className="fld"><label style={{ textTransform: "capitalize" }}>Nombre de jours de trajet · {monthName}</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="1" min="0" value={jours} onChange={(ev) => setJours(ev.target.value)} /><button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setJours(presDays)} title="Reprendre le nombre de jours de présence pointés ce mois">{presDays} pointé(s)</button></div></div>
-          <div style={{ marginTop: 10 }}><button className="btn btn-g btn-s" onClick={memoriser}><Save size={13} /> Mémoriser ces montants par défaut</button></div>
+          <div className="row2" style={{ marginBottom: 8 }}><div className="fld"><label>⛽ Essence (€ / trajet)</label><input type="number" step="0.01" value={essence} onChange={(ev) => { setFraisTouched(true); setEssence(ev.target.value); }} /></div><div className="fld"><label>🛣️ Péage (€ / trajet)</label><input type="number" step="0.01" value={peage} onChange={(ev) => { setFraisTouched(true); setPeage(ev.target.value); }} /></div></div>
+          <div className="fld" style={{ marginBottom: 8 }}><label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", fontWeight: 600 }}><input type="checkbox" checked={ar} onChange={(ev) => { setFraisTouched(true); setAr(ev.target.checked); }} style={{ width: 16, height: 16, accentColor: "var(--blue)" }} /> Aller-retour (× 2)</label></div>
+          <div className="fld"><label style={{ textTransform: "capitalize" }}>Nombre de jours de trajet · {monthName}</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="1" min="0" value={jours} onChange={(ev) => { setJoursTouched(true); setJours(ev.target.value); }} /><button className={cx("btn", "btn-s", joursTouched ? "btn-g" : "btn-p")} style={{ whiteSpace: "nowrap" }} onClick={() => { setJoursTouched(false); setJours(presDays); }} title="Suivre automatiquement les jours de présence pointés ce mois">↻ {presDays} pointé(s)</button></div><span style={{ fontSize: 11, color: joursTouched ? "var(--muted)" : "var(--green)", fontWeight: 600 }}>{joursTouched ? "Nombre saisi manuellement" : "↻ Suit automatiquement les jours de présence pointés"}</span></div>
+          <div style={{ marginTop: 10 }}><button className="btn btn-g btn-s" onClick={() => { memoriser(); setFraisTouched(false); }}><Save size={13} /> Mémoriser ces montants par défaut</button></div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <div className="card" style={{ borderTop: "3px solid var(--blue)" }}><div className="sec-h"><h3 className="pu-display">Coût par jour</h3></div>
