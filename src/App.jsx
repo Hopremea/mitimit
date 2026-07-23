@@ -1033,6 +1033,47 @@ function fileToBase64(file) {
     r.readAsDataURL(file);
   });
 }
+// Taille approximative (octets) d'une image encodée en Data URL base64.
+const dataUrlBytes = (u) => { const i = (u || "").indexOf(","); const b64 = i >= 0 ? u.slice(i + 1) : (u || ""); return Math.round(b64.length * 3 / 4); };
+// Redimensionne + compresse une image (JPEG) pour un stockage léger, sans la rejeter : on borne le
+// plus grand côté à maxDim et on ajuste la qualité. Fond blanc pour les PNG transparents.
+function compressImage(file, maxDim = 1600, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onerror = reject;
+    r.onload = () => {
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        try {
+          const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+          const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
+          const c = document.createElement("canvas"); c.width = w; c.height = h;
+          const ctx = c.getContext("2d");
+          ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h);
+          ctx.drawImage(img, 0, 0, w, h);
+          resolve(c.toDataURL("image/jpeg", quality));
+        } catch (e) { reject(e); }
+      };
+      img.src = r.result;
+    };
+    r.readAsDataURL(file);
+  });
+}
+// Prépare un fichier pour le stockage : les images sont réduites/compressées (jamais rejetées) jusqu'à
+// tenir sous ~1,5 Mo ; les autres fichiers sont renvoyés tels quels. Renvoie { dataUrl, type, size }.
+async function fileToStorable(file) {
+  if (/^image\//.test(file.type || "")) {
+    try {
+      let dataUrl = await compressImage(file, 1600, 0.82);
+      if (dataUrlBytes(dataUrl) > 1.5 * 1024 * 1024) dataUrl = await compressImage(file, 1280, 0.72);
+      if (dataUrlBytes(dataUrl) > 1.5 * 1024 * 1024) dataUrl = await compressImage(file, 1024, 0.62);
+      return { dataUrl, type: "image/jpeg", size: dataUrlBytes(dataUrl) };
+    } catch (e) { /* repli sur le fichier brut ci-dessous */ }
+  }
+  const dataUrl = await fileToBase64(file);
+  return { dataUrl, type: file.type, size: file.size };
+}
 const formatBytes = (b) => b < 1024 ? b + " o" : b < 1048576 ? Math.round(b / 1024) + " Ko" : (b / 1048576).toFixed(1) + " Mo";
 
 // Détection de doublons sur nom (similarité simple, casse + accents normalisés)
@@ -3392,7 +3433,7 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
   const addInteraction = (it) => persist((p) => ({ ...p, interactions: [...p.interactions, it] }));
   const saveInteraction = (it) => persist((p) => ({ ...p, interactions: p.interactions.some((x) => x.id === it.id) ? p.interactions.map((x) => x.id === it.id ? it : x) : [...p.interactions, it] }));
   const delInteraction = (id) => persist((p) => ({ ...p, interactions: p.interactions.filter((i) => i.id !== id) }));
-  const uploadFile = async (file) => { if (!file) return; if (file.size > 4 * 1024 * 1024) { alert("Fichier trop volumineux (max 4 Mo). Le stockage local n'accepte que des fichiers légers."); return; } const dataUrl = await fileToBase64(file); persist((p) => ({ ...p, attachments: { ...p.attachments, [attKey]: [...(p.attachments[attKey] || []), { id: "f_" + Date.now(), name: file.name, type: file.type, size: file.size, dataUrl, addedAt: new Date().toISOString().slice(0, 10) }] } })); };
+  const uploadFile = async (file) => { if (!file) return; const isImage = /^image\//.test(file.type || ""); if (!isImage && file.size > 4 * 1024 * 1024) { alert("Fichier trop volumineux (max 4 Mo). Le stockage local n'accepte que des fichiers légers."); return; } const st = await fileToStorable(file); const name = isImage ? file.name.replace(/\.(png|heic|heif|webp|bmp|tiff?)$/i, ".jpg") : file.name; persist((p) => ({ ...p, attachments: { ...p.attachments, [attKey]: [...(p.attachments[attKey] || []), { id: "f_" + Date.now(), name, type: st.type, size: st.size, dataUrl: st.dataUrl, addedAt: new Date().toISOString().slice(0, 10) }] } })); };
   const delFile = (fid) => persist((p) => ({ ...p, attachments: { ...p.attachments, [attKey]: (p.attachments[attKey] || []).filter((x) => x.id !== fid) } }));
   const downloadFile = (f) => { const a2 = document.createElement("a"); a2.href = f.dataUrl; a2.download = f.name; document.body.appendChild(a2); a2.click(); document.body.removeChild(a2); };
   const newDeal = (type) => ({ id: uid("d_"), accountId: s.accountId, siteId: s.id, type, date: TODAY(), statut: "brouillon", ref: nextRef(type, data.deals), note: "", tva: (data.settings && data.settings.tva) || 20, prestoStatus: "", prestoRef: "", prestoDate: "", converti: false, lines: [] });
@@ -3459,7 +3500,7 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
       </div>
       <div className="card"><div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 5, margin: 0 }}><Paperclip size={15} />Pièces jointes</h3><div><input ref={fileRef} type="file" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) uploadFile(f); e.target.value = ""; }} /><button className="btn btn-y btn-s" onClick={() => fileRef.current && fileRef.current.click()}><Upload size={14} /> Téléverser</button></div></div>
         {atts.length === 0 ? <div className="empty">Aucun fichier. Photo du linéaire, bon de commande signé, accord de référencement…</div> : <div className="attach-list">{atts.map((f) => (<div key={f.id} className="attach-row"><Paperclip size={15} color="var(--muted)" /><span className="a-name" title={f.name}>{f.name}</span><span className="a-size">{formatBytes(f.size)}</span><button className="iconbtn" onClick={() => downloadFile(f)} title="Télécharger"><Download size={14} /></button><button className="iconbtn" onClick={() => { appConfirm("Supprimer la pièce jointe « " + f.name + " » ?", { title: "Supprimer ce fichier ?" }).then((ok) => { if (ok) delFile(f.id); }); }} title="Supprimer"><Trash2 size={14} /></button></div>))}</div>}
-        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 10, lineHeight: 1.5 }}>Les fichiers sont stockés dans le navigateur (limite 4 Mo par fichier). Pensez à exporter une sauvegarde régulièrement.</div>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 10, lineHeight: 1.5 }}>Les fichiers sont stockés dans le navigateur. Les photos sont automatiquement redimensionnées et compressées à l'import (aucun rejet) ; les autres fichiers sont limités à 4 Mo. Pensez à exporter une sauvegarde régulièrement.</div>
       </div>
     </div>
     {preview && <DevisPreview deal={preview} account={acc} settings={data.settings} products={data.products} data={data} onClose={() => setPreview(null)} />}
@@ -3556,9 +3597,11 @@ function AccountDetail({ account, data, persist, go, onBack, onEdit, onAddContac
   const delInteraction = (id) => persist((p) => ({ ...p, interactions: p.interactions.filter((i) => i.id !== id) }));
   const uploadFile = async (file) => {
     if (!file) return;
-    if (file.size > 4 * 1024 * 1024) { alert("Fichier trop volumineux (max 4 Mo). Le stockage local n'accepte que des fichiers légers."); return; }
-    const dataUrl = await fileToBase64(file);
-    persist((p) => ({ ...p, attachments: { ...p.attachments, [a.id]: [...(p.attachments[a.id] || []), { id: "f_" + Date.now(), name: file.name, type: file.type, size: file.size, dataUrl, addedAt: new Date().toISOString().slice(0, 10) }] } }));
+    const isImage = /^image\//.test(file.type || "");
+    if (!isImage && file.size > 4 * 1024 * 1024) { alert("Fichier trop volumineux (max 4 Mo). Le stockage local n'accepte que des fichiers légers."); return; }
+    const st = await fileToStorable(file);
+    const name = isImage ? file.name.replace(/\.(png|heic|heif|webp|bmp|tiff?)$/i, ".jpg") : file.name;
+    persist((p) => ({ ...p, attachments: { ...p.attachments, [a.id]: [...(p.attachments[a.id] || []), { id: "f_" + Date.now(), name, type: st.type, size: st.size, dataUrl: st.dataUrl, addedAt: new Date().toISOString().slice(0, 10) }] } }));
   };
   const delFile = (fid) => persist((p) => ({ ...p, attachments: { ...p.attachments, [a.id]: (p.attachments[a.id] || []).filter((x) => x.id !== fid) } }));
   const downloadFile = (f) => { const a2 = document.createElement("a"); a2.href = f.dataUrl; a2.download = f.name; document.body.appendChild(a2); a2.click(); document.body.removeChild(a2); };
@@ -3602,7 +3645,7 @@ function AccountDetail({ account, data, persist, go, onBack, onEdit, onAddContac
       </div>
       <div className="card"><div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 5, margin: 0 }}><Paperclip size={15} />Pièces jointes</h3><div><input ref={fileRef} type="file" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) uploadFile(f); e.target.value = ""; }} /><button className="btn btn-y btn-s" onClick={() => fileRef.current && fileRef.current.click()}><Upload size={14} /> Téléverser</button></div></div>
         {accAttachments.length === 0 ? <div className="empty">Aucun fichier. NDA, devis signés, fiches techniques…</div> : <div className="attach-list">{accAttachments.map((f) => (<div key={f.id} className="attach-row"><Paperclip size={15} color="var(--muted)" /><span className="a-name" title={f.name}>{f.name}</span><span className="a-size">{formatBytes(f.size)}</span><button className="iconbtn" onClick={() => downloadFile(f)} title="Télécharger"><Download size={14} /></button><button className="iconbtn" onClick={() => { appConfirm("Supprimer la pièce jointe « " + f.name + " » ?", { title: "Supprimer ce fichier ?" }).then((ok) => { if (ok) delFile(f.id); }); }} title="Supprimer"><Trash2 size={14} /></button></div>))}</div>}
-        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 10, lineHeight: 1.5 }}>Les fichiers sont stockés dans le navigateur (limite 4 Mo par fichier). Pensez à exporter une sauvegarde régulièrement.</div>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 10, lineHeight: 1.5 }}>Les fichiers sont stockés dans le navigateur. Les photos sont automatiquement redimensionnées et compressées à l'import (aucun rejet) ; les autres fichiers sont limités à 4 Mo. Pensez à exporter une sauvegarde régulièrement.</div>
       </div>
     </div>
     {preview && <DevisPreview deal={preview} account={a} settings={data.settings} products={data.products} data={data} onClose={() => setPreview(null)} />}
