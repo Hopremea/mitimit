@@ -7503,17 +7503,19 @@ function FraisKm({ data, persist }) {
   const supprimerDepl = (id) => persist((pp) => ({ ...pp, deplacements: (pp.deplacements || []).filter((d) => d.id !== id) }));
   const fraisDomicile = coutJour * presDays;
   const grandFrais = fraisDomicile + deplTotalMois;
+  // Domicile-travail : prime = 50 % des frais. Déplacements ponctuels : remboursés à 100 %.
+  const grandPrime = fraisDomicile * PRIME_KM_RATE + deplTotalMois;
   return (<div>
     {/* Synthèse liée au pointage : chaque journée de présence pointée = 1 aller-retour domicile-travail. */}
     <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--green)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
       <div>
         <div style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3 }}>Frais kilométriques · <span style={{ textTransform: "capitalize" }}>{monthName}</span></div>
-        <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3, lineHeight: 1.5 }}>Domicile-travail : {presDays} journée(s) × {eur2(coutJour)}{ar ? " (A/R)" : ""} = <strong>{eur2(fraisDomicile)}</strong>{deplTotalMois > 0 ? <> · Déplacements ponctuels ({deplMois.length}) : <strong>{eur2(deplTotalMois)}</strong></> : null}. La <strong>prime versée en paie = 50 %</strong> des frais.</div>
+        <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3, lineHeight: 1.5 }}>Domicile-travail : {presDays} journée(s) × {eur2(coutJour)}{ar ? " (A/R)" : ""} = <strong>{eur2(fraisDomicile)}</strong> <span style={{ color: "var(--blue)" }}>(prime 50 %)</span>{deplTotalMois > 0 ? <> · Déplacements ponctuels ({deplMois.length}) : <strong>{eur2(deplTotalMois)}</strong> <span style={{ color: "var(--blue)" }}>(remboursés 100 %)</span></> : null}.</div>
       </div>
       <div style={{ textAlign: "right" }}>
         <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3 }}>Frais</div>
         <div className="pu-display tnum" style={{ fontSize: 28, color: "var(--green)", fontWeight: 900, lineHeight: 1 }}>{eur2(grandFrais)}</div>
-        <div style={{ fontSize: 12.5, color: "var(--blue)", fontWeight: 800, marginTop: 3 }}>Prime (50 %) : {eur2(grandFrais * PRIME_KM_RATE)}</div>
+        <div style={{ fontSize: 12.5, color: "var(--blue)", fontWeight: 800, marginTop: 3 }}>Prime versée : {eur2(grandPrime)}</div>
       </div>
     </div>
     <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
@@ -7558,11 +7560,11 @@ function FraisKm({ data, persist }) {
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}><span>Autres frais</span><span className="tnum">{eur2(Number(pAutre) || 0)}</span></div>
           </div>
           <div className="calc-out" style={{ background: "#e7f7ef" }}><span className="l">Frais réels{pDest ? " · " + pDest : ""}{pKm ? " · " + pKm + " km" : ""}</span><span className="b pu-display tnum" style={{ color: "var(--green)" }}>{eur2(pTotal)}</span></div>
-          <div className="calc-out" style={{ background: "#eef2fb", marginTop: 8 }}><span className="l">Prime versée (50 % des frais)</span><span className="b pu-display tnum" style={{ color: "var(--blue)" }}>{eur2(pTotal * PRIME_KM_RATE)}</span></div>
+          <div className="calc-out" style={{ background: "#eef2fb", marginTop: 8 }}><span className="l">Remboursé (100 % des frais)</span><span className="b pu-display tnum" style={{ color: "var(--blue)" }}>{eur2(pTotal)}</span></div>
         </div>
       </div>
-      <div className="card" style={{ marginTop: 14 }}><div className="sec-h"><h3 className="pu-display" style={{ textTransform: "capitalize" }}>Déplacements enregistrés · {monthName}</h3>{deplTotalMois > 0 && <span style={{ fontSize: 12.5, fontWeight: 800 }}><span style={{ color: "var(--green)" }}>{eur2(deplTotalMois)}</span> · prime <span style={{ color: "var(--blue)" }}>{eur2(deplTotalMois * PRIME_KM_RATE)}</span></span>}</div>
-        {deplMois.length === 0 ? <div className="empty">Aucun déplacement ponctuel enregistré ce mois. Renseignez-en un ci-dessus puis « Enregistrer ».</div> : <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Date</th><th>Destination / motif</th><th style={{ textAlign: "right" }}>Km</th><th style={{ textAlign: "right" }}>Frais réels</th><th style={{ textAlign: "right" }}>Prime (50 %)</th><th></th></tr></thead><tbody>{deplMois.map((d) => { const t = (Number(d.essence) || 0) + (Number(d.peage) || 0) + (Number(d.autre) || 0); return (<tr key={d.id}><td className="tnum">{d.date}</td><td>{d.dest || "—"}</td><td style={{ textAlign: "right" }} className="tnum">{d.km ? d.km : "—"}</td><td style={{ textAlign: "right", fontWeight: 700, color: "var(--green)" }} className="tnum">{eur2(t)}</td><td style={{ textAlign: "right", color: "var(--blue)" }} className="tnum">{eur2(t * PRIME_KM_RATE)}</td><td style={{ textAlign: "right" }}><button className="iconbtn" title="Supprimer" onClick={() => supprimerDepl(d.id)}><Trash2 size={14} /></button></td></tr>); })}</tbody></table></div>}
+      <div className="card" style={{ marginTop: 14 }}><div className="sec-h"><h3 className="pu-display" style={{ textTransform: "capitalize" }}>Déplacements enregistrés · {monthName}</h3>{deplTotalMois > 0 && <span style={{ fontSize: 12.5, fontWeight: 800 }}><span style={{ color: "var(--green)" }}>{eur2(deplTotalMois)}</span> · remboursé <span style={{ color: "var(--blue)" }}>{eur2(deplTotalMois)}</span></span>}</div>
+        {deplMois.length === 0 ? <div className="empty">Aucun déplacement ponctuel enregistré ce mois. Renseignez-en un ci-dessus puis « Enregistrer ».</div> : <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Date</th><th>Destination / motif</th><th style={{ textAlign: "right" }}>Km</th><th style={{ textAlign: "right" }}>Frais réels</th><th style={{ textAlign: "right" }}>Remboursé (100 %)</th><th></th></tr></thead><tbody>{deplMois.map((d) => { const t = (Number(d.essence) || 0) + (Number(d.peage) || 0) + (Number(d.autre) || 0); return (<tr key={d.id}><td className="tnum">{d.date}</td><td>{d.dest || "—"}</td><td style={{ textAlign: "right" }} className="tnum">{d.km ? d.km : "—"}</td><td style={{ textAlign: "right", fontWeight: 700, color: "var(--green)" }} className="tnum">{eur2(t)}</td><td style={{ textAlign: "right", color: "var(--blue)", fontWeight: 700 }} className="tnum">{eur2(t)}</td><td style={{ textAlign: "right" }}><button className="iconbtn" title="Supprimer" onClick={() => supprimerDepl(d.id)}><Trash2 size={14} /></button></td></tr>); })}</tbody></table></div>}
       </div></>
     )}
   </div>);
