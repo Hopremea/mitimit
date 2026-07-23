@@ -1074,6 +1074,29 @@ async function fileToStorable(file) {
   const dataUrl = await fileToBase64(file);
   return { dataUrl, type: file.type, size: file.size };
 }
+// Aperçu d'une pièce jointe (image affichée, PDF intégré, autre = proposition de téléchargement).
+function FilePreview({ file, onClose }) {
+  if (!file) return null;
+  const isImg = /^image\//.test(file.type || "") || /\.(jpe?g|png|gif|webp|bmp|svg|heic|heif)$/i.test(file.name || "");
+  const isPdf = /pdf/i.test(file.type || "") || /\.pdf$/i.test(file.name || "");
+  return createPortal(
+    <div className="ov" onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(10,15,25,.72)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 5000, padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, maxWidth: "94vw", maxHeight: "94vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,.35)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 14px", borderBottom: "1px solid var(--line)" }}>
+          <strong style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.name}</strong>
+          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            <a className="btn btn-g btn-s" href={file.dataUrl} download={file.name}><Download size={14} /> Télécharger</a>
+            <button className="iconbtn" onClick={onClose}><X size={16} /></button>
+          </div>
+        </div>
+        <div style={{ padding: 12, overflow: "auto", background: "#f4f6fb", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {isImg ? <img src={file.dataUrl} alt={file.name} style={{ maxWidth: "90vw", maxHeight: "80vh", display: "block", borderRadius: 8 }} />
+            : isPdf ? <iframe src={file.dataUrl} title={file.name} style={{ width: "90vw", height: "80vh", border: "none", borderRadius: 8, background: "#fff" }} />
+              : <div className="empty" style={{ padding: 32 }}>Aperçu non disponible pour ce type de fichier. Utilisez « Télécharger » pour l'ouvrir.</div>}
+        </div>
+      </div>
+    </div>, document.body);
+}
 const formatBytes = (b) => b < 1024 ? b + " o" : b < 1048576 ? Math.round(b / 1024) + " Ko" : (b / 1048576).toFixed(1) + " Mo";
 
 // Détection de doublons sur nom (similarité simple, casse + accents normalisés)
@@ -3343,6 +3366,7 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
   const [chatOpen, setChatOpen] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const [codeEdit, setCodeEdit] = useState(null);
+  const [filePreview, setFilePreview] = useState(null);
   // Enregistre un code client saisi à la main : sur le SITE pour un franchisé (code propre au pdv),
   // sur le COMPTE pour un établissement indépendant. Normalisé en MAJUSCULES ; vide = code effacé.
   const saveCode = () => {
@@ -3499,11 +3523,12 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
         <InteractionThread interactions={ints} data={data} onView={(it) => setIntView(it)} onEdit={(it) => setIntEdit(it)} onDelete={delInteraction} showContact />
       </div>
       <div className="card"><div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 5, margin: 0 }}><Paperclip size={15} />Pièces jointes</h3><div><input ref={fileRef} type="file" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) uploadFile(f); e.target.value = ""; }} /><button className="btn btn-y btn-s" onClick={() => fileRef.current && fileRef.current.click()}><Upload size={14} /> Téléverser</button></div></div>
-        {atts.length === 0 ? <div className="empty">Aucun fichier. Photo du linéaire, bon de commande signé, accord de référencement…</div> : <div className="attach-list">{atts.map((f) => (<div key={f.id} className="attach-row"><Paperclip size={15} color="var(--muted)" /><span className="a-name" title={f.name}>{f.name}</span><span className="a-size">{formatBytes(f.size)}</span><button className="iconbtn" onClick={() => downloadFile(f)} title="Télécharger"><Download size={14} /></button><button className="iconbtn" onClick={() => { appConfirm("Supprimer la pièce jointe « " + f.name + " » ?", { title: "Supprimer ce fichier ?" }).then((ok) => { if (ok) delFile(f.id); }); }} title="Supprimer"><Trash2 size={14} /></button></div>))}</div>}
+        {atts.length === 0 ? <div className="empty">Aucun fichier. Photo du linéaire, bon de commande signé, accord de référencement…</div> : <div className="attach-list">{atts.map((f) => (<div key={f.id} className="attach-row"><Paperclip size={15} color="var(--muted)" /><span className="a-name" title={f.name}>{f.name}</span><span className="a-size">{formatBytes(f.size)}</span><button className="iconbtn" onClick={() => setFilePreview(f)} title="Visualiser"><Eye size={14} /></button><button className="iconbtn" onClick={() => downloadFile(f)} title="Télécharger"><Download size={14} /></button><button className="iconbtn" onClick={() => { appConfirm("Supprimer la pièce jointe « " + f.name + " » ?", { title: "Supprimer ce fichier ?" }).then((ok) => { if (ok) delFile(f.id); }); }} title="Supprimer"><Trash2 size={14} /></button></div>))}</div>}
         <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 10, lineHeight: 1.5 }}>Les fichiers sont stockés dans le navigateur. Les photos sont automatiquement redimensionnées et compressées à l'import (aucun rejet) ; les autres fichiers sont limités à 4 Mo. Pensez à exporter une sauvegarde régulièrement.</div>
       </div>
     </div>
     {preview && <DevisPreview deal={preview} account={acc} settings={data.settings} products={data.products} data={data} onClose={() => setPreview(null)} />}
+    {filePreview && <FilePreview file={filePreview} onClose={() => setFilePreview(null)} />}
     {addInt && <Modal title="Nouvel échange" onClose={() => setAddInt(false)}><AccountInteractionForm contactId={siteContacts[0]?.id || ""} accountId={s.accountId} contacts={siteContacts} onCancel={() => setAddInt(false)} onSave={(it) => { addInteraction({ ...it, siteId: s.id }); setAddInt(false); }} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onPlanEvents={(evs, f) => persist((p) => ({ ...p, events: [...(p.events || []), ...plannedEvents(evs, { baseDate: f.date, accountId: s.accountId, siteId: s.id, contactId: f.contactId || "" })] }))} /></Modal>}
     {chatOpen && <EstablishmentChat account={acc} site={s} contacts={siteContacts} interactions={ints} deals={deals} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onClose={() => setChatOpen(false)} />}
     {composerOpen && <MessageComposer account={acc} site={s} contacts={siteContacts} data={data} persist={persist} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onClose={() => setComposerOpen(false)} />}
@@ -3543,6 +3568,7 @@ function AccountDetail({ account, data, persist, go, onBack, onEdit, onAddContac
   const [intEdit, setIntEdit] = useState(null);
   const [intView, setIntView] = useState(null);
   const [siteEdit, setSiteEdit] = useState(null);
+  const [filePreview, setFilePreview] = useState(null);
   const dwell = useDwellPreview();
   const [eventEdit, setEventEdit] = useState(null);
   const [eventView, setEventView] = useState(null);
@@ -3644,11 +3670,12 @@ function AccountDetail({ account, data, persist, go, onBack, onEdit, onAddContac
         <InteractionThread interactions={accInteractions} data={data} onView={(it) => setIntView(it)} onEdit={(it) => setIntEdit(it)} onDelete={delInteraction} showContact />
       </div>
       <div className="card"><div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 5, margin: 0 }}><Paperclip size={15} />Pièces jointes</h3><div><input ref={fileRef} type="file" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) uploadFile(f); e.target.value = ""; }} /><button className="btn btn-y btn-s" onClick={() => fileRef.current && fileRef.current.click()}><Upload size={14} /> Téléverser</button></div></div>
-        {accAttachments.length === 0 ? <div className="empty">Aucun fichier. NDA, devis signés, fiches techniques…</div> : <div className="attach-list">{accAttachments.map((f) => (<div key={f.id} className="attach-row"><Paperclip size={15} color="var(--muted)" /><span className="a-name" title={f.name}>{f.name}</span><span className="a-size">{formatBytes(f.size)}</span><button className="iconbtn" onClick={() => downloadFile(f)} title="Télécharger"><Download size={14} /></button><button className="iconbtn" onClick={() => { appConfirm("Supprimer la pièce jointe « " + f.name + " » ?", { title: "Supprimer ce fichier ?" }).then((ok) => { if (ok) delFile(f.id); }); }} title="Supprimer"><Trash2 size={14} /></button></div>))}</div>}
+        {accAttachments.length === 0 ? <div className="empty">Aucun fichier. NDA, devis signés, fiches techniques…</div> : <div className="attach-list">{accAttachments.map((f) => (<div key={f.id} className="attach-row"><Paperclip size={15} color="var(--muted)" /><span className="a-name" title={f.name}>{f.name}</span><span className="a-size">{formatBytes(f.size)}</span><button className="iconbtn" onClick={() => setFilePreview(f)} title="Visualiser"><Eye size={14} /></button><button className="iconbtn" onClick={() => downloadFile(f)} title="Télécharger"><Download size={14} /></button><button className="iconbtn" onClick={() => { appConfirm("Supprimer la pièce jointe « " + f.name + " » ?", { title: "Supprimer ce fichier ?" }).then((ok) => { if (ok) delFile(f.id); }); }} title="Supprimer"><Trash2 size={14} /></button></div>))}</div>}
         <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 10, lineHeight: 1.5 }}>Les fichiers sont stockés dans le navigateur. Les photos sont automatiquement redimensionnées et compressées à l'import (aucun rejet) ; les autres fichiers sont limités à 4 Mo. Pensez à exporter une sauvegarde régulièrement.</div>
       </div>
     </div>
     {preview && <DevisPreview deal={preview} account={a} settings={data.settings} products={data.products} data={data} onClose={() => setPreview(null)} />}
+    {filePreview && <FilePreview file={filePreview} onClose={() => setFilePreview(null)} />}
     {addInt && <Modal title="Nouvel échange" onClose={() => setAddInt(false)}><AccountInteractionForm contactId={conts[0]?.id || ""} accountId={a.id} contacts={conts} onCancel={() => setAddInt(false)} onSave={(it) => { addInteraction(it); setAddInt(false); }} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onPlanEvents={(evs, f) => persist((p) => ({ ...p, events: [...(p.events || []), ...plannedEvents(evs, { baseDate: f.date, accountId: a.id, contactId: f.contactId || "" })] }))} /></Modal>}
     {chatOpen && <EstablishmentChat account={a} contacts={conts} interactions={accInteractions} deals={deals} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onClose={() => setChatOpen(false)} />}
     {composerOpen && <MessageComposer account={a} contacts={conts} data={data} persist={persist} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onClose={() => setComposerOpen(false)} />}
