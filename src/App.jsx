@@ -8875,8 +8875,12 @@ export default function App() {
     // valeur enregistrée juste avant la mise à jour serait perdue, le pull au rechargement écrasant
     // le localStorage par la version serveur (obsolète). On pousse l'état local courant avant de recharger.
     try {
+      // On ne renvoie au serveur QUE si une modification locale est réellement en attente : sinon un
+      // appareil qui n'a rien changé (mais dont le cache est plus ancien) écraserait les modifications
+      // faites entre-temps sur un autre appareil (ex. une photo ajoutée depuis le téléphone).
+      const hadPending = pendingWrite.current || !!saveTimer.current;
       if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
-      if (supabaseEnabled && supabase) {
+      if (supabaseEnabled && supabase && hadPending) {
         const payload = latestRef.current || (() => { try { const raw = localStorage.getItem(KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } })();
         if (payload) { const ts = new Date().toISOString(); await supabase.from("cockpit_state").upsert({ id: "shared", data: payload, updated_at: ts }, { onConflict: "id" }); pendingWrite.current = false; }
       }
