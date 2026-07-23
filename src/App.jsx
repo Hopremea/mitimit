@@ -7407,7 +7407,10 @@ function SalaireRH({ data, persist }) {
   const coutJour = (Number(s.fraisEssence != null ? s.fraisEssence : 8) + Number(s.fraisPeage != null ? s.fraisPeage : 3.2)) * (s.fraisAR !== false ? 2 : 1);
   const presDays = useMemo(() => Object.entries(data.pointages || {}).filter(([ds, r]) => ds.startsWith(monthPrefix) && r && (!r.motif || r.motif === "presence") && r.arrivee && r.depart).length, [data.pointages, monthPrefix]);
   const fraisKmMois = Math.round(coutJour * presDays * 100) / 100;
-  const autoKm = Math.round(fraisKmMois * PRIME_KM_RATE * 100) / 100;
+  // Deux natures de frais de trajet : domicile-travail remboursé à 50 %, déplacements ponctuels à 100 %.
+  const deplTotalMois = useMemo(() => (data.deplacements || []).filter((d) => (d.date || "").startsWith(monthPrefix)).reduce((s, d) => s + ((Number(d.essence) || 0) + (Number(d.peage) || 0) + (Number(d.autre) || 0)), 0), [data.deplacements, monthPrefix]);
+  const domicilePrime = Math.round(fraisKmMois * PRIME_KM_RATE * 100) / 100;
+  const autoKm = Math.round((domicilePrime + deplTotalMois) * 100) / 100;
   const [h25, setH25] = useState(autoOT.h25);
   const [h50, setH50] = useState(autoOT.h50);
   const [prime, setPrime] = useState(autoKm);
@@ -7438,7 +7441,7 @@ function SalaireRH({ data, persist }) {
           <div className="fld"><label>H. sup. à +50 % (h)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.25" min="0" value={h50} onChange={(e) => { setOtTouched(true); setH50(e.target.value); }} /></div></div>
         </div>
         <div style={{ marginBottom: 8, fontSize: 11.5, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><span style={{ color: otTouched ? "var(--muted)" : "var(--green)", fontWeight: 700 }}>{otTouched ? "Valeurs saisies manuellement" : "↻ Réparti automatiquement depuis le pointage (" + autoOT.h25 + " h + " + autoOT.h50 + " h)"}</span>{otTouched && <button className="btn btn-g btn-s" onClick={() => setOtTouched(false)} title="Reprendre la répartition automatique du pointage">↻ Auto</button>}</div>
-        <div className="fld"><label style={{ textTransform: "capitalize" }}>Prime — indemnités kilométriques · {monthName} (€)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.01" min="0" value={prime} onChange={(e) => { setKmTouched(true); setPrime(e.target.value); }} />{kmTouched && <button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setKmTouched(false)} title="Reprendre la prime (50 % des frais kilométriques du mois)">↻ {eur2(autoKm)}</button>}</div><span style={{ fontSize: 11, color: "var(--muted)" }}>Prime = 50 % des frais kilométriques du mois ({eur2(fraisKmMois)} de frais → {eur2(fraisKmMois * PRIME_KM_RATE)} de prime).</span></div>
+        <div className="fld"><label style={{ textTransform: "capitalize" }}>Prime — indemnités kilométriques · {monthName} (€)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.01" min="0" value={prime} onChange={(e) => { setKmTouched(true); setPrime(e.target.value); }} />{kmTouched && <button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setKmTouched(false)} title="Reprendre la prime (50 % des frais kilométriques du mois)">↻ {eur2(autoKm)}</button>}</div><span style={{ fontSize: 11, color: "var(--muted)" }}>Domicile-travail : 50 % de {eur2(fraisKmMois)} = {eur2(domicilePrime)}{deplTotalMois > 0 ? " · Déplacements ponctuels remboursés à 100 % = " + eur2(deplTotalMois) : ""}. Total prime : {eur2(autoKm)}.</span></div>
         <div style={{ marginTop: 10 }}><button className="btn btn-g btn-s" onClick={memoriser}><Save size={13} /> Mémoriser mon taux horaire</button></div>
         <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 10, lineHeight: 1.5 }}>Statut apprenti : rémunération à {part} % du SMIC, exonération de cotisations salariales jusqu'à 79 % du SMIC, mutuelle {eur2(mutuelle)}. Les heures sup. sont reprises du pointage et réparties par semaine (8 h à +25 %, au-delà à +50 %). Estimation calibrée sur vos bulletins (~1 € près).</div>
       </div>
@@ -7447,7 +7450,7 @@ function SalaireRH({ data, persist }) {
           <Line l="Salaire de base" sub={"(" + SAL_BASE_HOURS + " h × " + eur2(Number(tauxBase) || 0) + ")"} v={eur2(r.base)} />
           <Line l="Heures sup. +25 %" sub={"(" + h25 + " h × " + eur2(r.t25) + ")"} v={eur2(r.hs25)} />
           <Line l="Heures sup. +50 %" sub={"(" + h50 + " h × " + eur2(r.t50) + ")"} v={eur2(r.hs50)} />
-          <Line l="Prime (indemnités km)" v={eur2(r.prime)} />
+          {(!kmTouched && deplTotalMois > 0) ? (<><Line l="Prime domicile-travail (50 %)" v={eur2(domicilePrime)} /><Line l="Remboursement déplacements (100 %)" v={eur2(deplTotalMois)} /></>) : <Line l="Prime (indemnités km)" v={eur2(r.prime)} />}
           <div style={{ borderTop: "1px solid var(--line)", margin: "6px 0" }} />
           <Line l="Salaire brut" v={eur2(r.brut)} strong />
           <Line l="Mutuelle santé" v={"− " + eur2(r.mutuelle)} color="var(--muted)" />
@@ -8769,6 +8772,16 @@ export default function App() {
   // Mise à jour forcée : vide les caches du navigateur (Cache API + service workers) puis recharge
   // depuis le serveur avec une URL anti-cache, pour récupérer immédiatement la dernière version déployée.
   const hardRefresh = useCallback(async () => {
+    // Vide d'abord toute écriture Supabase en attente (persist est débouncé de 800 ms) : sinon une
+    // valeur enregistrée juste avant la mise à jour serait perdue, le pull au rechargement écrasant
+    // le localStorage par la version serveur (obsolète). On pousse l'état local courant avant de recharger.
+    try {
+      if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+      if (supabaseEnabled && supabase) {
+        const raw = localStorage.getItem(KEY);
+        if (raw) { const ts = new Date().toISOString(); await supabase.from("cockpit_state").upsert({ id: "shared", data: JSON.parse(raw), updated_at: ts }, { onConflict: "id" }); pendingWrite.current = false; }
+      }
+    } catch (e) { }
     try { if (typeof caches !== "undefined") { const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); } } catch (e) { }
     try { if (navigator.serviceWorker) { const regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map((r) => r.unregister())); } } catch (e) { }
     try { const u = new URL(window.location.href); u.searchParams.set("_v", Date.now().toString(36)); window.location.replace(u.toString()); } catch (e) { window.location.reload(); }
