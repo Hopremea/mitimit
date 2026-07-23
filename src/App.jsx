@@ -4895,22 +4895,39 @@ function DealForm({ deal, accounts, products, sites, onSave, onPreview }) {
   const zoneInit = useRef(false);
   useEffect(() => { if (!zoneInit.current) { zoneInit.current = true; if (f.zoneLivraison) return; } if (detectedZone) setF((p) => ({ ...p, zoneLivraison: detectedZone })); }, [detectedZone]);
   const zone = f.zoneLivraison || detectedZone || "metropole"; const zc = francoZone(zone);
-  const ht = dealMontant(f.lines); const port = (f.type === "Avoir" || f.portOffert) ? 0 : fraisPortHT(ht, zone); const baseHt = ht + port; const tva = baseHt * (f.tva || 0) / 100; const ttc = baseHt + tva;
+  const ht = dealMontant(f.lines);
+  // Le franco (frais de port) se calcule sur la valeur BRUTE de la marchandise (toutes lignes, y compris
+  // celles offertes) : offrir un produit ne doit pas, à lui seul, offrir la livraison — les deux choix
+  // sont indépendants. La livraison n'est gratuite que si le franco brut est atteint ou si on l'offre.
+  const htBrut = (f.lines || []).reduce((s, l) => s + (l.qte || 0) * (l.pu || 0), 0);
+  const port = (f.type === "Avoir" || f.portOffert) ? 0 : fraisPortHT(htBrut, zone); const baseHt = ht + port; const tva = baseHt * (f.tva || 0) / 100; const ttc = baseHt + tva;
   const clean = () => ({ ...f, zoneLivraison: zone, lines: f.lines.filter((l) => l.code) });
   // Marge PEN'UP en temps réel : coût de revient (product.cout, repli sur le prix d'achat officiel)
   // rapporté au prix de cession de chaque ligne. Alerte discrète si la marge globale est faible.
   const coutOf = (code) => { const p = products.find((x) => x.code === code); if (p && p.cout != null) return p.cout; return PA_HT_OFFICIEL[code] != null ? PA_HT_OFFICIEL[code] : null; };
   const marge = (() => { let cost = 0, ca = 0, known = true, anyKnown = false; f.lines.forEach((l) => { if (!l.code) return; const c = coutOf(l.code); if (c == null) { known = false; return; } anyKnown = true; cost += c * (l.qte || 0); ca += (l.pu || 0) * (l.qte || 0); }); const m = ca - cost; return { m, pct: ca > 0 ? m / ca * 100 : 0, known, anyKnown }; })();
-  // Upsell « atteindre le franco » : complète la commande avec le filament le plus vendu (lot de 12
-  // Multicolore, sinon un lot de bobines) pour dépasser le seuil de franco de la zone — la marchandise
-  // ajoutée coûte au revendeur moins que la participation au port économisée.
+  // Upsell « atteindre le franco » : complète la commande avec un ASSORTIMENT ÉQUILIBRÉ de bobines Fil'Up
+  // (plusieurs coloris répartis en tourniquet) plutôt qu'un seul lot en grande quantité, jusqu'à dépasser
+  // le seuil de franco de la zone. La marchandise ajoutée coûte au revendeur moins que le port économisé.
   const completerFranco = () => {
-    const restant = zc.seuil - ht; if (restant <= 0) return;
-    const pr = products.find((x) => x.code === "PU3D-FIL-MULTICOLORE") || products.find((x) => /-FIL-/.test(x.code || ""));
-    if (!pr) return;
-    const pu = pr.cessionHT != null ? pr.cessionHT : pr.pvc; if (!pu || pu <= 0) return;
-    const qte = Math.ceil(restant / pu);
-    setF((p) => ({ ...p, lines: [...p.lines.filter((l) => l.code), L(pr.code, pr.designation, qte, pu)] }));
+    const restant = zc.seuil - htBrut; if (restant <= 0) return;
+    const fils = sortProducts(products).filter((p) => /-FIL-/.test(p.code || "") && ((p.cessionHT != null ? p.cessionHT : p.pvc) > 0));
+    if (!fils.length) return;
+    const variety = fils.slice(0, Math.min(8, fils.length));
+    const add = {}; variety.forEach((p) => { add[p.code] = 0; });
+    let total = 0, i = 0, guard = 0;
+    while (total < restant && guard < 2000) { const p = variety[i % variety.length]; const pu = p.cessionHT != null ? p.cessionHT : p.pvc; add[p.code] += 1; total += pu; i++; guard++; }
+    setF((prev) => {
+      let lines = prev.lines.filter((l) => l.code);
+      variety.forEach((p) => {
+        const q = add[p.code]; if (!q) return;
+        const pu = p.cessionHT != null ? p.cessionHT : p.pvc;
+        const ex = lines.find((l) => l.code === p.code && !l.offert);
+        if (ex) lines = lines.map((l) => l === ex ? { ...l, qte: (l.qte || 0) + q } : l);
+        else lines = [...lines, L(p.code, p.designation, q, pu)];
+      });
+      return { ...prev, lines };
+    });
   };
   return (<>
     <div className="row2"><div className="fld"><label>Groupe / établissement</label><EtabPicker accounts={accounts} sites={sites} accountId={f.accountId} siteId={f.siteId} onChange={(a, s) => setF((p) => ({ ...p, accountId: a, siteId: s }))} noneLabel="— Choisir —" /></div><div className="fld"><label>Type</label><select value={f.type} onChange={(e) => up("type", e.target.value)}><option value="Devis">Devis</option><option value="Commande">Bon de commande</option><option value="Facture">Facture</option><option value="Avoir">Avoir / Retour</option></select></div></div>
@@ -4919,7 +4936,7 @@ function DealForm({ deal, accounts, products, sites, onSave, onPreview }) {
     {f.type === "Commande" && <div className="fld"><label>Destination de livraison (point de vente)</label><select value={f.livraisonSiteId || ""} onChange={(e) => up("livraisonSiteId", e.target.value)}><option value="">— aucune (pas de tracé sur la carte) —</option>{destSites.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select><span style={{ fontSize: 11, color: "var(--muted)" }}>Si renseignée et le statut « En cours de livraison », un tracé entrepôt → établissement apparaît sur la carte.</span></div>}
     {effLivraison(acc) && <div style={{ fontSize: 12, color: "var(--muted)" }}><MapPin size={12} style={{ verticalAlign: -2 }} /> Livraison : {effLivraison(acc)}</div>}
     <div className="fld"><label>Zone de livraison (détermine le franco)</label><select value={zone} onChange={(e) => up("zoneLivraison", e.target.value)}>{FRANCO_ZONE_ORDER.map((k) => <option key={k} value={k}>{FRANCO_ZONES[k].label} — franco {FRANCO_ZONES[k].seuil} € HT, sinon {FRANCO_ZONES[k].part} € HT</option>)}</select><span style={{ fontSize: 11, color: "var(--muted)" }}>{detectedZone && detectedZone === zone ? "Détectée automatiquement d'après l'adresse de livraison." : detectedZone ? ("Détection auto : " + FRANCO_ZONES[detectedZone].label + " (vous avez forcé une autre zone).") : "Renseignez une adresse de livraison avec code postal pour la détection automatique."}</span></div>
-    {f.type !== "Avoir" && <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}><input type="checkbox" checked={!!f.portOffert} onChange={(e) => up("portOffert", e.target.checked)} style={{ width: "auto" }} /> Offrir la livraison (frais de port gratuits, même sous le franco)</label>}
+    {f.type !== "Avoir" && <label style={{ display: "inline-flex", alignItems: "center", gap: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", border: "1px solid " + (f.portOffert ? "#2bb673" : "var(--line)"), background: f.portOffert ? "#eafaf1" : "var(--card)", color: f.portOffert ? "#1f7a4d" : "inherit", borderRadius: 10, padding: "9px 12px", alignSelf: "flex-start" }}><input type="checkbox" checked={!!f.portOffert} onChange={(e) => up("portOffert", e.target.checked)} style={{ width: 16, height: 16 }} /><Truck size={15} /> Offrir la livraison{f.portOffert ? " ✓" : " (frais de port gratuits, même sous le franco)"}</label>}
     <div><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}><label style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)" }}>Lignes (prix unitaire = prix de cession HT)</label><button className="btn btn-g btn-s" onClick={addLine}><Plus size={14} /> Ligne</button></div>
       <div className="lineRow" style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}><span>Produit</span><span style={{ textAlign: "right" }}>Qté</span><span style={{ textAlign: "right" }}>PU HT</span><span style={{ textAlign: "right" }}>Total</span><span style={{ textAlign: "center", fontSize: 10 }}>Offert</span><span></span></div>
       {f.lines.map((l) => (<div className="lineRow" key={l.id}><select value={l.code} onChange={(e) => onPick(l.id, e.target.value)}><option value="">— produit —</option>{sortProducts(products).map((p) => <option key={p.code} value={p.code}>{p.designation}</option>)}</select><input type="number" style={{ textAlign: "right" }} value={l.qte} onChange={(e) => setLine(l.id, { qte: +e.target.value })} /><input type="number" step="0.01" style={{ textAlign: "right" }} value={l.pu} onChange={(e) => setLine(l.id, { pu: +e.target.value })} /><div style={{ textAlign: "right", fontWeight: 700, fontSize: 13, color: l.offert ? "#2bb673" : "inherit" }} className="tnum" title={l.offert ? "Offert" : ""}>{l.offert ? "Offert" : eur2((l.qte || 0) * (l.pu || 0))}</div><input type="checkbox" title="Marquer comme offert" checked={l.offert || false} onChange={(e) => setLine(l.id, { offert: e.target.checked })} style={{ width: 16, height: 16, cursor: "pointer", justifySelf: "center" }} /><button className="iconbtn" onClick={() => rmLine(l.id)}><X size={14} /></button></div>))}
@@ -4928,8 +4945,8 @@ function DealForm({ deal, accounts, products, sites, onSave, onPreview }) {
     <div style={{ display: "flex", justifyContent: "flex-end", gap: 26, padding: "4px 2px", borderTop: "1px solid var(--line)", paddingTop: 12 }}><Stat label="Total HT" value={eur2(ht)} /><Stat label={port > 0 ? "Participation port" : (f.portOffert ? "Livraison offerte" : "Franco de port")} value={port > 0 ? eur2(port) : "offert"} /><Stat label={"TVA " + f.tva + "%"} value={eur2(tva)} /><Stat label="Total TTC" value={eur2(ttc)} /></div>
     {f.type !== "Avoir" && marge.anyKnown && <div style={{ fontSize: 11.5, textAlign: "right", fontWeight: 700, marginTop: 2, color: marge.pct >= 40 ? "var(--green)" : marge.pct >= 25 ? "var(--amber)" : "var(--red)" }} title="Marge interne PEN'UP (prix de cession − coût de revient). N'apparaît jamais sur le document client.">Marge PEN'UP : {eur2(marge.m)} ({Math.round(marge.pct)}%){!marge.known ? " · coûts partiels" : ""}</div>}
     {f.type !== "Avoir" && <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: -4, flexWrap: "wrap" }}>
-      {port > 0 && <button className="btn btn-g btn-s" onClick={completerFranco} title="Ajouter des bobines Multicolore pour dépasser le seuil de franco"><Plus size={13} /> Compléter pour le franco</button>}
-      <div style={{ fontSize: 11, color: port > 0 ? "var(--amber)" : "var(--green)", textAlign: "right" }}>{port > 0 ? `${zc.label} — sous ${zc.seuil} € HT : participation de ${zc.part} € HT aux frais de port. Encore ${eur2(zc.seuil - ht)} HT pour le franco.` : (f.portOffert ? "Livraison offerte au client (frais de port gratuits)." : `Franco de port atteint (${zc.label} : commande ≥ ${zc.seuil} € HT).`)}</div>
+      {port > 0 && <button className="btn btn-g btn-s" onClick={completerFranco} title="Ajouter un assortiment équilibré de bobines Fil'Up pour dépasser le seuil de franco"><Plus size={13} /> Compléter pour le franco</button>}
+      <div style={{ fontSize: 11, color: port > 0 ? "var(--amber)" : "var(--green)", textAlign: "right" }}>{port > 0 ? `${zc.label} — sous ${zc.seuil} € HT : participation de ${zc.part} € HT aux frais de port. Encore ${eur2(zc.seuil - htBrut)} HT pour le franco.` : (f.portOffert ? "Livraison offerte au client (frais de port gratuits)." : `Franco de port atteint (${zc.label} : commande ≥ ${zc.seuil} € HT).`)}</div>
     </div>}
     {f.type === "Commande" && <div className="fld"><label>Signature du client — bon pour accord (optionnel)</label><SignaturePad value={f.signature || ""} onChange={(v) => up("signature", v)} /><div className="row2" style={{ marginTop: 8 }}><div className="fld"><label>Nom du signataire</label><input value={f.signataire || ""} onChange={(e) => up("signataire", e.target.value)} placeholder="Nom et fonction" /></div><div className="fld"><label>Date de signature</label><input type="date" value={f.signatureDate || ""} onChange={(e) => up("signatureDate", e.target.value)} /></div></div></div>}
     <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}><button className="btn btn-g" onClick={() => onPreview(clean())}><Eye size={16} /> Aperçu</button><button className="btn btn-p" onClick={() => onSave(clean())}>Enregistrer</button></div>
@@ -4949,7 +4966,7 @@ function DevisPreview({ deal, account, settings, products = [], data = {}, onClo
     return () => { document.body.classList.remove("doc-print"); document.title = prevTitle; };
   }, []);
   const zone = deal.zoneLivraison || detectFrancoZone(account && (account.adresseLivraison || account.adressePostale)) || "metropole"; const zc = francoZone(zone);
-  const ht = dealMontant(deal.lines); const port = (deal.type === "Avoir" || deal.portOffert) ? 0 : fraisPortHT(ht, zone); const baseHt = ht + port; const tva = baseHt * (deal.tva || 0) / 100; const ttc = baseHt + tva;
+  const ht = dealMontant(deal.lines); const htBrut = (deal.lines || []).reduce((s, l) => s + (l.qte || 0) * (l.pu || 0), 0); const port = (deal.type === "Avoir" || deal.portOffert) ? 0 : fraisPortHT(htBrut, zone); const baseHt = ht + port; const tva = baseHt * (deal.tva || 0) / 100; const ttc = baseHt + tva;
   const titre = deal.type === "Facture" ? "FACTURE" : deal.type === "Commande" ? "BON DE COMMANDE" : deal.type === "Avoir" ? "AVOIR" : "DEVIS";
   // Coordonnées du magasin pour l'encart « Client » : établissement rattaché en priorité, sinon contact
   // principal du compte, sinon le compte. La note interne du devis n'est jamais imprimée.
