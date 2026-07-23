@@ -7295,7 +7295,7 @@ const PRESENCE_MOTIFS = {
   presence:    { label: "Présence au local",     hours: null,           color: "#3F60AA", emoji: "🏢" },
   cours:       { label: "Journée de cours",      hours: PRESENCE_TARGET, color: "#7c5cf0", emoji: "🎓" },
   teletravail: { label: "Télétravail",           hours: PRESENCE_TARGET, color: "#3F60AA", emoji: "🏠" },
-  rdv:         { label: "Rendez-vous",            hours: PRESENCE_TARGET, color: "#A855F7", emoji: "🤝" },
+  rdv:         { label: "Rendez-vous",            hours: null,           color: "#A855F7", emoji: "🤝" },
   conges:      { label: "Congés",                hours: PRESENCE_TARGET, color: "#2bb673", emoji: "🌴" },
   rtt:         { label: "RTT",                    hours: PRESENCE_TARGET, color: "#2bb673", emoji: "🗓️" },
   ferie:       { label: "Jour férié",            hours: PRESENCE_TARGET, color: "#F8B133", emoji: "🎉" },
@@ -7303,6 +7303,9 @@ const PRESENCE_MOTIFS = {
   absence:     { label: "Absence non rémunérée", hours: 0,               color: "#9aa6bd", emoji: "➖" },
 };
 const MOTIF_ORDER = ["presence", "cours", "teletravail", "rdv", "conges", "rtt", "ferie", "maladie", "absence"];
+// Motif « chrono » = saisie des horaires (arrivée/départ/pause) plutôt qu'un forfait d'heures.
+// « Présence au local » et « Rendez-vous » se remplissent ainsi ; les autres valent un forfait.
+const isChronoMotif = (m) => !!(PRESENCE_MOTIFS[m] && PRESENCE_MOTIFS[m].hours === null);
 const pMin = (t) => { if (!t || !/^\d{1,2}:\d{2}$/.test(t)) return null; const [h, m] = t.split(":").map(Number); return h * 60 + m; };
 const fmtDur = (min, opts = {}) => { const v = Math.round(min || 0); const sign = v < 0 ? "−" : (opts.plus && v > 0 ? "+" : ""); const a = Math.abs(v); const h = Math.floor(a / 60), m = a % 60; return sign + (m ? `${h} h ${String(m).padStart(2, "0")}` : `${h} h`); };
 const isoLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -7311,7 +7314,7 @@ const isWeekendDs = (ds) => { const wd = new Date(ds + "T00:00:00").getDay(); re
 function presenceDay(rec) {
   if (!rec) return null;
   const motif = (rec.motif && PRESENCE_MOTIFS[rec.motif]) ? rec.motif : "presence";
-  if (motif !== "presence") {
+  if (!isChronoMotif(motif)) {
     const forfait = PRESENCE_MOTIFS[motif].hours || 0;
     const worked = (rec.heures != null && rec.heures !== "") ? Math.max(0, Number(rec.heures) || 0) : forfait;
     return { worked, pause: false, motif, invalid: false };
@@ -7319,10 +7322,10 @@ function presenceDay(rec) {
   if (!rec.arrivee || !rec.depart) return null;
   const a = pMin(rec.arrivee), d = pMin(rec.depart);
   if (a == null || d == null) return null;
-  if (d <= a) return { worked: 0, invalid: true, arrivee: rec.arrivee, depart: rec.depart, pause: !!rec.pause, motif: "presence" };
+  if (d <= a) return { worked: 0, invalid: true, arrivee: rec.arrivee, depart: rec.depart, pause: !!rec.pause, motif };
   const pause = rec.pause ? (Number(rec.pauseMin) || 0) : 0;
   const worked = Math.max(0, d - a - pause);
-  return { worked, pause, arrivee: rec.arrivee, depart: rec.depart, invalid: false, motif: "presence" };
+  return { worked, pause, arrivee: rec.arrivee, depart: rec.depart, invalid: false, motif };
 }
 // Sélecteur d'heure au pas de 5 min (2 menus heures/minutes) : le champ natif <input type="time">
 // ignore step="300" sur plusieurs navigateurs et propose les minutes 1 par 1. Ici c'est garanti.
@@ -7554,18 +7557,18 @@ function PointageEditor({ ds, rec, onSave, onDelete, onClose }) {
   const [pauseMin, setPauseMin] = useState((rec && rec.pauseMin != null) ? rec.pauseMin : 30);
   const [heures, setHeures] = useState((rec && rec.heures != null) ? rec.heures : (PRESENCE_MOTIFS[(rec && rec.motif && PRESENCE_MOTIFS[rec.motif]) ? rec.motif : "presence"].hours || 0));
   const we = isWeekendDs(ds);
-  const isPresence = motif === "presence";
-  const st = presenceDay(isPresence ? { arrivee, depart, pause, pauseMin } : { motif, heures });
+  const isChrono = isChronoMotif(motif);
+  const st = presenceDay(isChrono ? { motif, arrivee, depart, pause, pauseMin } : { motif, heures });
   const target = we ? 0 : PRESENCE_TARGET;
   const over = st && !st.invalid ? st.worked - target : null;
   const dLabel = new Date(ds + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
   const col = over == null ? "var(--muted)" : over >= 0 ? "var(--green)" : "var(--amber)";
-  const save = () => onSave(isPresence ? { arrivee, depart, pause, pauseMin: pause ? (Number(pauseMin) || 0) : 0 } : { motif, heures });
+  const save = () => onSave(isChrono ? { motif, arrivee, depart, pause, pauseMin: pause ? (Number(pauseMin) || 0) : 0 } : { motif, heures });
   return (<Modal title={"Pointage — " + dLabel} onClose={onClose}>
     <div className="fld"><label>Type de journée</label>
-      <select value={motif} onChange={(e) => { const k = e.target.value; setMotif(k); if (k !== "presence") setHeures(PRESENCE_MOTIFS[k].hours || 0); }}>{MOTIF_ORDER.map((k) => { const m = PRESENCE_MOTIFS[k]; return <option key={k} value={k}>{m.emoji + " " + m.label}</option>; })}</select>
+      <select value={motif} onChange={(e) => { const k = e.target.value; setMotif(k); if (!isChronoMotif(k)) setHeures(PRESENCE_MOTIFS[k].hours || 0); }}>{MOTIF_ORDER.map((k) => { const m = PRESENCE_MOTIFS[k]; return <option key={k} value={k}>{m.emoji + " " + m.label}</option>; })}</select>
     </div>
-    {isPresence ? (<>
+    {isChrono ? (<>
       <div className="row2">
         <div className="fld"><label>Heure d'arrivée</label><TimeSelect value={arrivee} onChange={setArrivee} /></div>
         <div className="fld"><label>Heure de départ</label><TimeSelect value={depart} onChange={setDepart} /></div>
