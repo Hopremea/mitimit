@@ -1380,6 +1380,9 @@ async function generateProspectMail({ prospect, angles, consigne, ton, mode, pre
   return { ok: true, objet: parsed.objet || "", corps, objectif: parsed.objectif || angles.objectif_type, angle_utilise: parsed.angle_utilise || angles.bestAngle, claims_verifiables: Array.isArray(parsed.claims_verifiables) ? parsed.claims_verifiables : [], confiance: v.confiance, alertes: v.alertes };
 }
 function contactSite(c, data) { return c && c.siteId ? ((data && data.sites) || []).find((s) => s.id === c.siteId) || null : null; }
+// Un contact peut être rattaché à plusieurs points de vente (ex. un patron de plusieurs magasins) :
+// son établissement principal est `siteId`, ses établissements supplémentaires sont dans `siteIds`.
+function contactInSite(c, sid) { return !!(c && sid && (c.siteId === sid || (Array.isArray(c.siteIds) && c.siteIds.includes(sid)))); }
 function contactLocality(c, data) {
   const site = contactSite(c, data);
   const acc = ((data && data.accounts) || []).find((a) => a.id === (c && c.accountId)) || null;
@@ -3351,7 +3354,7 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
   const st = acc ? (siteNature === "FC" ? { label: "Franchisé", color: "#7c5cf0" } : stageMeta(acc.stage)) : stageMeta("prospect");
   const tm = SITE_TYPES[s.type] || SITE_TYPES.pdv;
   const col = siteColor(s, acc || {});
-  const siteContacts = indep ? data.contacts.filter((c) => c.accountId === acc.id) : data.contacts.filter((c) => c.siteId === s.id);
+  const siteContacts = indep ? data.contacts.filter((c) => c.accountId === acc.id) : data.contacts.filter((c) => contactInSite(c, s.id));
   const deals = (indep ? data.deals.filter((d) => d.accountId === acc.id) : data.deals.filter((d) => d.siteId === s.id)).sort((x, y) => (y.date || "").localeCompare(x.date || ""));
   const caSigne = sumMontant(deals.filter(isCaSigne)); const caAttente = sumMontant(deals.filter(isDevisEnAttente));
   const loy = loyaltyTier(deals);
@@ -3540,7 +3543,9 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
     {linkC && (() => {
       const q = normStr(linkQ);
       const linkable = data.contacts.filter((c) => !siteContactIds.has(c.id) && !c.archived).filter((c) => { if (!q) return true; const a = data.accounts.find((x) => x.id === c.accountId); return normStr(fullName(c) + (c.fonction || "") + (a ? a.enseigne : "")).includes(q); }).sort((a, b) => fullName(a).localeCompare(fullName(b)));
-      const link = (c) => { persist((p) => ({ ...p, contacts: p.contacts.map((x) => x.id === c.id ? { ...x, accountId: s.accountId || x.accountId, siteId: indep ? "" : s.id } : x) })); setLinkC(false); };
+      // Rattacher un contact existant à CET établissement sans le retirer de ses autres PDV : on ajoute
+      // le site à sa liste `siteIds` (un patron multi-magasins reste lié à tous ses points de vente).
+      const link = (c) => { persist((p) => ({ ...p, contacts: p.contacts.map((x) => x.id === c.id ? { ...x, accountId: s.accountId || x.accountId, siteId: indep ? "" : (x.siteId || s.id), siteIds: indep ? (x.siteIds || []) : [...new Set([...(x.siteIds || []), s.id])] } : x) })); setLinkC(false); };
       return (<Modal title="Rattacher un contact existant" onClose={() => setLinkC(false)} wide>
         <input value={linkQ} onChange={(e) => setLinkQ(e.target.value)} placeholder="Rechercher un contact (nom, fonction, enseigne)…" style={{ marginBottom: 10 }} autoFocus />
         {linkable.length === 0 ? <div className="empty">{normStr(linkQ) ? "Aucun contact ne correspond." : "Aucun autre contact à rattacher. Créez-en un avec « Ajouter »."}</div> : <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 420, overflowY: "auto" }}>{linkable.map((c) => { const a = data.accounts.find((x) => x.id === c.accountId); return (<div key={c.id} onClick={() => link(c)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 11, background: "#fff", cursor: "pointer" }}><Avatar c={c} /><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 700 }}>{fullName(c)}</div><div style={{ color: "var(--muted)", fontSize: 12 }}>{[c.fonction, a && a.enseigne].filter(Boolean).join(" · ") || "—"}</div></div><Link2 size={15} color="var(--muted)" /></div>); })}</div>}
@@ -4624,6 +4629,9 @@ function ContactForm({ contact, accounts, contacts, onSave, known = [], sites = 
     {dup && <div className="dup-warn"><AlertTriangle size={15} /> Contact similaire existant : « {fullName(dup)} » {dup.email && `(${dup.email})`}. Vérifiez avant d'enregistrer pour éviter un doublon.</div>}
     <div className="fld"><label>Enseigne / établissement lié</label><EtabPicker accounts={accounts} sites={sites} accountId={f.accountId} siteId={f.siteId} onChange={(a, s) => setF((p) => ({ ...p, accountId: a, siteId: s }))} /></div>
     {apercu && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: -4, marginBottom: 2, display: "inline-flex", alignItems: "center", gap: 5 }}><MapPin size={12} />{apercu}{selSite && selSite.adresse ? " · " + selSite.adresse : ""}</div>}
+    {isChainAcc && ensSites.length > 1 && <div className="fld"><label>Aussi présent dans ces établissements (patron / responsable multi-magasins)</label>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{ensSites.map((st) => { const isPrimary = f.siteId === st.id; const checked = isPrimary || (f.siteIds || []).includes(st.id); return (<label key={st.id} title={isPrimary ? "Établissement principal (défini ci-dessus)" : ""} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 600, border: "1px solid " + (checked ? "var(--blue)" : "var(--line)"), background: checked ? "var(--blue-l)" : "#fff", borderRadius: 8, padding: "5px 9px", cursor: isPrimary ? "not-allowed" : "pointer", opacity: isPrimary ? 0.7 : 1 }}><input type="checkbox" checked={checked} disabled={isPrimary} onChange={(e) => setF((p) => { const set = new Set(p.siteIds || []); if (e.target.checked) set.add(st.id); else set.delete(st.id); return { ...p, siteIds: [...set] }; })} style={{ width: 15, height: 15 }} />{st.label}</label>); })}</div>
+      <span style={{ fontSize: 11, color: "var(--muted)" }}>Cochez tous les points de vente que cette personne dirige/gère. L'établissement principal reste celui choisi ci-dessus.</span></div>}
     <div className="row2"><div className="fld"><label>Civilité</label><select value={f.civilite || ""} onChange={(e) => up("civilite", e.target.value)}><option value="">— non précisée —</option><option value="Madame">Madame</option><option value="Monsieur">Monsieur</option></select></div><div className="fld"><label>Rôle</label><select value={f.role} onChange={(e) => up("role", e.target.value)}>{Object.entries(ROLE_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div></div>
     <div className="fld"><label>Fonction</label><Combo value={f.fonction} onChange={(v) => up("fonction", v)} options={FONCTIONS} placeholder="Chef(fe) de produit, Dirigeant(e)…" /></div>
     <div className="fld"><label>Courriel</label><input value={f.email} onChange={(e) => up("email", e.target.value)} placeholder="prenom.nom@exemple.fr" /></div>
@@ -4635,7 +4643,7 @@ function ContactForm({ contact, accounts, contacts, onSave, known = [], sites = 
       {grp && f.siteId && <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600 }}><input type="checkbox" checked={!!f.principalEtab} onChange={(e) => up("principalEtab", e.target.checked)} style={{ width: 16, height: 16 }} /> Contact favori de l'établissement ⭐</label>}
     </div>); })()}
     <div className="fld"><label>Notes</label><textarea rows={3} value={f.notes} onChange={(e) => up("notes", e.target.value)} /></div>
-    <div style={{ display: "flex", justifyContent: "flex-end" }}><button className="btn btn-p" onClick={() => onSave(f)}>Enregistrer</button></div>
+    <div style={{ display: "flex", justifyContent: "flex-end" }}><button className="btn btn-p" onClick={() => onSave({ ...f, siteIds: [...new Set([...(f.siteIds || []), ...(f.siteId ? [f.siteId] : [])])].filter((id) => id && id !== f.siteId) })}>Enregistrer</button></div>
   </>);
 }
 function Fiche({ c, account, data, myEmail, settings, deals, interactions, onBack, onEdit, onDelete, onTogglePrincipal, onSaveContact, go, onGoEnseigne, onGoSite, persist, editModal }) {
