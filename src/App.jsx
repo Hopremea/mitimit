@@ -7906,7 +7906,8 @@ function Pointage({ data, persist }) {
               </div>
               {st && !st.invalid ? (mot ? (<>
                 <div style={{ fontSize: 11.5, fontWeight: 800, color: mot.color, lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{mot.emoji} {mot.label}</div>
-                <div className="tnum" style={{ fontSize: 11, color: "var(--muted)" }}>{fmtDur(st.worked)}</div>
+                <div className="tnum" style={{ fontSize: 11, color: "var(--muted)" }}>{fmtDur(st.worked)}{isChronoMotif(st.motif) && st.arrivee && st.depart ? " · " + st.arrivee + "–" + st.depart : ""}</div>
+                {isChronoMotif(st.motif) && over !== 0 && <span style={{ alignSelf: "flex-start", fontSize: 10, fontWeight: 800, color: col, background: col + "22", borderRadius: 6, padding: "1px 5px" }}>{fmtDur(over, { plus: true })}</span>}
               </>) : (<>
                 <div className="pu-display tnum" style={{ fontSize: 15, lineHeight: 1.05 }}>{fmtDur(st.worked)}</div>
                 <div style={{ fontSize: 10, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{st.arrivee}–{st.depart}{st.pause ? " · 🍽" : ""}</div>
