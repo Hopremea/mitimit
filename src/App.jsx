@@ -8657,6 +8657,7 @@ export default function App() {
   const saveTimer = useRef(null);
   const lastSyncAt = useRef(null);    // updated_at de la dernière version appliquée/écrite : ignore nos propres échos.
   const pendingWrite = useRef(false); // une écriture locale est en attente : ne pas l'écraser avec une version distante.
+  const latestRef = useRef(null);     // dernier état persisté EN MÉMOIRE : source fiable pour les flush, même si le localStorage a débordé (photos volumineuses).
   // Chargement : cache localStorage, puis Supabase. Restauration unique de la vraie base (export CSV) si pas encore appliquee.
   useEffect(() => {
     let cancelled = false;
@@ -8689,6 +8690,7 @@ export default function App() {
     setData((prev) => {
       if (snap) undoRef.current = clone(prev);
       const next = normalize(typeof updater === "function" ? updater(clone(prev)) : updater);
+      latestRef.current = next;
       try { localStorage.setItem(KEY, JSON.stringify(next)); } catch (e) { }
       if (supabaseEnabled && supabase) {
         if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -8712,7 +8714,7 @@ export default function App() {
       if (!supabaseEnabled || !supabase) return;
       if (!pendingWrite.current && !saveTimer.current) return;
       if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
-      try { const raw = localStorage.getItem(KEY); if (raw) { supabase.from("cockpit_state").upsert({ id: "shared", data: JSON.parse(raw), updated_at: new Date().toISOString() }, { onConflict: "id" }); pendingWrite.current = false; } } catch (e) { }
+      try { const payload = latestRef.current || (() => { try { const raw = localStorage.getItem(KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } })(); if (payload) { supabase.from("cockpit_state").upsert({ id: "shared", data: payload, updated_at: new Date().toISOString() }, { onConflict: "id" }); pendingWrite.current = false; } } catch (e) { }
     };
     const onVis = () => { if (document.visibilityState === "hidden") flush(); };
     document.addEventListener("visibilitychange", onVis);
@@ -8875,8 +8877,8 @@ export default function App() {
     try {
       if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
       if (supabaseEnabled && supabase) {
-        const raw = localStorage.getItem(KEY);
-        if (raw) { const ts = new Date().toISOString(); await supabase.from("cockpit_state").upsert({ id: "shared", data: JSON.parse(raw), updated_at: ts }, { onConflict: "id" }); pendingWrite.current = false; }
+        const payload = latestRef.current || (() => { try { const raw = localStorage.getItem(KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } })();
+        if (payload) { const ts = new Date().toISOString(); await supabase.from("cockpit_state").upsert({ id: "shared", data: payload, updated_at: ts }, { onConflict: "id" }); pendingWrite.current = false; }
       }
     } catch (e) { }
     try { if (typeof caches !== "undefined") { const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); } } catch (e) { }
