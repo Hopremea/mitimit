@@ -4991,7 +4991,7 @@ function Deals({ data, persist, go, focus }) {
     if (a && !isGroupe(a)) { const s = (data.sites || []).find((x) => x.accountId === a.id && (x.type === "pdv" || x.type === "decision")); if (s && s.label) return s.label; }
     return "—";
   };
-  const save = (d) => persist((p) => { const x = { ...d, montant: dealMontant(d.lines), qte: dealQte(d.lines) }; const ex = p.deals.some((y) => y.id === d.id); return { ...p, deals: ex ? p.deals.map((y) => y.id === d.id ? x : y) : [x, ...p.deals] }; });
+  const save = (d) => persist((p) => { const old = p.deals.find((y) => y.id === d.id) || null; const x = { ...d, montant: dealMontant(d.lines), qte: dealQte(d.lines) }; const ex = p.deals.some((y) => y.id === d.id); const seen = new Set((p.events || []).map((e) => e.auto).filter(Boolean)); const autoEv = dealAutomationEvents(old, x, p.accounts).filter((e) => !seen.has(e.auto)); return { ...p, deals: ex ? p.deals.map((y) => y.id === d.id ? x : y) : [x, ...p.deals], events: autoEv.length ? [...(p.events || []), ...autoEv] : (p.events || []) }; });
   const del = (id) => appConfirm("Supprimer ce document (devis, commande ou facture) ?", { title: "Supprimer ce document ?" }).then((ok) => { if (ok) persist((p) => ({ ...p, deals: p.deals.filter((d) => d.id !== id) })); });
   const toggleSel = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const nq = normStr(q);
@@ -5042,7 +5042,7 @@ function Deals({ data, persist, go, focus }) {
       {list.length === 0 ? <tr><td colSpan={9} className="empty">Aucun document {hasFilter && "correspondant aux filtres"}.</td></tr> : (() => {
         const GD = { statut: { get: (d) => d.statut || "brouillon", meta: (v) => DEAL_STATUS[v] || DEAL_STATUS.brouillon, order: Object.keys(DEAL_STATUS) }, enseigne: { get: (d) => dealClient(d) }, type: { get: (d) => d.type || "—" }, mois: { get: (d) => (d.date || "").slice(0, 7) || "Sans date" } };
         const gd = GD[grp] || GD.statut;
-        const drow = (d) => { const st = DEAL_STATUS[d.statut] || DEAL_STATUS.brouillon; return (<tr key={d.id} style={sel.has(d.id) ? { background: "rgba(63,96,170,.06)" } : undefined}><td style={{ textAlign: "center" }}><input type="checkbox" checked={sel.has(d.id)} onChange={() => toggleSel(d.id)} style={{ width: 16, height: 16, margin: 0, cursor: "pointer" }} /></td><td style={{ fontWeight: 700 }}>{docRef(d, { code: dealDocCode(data, d) })}</td><td><span className="lnk" onClick={() => go("accounts", d.accountId)}>{dealClient(d)}</span></td><td>{d.type}</td><td className="tnum">{d.date}</td><td><Badge color={st.color}>{st.label}</Badge></td><td style={{ textAlign: "right" }} className="tnum">{num(d.qte)}</td><td style={{ textAlign: "right", fontWeight: 700 }} className="tnum">{eur(d.montant)}</td><td style={{ textAlign: "right", whiteSpace: "nowrap" }}><button className="iconbtn" title="Aperçu / imprimer" onClick={() => setPreview(d)}><Eye size={15} /></button> <button className="iconbtn" title="Modifier" onClick={() => setEdit(d)}><Pencil size={15} /></button> <button className="iconbtn" title="Supprimer" onClick={() => del(d.id)}><Trash2 size={15} /></button></td></tr>); };
+        const drow = (d) => { const st = DEAL_STATUS[d.statut] || DEAL_STATUS.brouillon; return (<tr key={d.id} style={sel.has(d.id) ? { background: "rgba(63,96,170,.06)" } : undefined}><td style={{ textAlign: "center" }}><input type="checkbox" checked={sel.has(d.id)} onChange={() => toggleSel(d.id)} style={{ width: 16, height: 16, margin: 0, cursor: "pointer" }} /></td><td style={{ fontWeight: 700 }}>{docRef(d, { code: dealDocCode(data, d) })}</td><td><span className="lnk" onClick={() => go("accounts", d.accountId)}>{dealClient(d)}</span></td><td>{d.type}</td><td className="tnum">{d.date}</td><td><span style={{ display: "inline-flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}><Badge color={st.color}>{st.label}</Badge>{isDealDormant(d, data) && <Badge color="#9333EA">😴 En sommeil</Badge>}</span></td><td style={{ textAlign: "right" }} className="tnum">{num(d.qte)}</td><td style={{ textAlign: "right", fontWeight: 700 }} className="tnum">{eur(d.montant)}</td><td style={{ textAlign: "right", whiteSpace: "nowrap" }}><button className="iconbtn" title="Aperçu / imprimer" onClick={() => setPreview(d)}><Eye size={15} /></button> <button className="iconbtn" title="Modifier" onClick={() => setEdit(d)}><Pencil size={15} /></button> <button className="iconbtn" title="Supprimer" onClick={() => del(d.id)}><Trash2 size={15} /></button></td></tr>); };
         return groupList(list, gd, dir).map((g) => { const m = gd.meta ? gd.meta(g.key) : null; const col = m ? m.color : "#9aa6bd"; const lbl = m ? m.label : g.key; const somme = g.items.reduce((s, d) => s + (d.montant || 0), 0); return (<React.Fragment key={g.key}><tr><td colSpan={7} style={{ background: col + "1f", borderLeft: "3px solid " + col, padding: "8px 12px" }}><span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 800 }} className="pu-display"><span style={{ width: 10, height: 10, borderRadius: 3, background: col, display: "inline-block" }} />{lbl}<span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>· {g.items.length}</span></span></td><td style={{ background: col + "1f", textAlign: "right", fontWeight: 800, padding: "8px 12px" }} className="tnum pu-display">{eur(somme)}</td><td style={{ background: col + "1f" }}></td></tr>{g.items.map(drow)}</React.Fragment>); });
       })()}
     </tbody></table></div></div>
@@ -7405,6 +7405,31 @@ function Connexions({ data, persist, autoBackup }) {
   </div>);
 }
 
+// Dernière activité (échange ou événement) enregistrée sur un compte, pour détecter les affaires dormantes.
+function lastActivityDate(data, accId) {
+  if (!accId) return "";
+  let last = "";
+  (data.interactions || []).forEach((i) => { if (i.accountId === accId && (i.date || "") > last) last = i.date; });
+  (data.events || []).forEach((e) => { if (e.accountId === accId && (e.date || "") > last && (e.date || "") <= TODAY()) last = e.date; });
+  return last;
+}
+// Devis « en sommeil » : envoyé et toujours en attente, sans aucune activité récente sur son compte.
+function isDealDormant(d, data, days = 14) {
+  if (!isDevisEnAttente(d) || d.statut !== "envoye") return false;
+  const ref = lastActivityDate(data, d.accountId) || d.date || "";
+  const n = daysFromToday(ref);
+  return n != null && n <= -days;
+}
+// Automations de stage (façon HubSpot) : au changement de statut d'un document, planifie une relance.
+// Idempotent via une clé `auto` unique par règle et par document.
+function dealAutomationEvents(prev, next, accounts) {
+  const out = []; const was = prev ? prev.statut : null;
+  const acc = (accounts || []).find((a) => a.id === next.accountId); const ens = acc ? acc.enseigne : "";
+  const mk = (autoKey, days, titre) => ({ id: "ev_auto_" + autoKey.replace(/[^a-z0-9]/gi, "_"), date: isoLocal(new Date(Date.now() + days * 86400000)), heure: "", titre, notes: "Relance planifiée automatiquement par MITMIT.", type: "relance", color: EVENT_TYPES.relance.color, accountId: next.accountId || "", siteId: next.livraisonSiteId || next.siteId || "", contactId: "", dealId: next.id, auto: autoKey });
+  if (next.type === "Facture" && next.statut === "livre" && was !== "livre") out.push(mk("reassort:" + next.id, 45, "Relance réassort — " + (ens || next.ref || "client")));
+  if (next.type === "Devis" && next.statut === "envoye" && was !== "envoye") out.push(mk("relancedevis:" + next.id, 7, "Relancer le devis " + (next.ref || "") + (ens ? " · " + ens : "")));
+  return out;
+}
 // Command Center « Aujourd'hui » (inspiré de la home HubSpot) : agrège en une file d'attente priorisée
 // tout ce qui demande une action — RDV/relances en retard et du jour, devis à relancer, factures à
 // encaisser, anniversaires — avec accès direct à la fiche concernée et actions rapides.
@@ -7419,9 +7444,10 @@ function CommandCenter({ data, persist, go }) {
   const todayEv = events.filter((e) => (e.date || "") === today).sort((a, b) => (a.heure || "").localeCompare(b.heure || ""));
   const devisRelance = deals.filter((d) => isDevisEnAttente(d) && d.statut === "envoye" && (daysFromToday(d.date) ?? 0) <= -5).sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   const facturesDues = deals.filter((d) => isCaSigne(d) && !((d.datePaiement || "").trim()) && (daysFromToday(d.date) ?? 0) <= -30).sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const dormant = deals.filter((d) => isDealDormant(d, data)).sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   const md = today.slice(5);
   const anniv = contacts.filter((c) => !c.archived && (c.naissance || "").length >= 10 && (c.naissance || "").slice(5) === md);
-  const total = overdue.length + todayEv.length + devisRelance.length + facturesDues.length + anniv.length;
+  const total = overdue.length + todayEv.length + devisRelance.length + facturesDues.length + dormant.length + anniv.length;
   const markDone = (id) => persist((p) => ({ ...p, events: (p.events || []).map((e) => e.id === id ? { ...e, done: true } : e) }));
   const snooze = (id) => persist((p) => ({ ...p, events: (p.events || []).map((e) => e.id === id ? { ...e, date: isoLocal(new Date(Date.now() + 86400000)) } : e) }));
   const evGo = (e) => e.contactId ? go("repertoire", e.contactId) : e.accountId ? go("accounts", e.accountId) : go("agenda");
@@ -7466,6 +7492,9 @@ function CommandCenter({ data, persist, go }) {
     </Section>
     <Section title="Devis à relancer" color="#F8B133" icon="📄" count={devisRelance.length}>
       {devisRelance.map((d) => <Row key={d.id} onClick={() => go("deals", d.id)} icon="📄" title={(d.ref || "Devis") + (accName(d.accountId) ? " · " + accName(d.accountId) : "")} sub={"Envoyé " + relDate(d.date) + " · en attente"} right={eur(d.montant || 0)} />)}
+    </Section>
+    <Section title="Devis en sommeil" color="#9333EA" icon="😴" count={dormant.length}>
+      {dormant.map((d) => <Row key={d.id} onClick={() => go("deals", d.id)} icon="😴" title={(d.ref || "Devis") + (accName(d.accountId) ? " · " + accName(d.accountId) : "")} sub={"Sans activité depuis un moment · envoyé " + relDate(d.date)} right={eur(d.montant || 0)} />)}
     </Section>
     <Section title="Factures à encaisser" color="#2bb673" icon="💶" count={facturesDues.length}>
       {facturesDues.map((d) => <Row key={d.id} onClick={() => go("deals", d.id)} icon="💶" title={(d.ref || "Facture") + (accName(d.accountId) ? " · " + accName(d.accountId) : "")} sub={"Émise " + relDate(d.date) + " · non pointée payée"} right={<span style={{ color: "var(--red)" }}>{eur(d.montant || 0)}</span>} />)}
