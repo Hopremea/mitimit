@@ -1205,10 +1205,13 @@ function identityKeys(o) {
   const keys = [];
   const siret = digits(o.siret), siren = digits(o.siren), a = norm(o.adresse);
   const coreName = (() => { const toks = norm(o.nom || o.enseigne).split(/\s+/).filter((t) => t.length > 1 && !GEN.has(t)); return toks.length ? toks.join(" ") : norm(o.nom || o.enseigne); })();
-  if (siret.length === 14) keys.push("T:" + siret);
-  if (a.length >= 6) keys.push("A:" + a);
-  if (siren.length === 9 && ville) { keys.push("S:" + siren + "|" + ville); if (coreName) keys.push("S:" + siren + "|" + ville + "|" + coreName); }
   const sc = streetCore(o.adresse);
+  if (siret.length === 14) keys.push("T:" + siret);
+  // Adresse comme clé d'identité UNIQUEMENT si elle porte un vrai numéro de voie (cœur de rue détecté) :
+  // deux commerces distincts partageant la même adresse « ZAC / zone / centre commercial » sans n° de rue
+  // (ex. King Jouet et Cultura dans la même ZAC) ne doivent PAS être fusionnés.
+  if (a.length >= 6 && sc) keys.push("A:" + a);
+  if (siren.length === 9 && ville) { keys.push("S:" + siren + "|" + ville); if (coreName) keys.push("S:" + siren + "|" + ville + "|" + coreName); }
   if (sc && sc.split(" ").length >= 3) { if (loc) keys.push("R:" + sc + "|" + loc); else keys.push("R:" + sc); }
   [o.nom, o.enseigne].forEach((v) => { const toks = normSp(v).split(/\s+/).filter((t) => t.length > 1 && !GEN.has(t)); if (toks.length >= 2 && loc) keys.push("N:" + toks.join(" ") + "|" + loc); if (loc && ville) { const strip = toks.filter((t) => !(t.length >= 3 && ville.includes(t))); if (strip.length >= 2 && strip.length < toks.length) keys.push("N:" + strip.join(" ") + "|" + loc); } });
   // Signaux « évidents » : e-mail identique (hors boîtes génériques), téléphone identique, gérant + ville.
@@ -6118,7 +6121,7 @@ const PROSPECT_FIELD_ALIASES = {
   cp: ["codepostal", "cp", "postal", "zip"], ville: ["ville", "commune", "city"], adresse: ["adresse", "adr", "address", "rue"], departement: ["departement", "dept", "dpt"], region: ["region"],
   site: ["siteweb", "site", "web", "url"], email: ["email", "mail", "courriel"], telephone: ["telephone", "tel", "phone", "portable", "mobile"],
   type: ["typeprospect", "categorie"], statut: ["statutprospect"], potentiel: ["potentiel"], format: ["format"],
-  enseigne: ["groupe", "reseau", "chaine", "enseigne"], nom: ["nom", "magasin", "etablissement", "prospect", "name", "societe"], notes: ["notes", "note", "commentaire", "remarque", "info"],
+  enseigne: ["groupe", "reseau", "chaine", "enseigne", "rattachement"], nom: ["nom", "magasin", "etablissement", "prospect", "name", "societe", "libelle", "libellesite", "libellepdv", "raisonsocialesite"], notes: ["notes", "note", "commentaire", "remarque", "info"],
 };
 // Deux passes : d'abord une égalité EXACTE (fiable), puis un « contient » tolérant (ordre = priorité).
 function matchProspectField(h) {
@@ -6475,10 +6478,12 @@ function Prospection({ data, persist, go }) {
       const keys = [];
       const siret = digits(p.siret); const siren = digits(p.siren);
       const { ville, cp } = localityOf(p); const loc = ville || cp; const a = norm(p.adresse);
-      if (siret.length === 14) keys.push("T:" + siret);
-      if (a.length >= 6) keys.push("A:" + a);
-      if (siren.length === 9 && ville) { keys.push("S:" + siren + "|" + ville); if (nameCore(p)) keys.push("S:" + siren + "|" + ville + "|" + nameCore(p)); }
       const sc = streetCore(p.adresse);
+      if (siret.length === 14) keys.push("T:" + siret);
+      // Adresse seule = identité UNIQUEMENT avec un vrai numéro de voie : deux commerces d'une même ZAC
+      // (sans n° de rue) ne sont pas fusionnés à tort.
+      if (a.length >= 6 && sc) keys.push("A:" + a);
+      if (siren.length === 9 && ville) { keys.push("S:" + siren + "|" + ville); if (nameCore(p)) keys.push("S:" + siren + "|" + ville + "|" + nameCore(p)); }
       if (sc && sc.split(" ").length >= 3) { if (loc) keys.push("R:" + sc + "|" + loc); else keys.push("R:" + sc); }
       [p.nom, p.enseigne].forEach((v) => { const toks = normSp(v).split(/\s+/).filter((t) => t.length > 1 && !GENERIC.has(t)); if (toks.length >= 2 && loc) keys.push("N:" + toks.join(" ") + "|" + loc); });
       // Signaux « évidents » : e-mail identique (hors boîtes génériques), téléphone identique, gérant + ville.
