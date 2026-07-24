@@ -7626,15 +7626,108 @@ function SalaireRH({ data, persist }) {
     </div>
   </div>);
 }
-// Onglet RH : sous-navigation entre le temps de présence (pointage), les frais kilométriques et le salaire.
+// Calculateur de commission commerciale : 4 % du CA HT sur la 1re facture d'un établissement
+// (référencement / ouverture, « en cours de livraison ») et 2 % sur chaque facture suivante du
+// même établissement (réassort). Le classement 1re vente / réassort est établi sur tout l'historique
+// des factures ; le sélecteur de période ne filtre que ce qui est affiché et totalisé.
+function CommissionsRH({ data, persist }) {
+  const { accounts, sites } = data;
+  const s = data.settings || {};
+  const accName = (id) => accounts.find((a) => a.id === id)?.enseigne || "—";
+  const siteName = (id) => (sites || []).find((x) => x.id === id)?.label || null;
+  const [taux1, setTaux1] = useState(s.commTaux1 != null ? s.commTaux1 : 4);
+  const [tauxN, setTauxN] = useState(s.commTauxN != null ? s.commTauxN : 2);
+  const [touched, setTouched] = useState(false);
+  useEffect(() => { if (touched) return; if (s.commTaux1 != null) setTaux1(s.commTaux1); if (s.commTauxN != null) setTauxN(s.commTauxN); }, [s.commTaux1, s.commTauxN, touched]);
+  const r1 = (Number(taux1) || 0) / 100, rN = (Number(tauxN) || 0) / 100;
+  const monthPrefix = new Date().toISOString().slice(0, 7);
+  const [periode, setPeriode] = useState("all");
+  // Établissement d'une facture : site de livraison, à défaut site de facturation, à défaut le compte.
+  const estabKey = (d) => d.livraisonSiteId || d.siteId || d.accountId || "";
+  const estabLabel = (d) => siteName(d.livraisonSiteId) || siteName(d.siteId) || accName(d.accountId);
+  // Toutes les factures, chronologiques : la 1re de chaque établissement = référencement (4 %), les
+  // suivantes = réassort (2 %).
+  const rows = useMemo(() => {
+    const factures = (data.deals || []).filter((d) => d.type === "Facture").slice()
+      .sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.id || "").localeCompare(b.id || ""));
+    const seen = new Set();
+    return factures.map((d) => {
+      const key = estabKey(d); const first = !seen.has(key); seen.add(key);
+      const rate = first ? r1 : rN; const ca = d.montant || 0;
+      return { d, first, rate, ca, comm: ca * rate };
+    });
+  }, [data.deals, r1, rN]);
+  // Périodes disponibles (années présentes dans les factures) + « mois en cours » + « total ».
+  const annees = useMemo(() => Array.from(new Set(rows.map((x) => (x.d.date || "").slice(0, 4)).filter(Boolean))).sort((a, b) => b.localeCompare(a)), [rows]);
+  const inPeriode = (d) => { const dt = d.date || ""; if (periode === "all") return true; if (periode === "month") return dt.startsWith(monthPrefix); return dt.startsWith(periode); };
+  const shown = rows.filter((x) => inPeriode(x.d));
+  const tot = shown.reduce((a, x) => a + x.comm, 0);
+  const totCA = shown.reduce((a, x) => a + x.ca, 0);
+  const nFirst = shown.filter((x) => x.first).length; const nReassort = shown.length - nFirst;
+  const commFirst = shown.filter((x) => x.first).reduce((a, x) => a + x.comm, 0);
+  const commReassort = tot - commFirst;
+  const memoriser = () => { setTouched(false); persist((p) => ({ ...p, settings: { ...p.settings, commTaux1: Number(taux1) || 0, commTauxN: Number(tauxN) || 0 } })); };
+  const periodLabel = periode === "all" ? "toutes périodes" : periode === "month" ? new Date().toLocaleDateString("fr-FR", { month: "long", year: "numeric" }) : "année " + periode;
+  const Tile = ({ l, v, sub, color }) => (<div className="card" style={{ padding: "12px 14px", borderTop: "3px solid " + (color || "var(--line)") }}><div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3 }}>{l}</div><div className="tnum pu-display" style={{ fontSize: 24, fontWeight: 900, color: color || "inherit", marginTop: 2 }}>{v}</div>{sub && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{sub}</div>}</div>);
+  return (<div>
+    <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--green)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+      <div>
+        <div style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3 }}>Commission commerciale · <span style={{ textTransform: "capitalize" }}>{periodLabel}</span></div>
+        <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3, lineHeight: 1.5 }}>{num(taux1)} % sur la 1re facture de chaque établissement (référencement) · {num(tauxN)} % sur les factures de réassort. Calculé sur le CA HT.</div>
+      </div>
+      <div className="pu-display tnum" style={{ fontSize: 34, color: "var(--green)", fontWeight: 900 }}>{eur2(tot)}</div>
+    </div>
+    <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+      <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>Période</span>
+      <button className={cx("chip", periode === "all" && "on")} onClick={() => setPeriode("all")}>Total</button>
+      <button className={cx("chip", periode === "month" && "on")} onClick={() => setPeriode("month")}>Mois en cours</button>
+      {annees.map((y) => <button key={y} className={cx("chip", periode === y && "on")} onClick={() => setPeriode(y)}>{y}</button>)}
+    </div>
+    <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 16 }}>
+      <Tile l="Commission totale" v={eur2(tot)} sub={num(shown.length) + " facture" + (shown.length > 1 ? "s" : "")} color="var(--green)" />
+      <Tile l={"Référencement (" + num(taux1) + " %)"} v={eur2(commFirst)} sub={num(nFirst) + " 1re vente" + (nFirst > 1 ? "s" : "")} color="#2bb673" />
+      <Tile l={"Réassort (" + num(tauxN) + " %)"} v={eur2(commReassort)} sub={num(nReassort) + " réassort" + (nReassort > 1 ? "s" : "")} color="#5b8def" />
+      <Tile l="CA HT facturé" v={eur2(totCA)} sub="assiette de commission" />
+    </div>
+    <div className="grid" style={{ gridTemplateColumns: "1.1fr 1.9fr", alignItems: "start" }}>
+      <div className="card"><div className="sec-h"><h3 className="pu-display">Taux de commission</h3></div>
+        <div className="row2" style={{ marginBottom: 8 }}>
+          <div className="fld"><label>1re facture — référencement (%)</label><input type="number" step="0.1" min="0" value={taux1} onChange={(e) => { setTouched(true); setTaux1(e.target.value); }} /></div>
+          <div className="fld"><label>Factures suivantes — réassort (%)</label><input type="number" step="0.1" min="0" value={tauxN} onChange={(e) => { setTouched(true); setTauxN(e.target.value); }} /></div>
+        </div>
+        <div style={{ marginTop: 6 }}><button className="btn btn-g btn-s" onClick={memoriser}><Save size={13} /> Mémoriser les taux</button></div>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 10, lineHeight: 1.5 }}>Un « établissement » est identifié par son site de livraison (à défaut le site de facturation, sinon le compte). La toute première facture d'un établissement rémunère l'ouverture / le référencement ; chaque facture ultérieure vers ce même établissement est traitée en réassort.</div>
+      </div>
+      <div className="card" style={{ borderTop: "3px solid var(--green)" }}><div className="sec-h"><h3 className="pu-display">Détail des factures · <span style={{ textTransform: "capitalize" }}>{periodLabel}</span></h3></div>
+        {shown.length === 0 ? <div style={{ fontSize: 12.5, color: "var(--muted)", padding: "10px 2px" }}>Aucune facture sur cette période.</div> : (
+          <div style={{ overflowX: "auto" }}><table className="tbl" style={{ width: "100%", fontSize: 12.5 }}>
+            <thead><tr><th style={{ textAlign: "left" }}>Date</th><th style={{ textAlign: "left" }}>Établissement</th><th style={{ textAlign: "left" }}>Type</th><th style={{ textAlign: "right" }}>CA HT</th><th style={{ textAlign: "right" }}>Taux</th><th style={{ textAlign: "right" }}>Commission</th></tr></thead>
+            <tbody>{shown.slice().sort((a, b) => (b.d.date || "").localeCompare(a.d.date || "")).map((x) => (
+              <tr key={x.d.id}>
+                <td>{x.d.date || "—"}</td>
+                <td>{estabLabel(x.d)}{x.d.ref ? <span style={{ color: "var(--muted)" }}> · {x.d.ref}</span> : null}</td>
+                <td><span className="badge" style={{ background: (x.first ? "#2bb673" : "#5b8def") + "22", color: x.first ? "#2bb673" : "#5b8def", fontWeight: 700 }}>{x.first ? "Référencement" : "Réassort"}</span></td>
+                <td style={{ textAlign: "right" }} className="tnum">{eur2(x.ca)}</td>
+                <td style={{ textAlign: "right" }} className="tnum">{num(Math.round(x.rate * 1000) / 10)} %</td>
+                <td style={{ textAlign: "right", fontWeight: 800 }} className="tnum">{eur2(x.comm)}</td>
+              </tr>))}</tbody>
+            <tfoot><tr style={{ borderTop: "2px solid var(--line)", fontWeight: 800 }}><td colSpan={3}>Total · {periodLabel}</td><td style={{ textAlign: "right" }} className="tnum">{eur2(totCA)}</td><td></td><td style={{ textAlign: "right", color: "var(--green)" }} className="tnum">{eur2(tot)}</td></tr></tfoot>
+          </table></div>
+        )}
+      </div>
+    </div>
+  </div>);
+}
+// Onglet RH : sous-navigation entre le temps de présence (pointage), les frais kilométriques, le salaire et les commissions.
 function RH({ data, persist }) {
   const [sub, setSub] = useState("presence");
-  const subs = [{ id: "presence", label: "Temps de présence", icon: Clock }, { id: "frais", label: "Frais kilométriques", icon: Navigation }, { id: "salaire", label: "Salaire estimé", icon: Calculator }];
+  const subs = [{ id: "presence", label: "Temps de présence", icon: Clock }, { id: "frais", label: "Frais kilométriques", icon: Navigation }, { id: "salaire", label: "Salaire estimé", icon: Calculator }, { id: "commission", label: "Commissions", icon: Percent }];
   return (<div className="fade">
     <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>{subs.map((x) => { const Ic = x.icon; return <button key={x.id} className={cx("chip", sub === x.id && "on")} onClick={() => setSub(x.id)} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Ic size={14} />{x.label}</button>; })}</div>
     <div style={{ display: sub === "presence" ? "block" : "none" }}><Pointage data={data} persist={persist} /></div>
     <div style={{ display: sub === "frais" ? "block" : "none" }}><FraisKm data={data} persist={persist} /></div>
     <div style={{ display: sub === "salaire" ? "block" : "none" }}><SalaireRH data={data} persist={persist} /></div>
+    <div style={{ display: sub === "commission" ? "block" : "none" }}><CommissionsRH data={data} persist={persist} /></div>
   </div>);
 }
 // Simulateur de frais kilométriques : trajet quotidien domicile-travail (essence + péage, aller-retour)
