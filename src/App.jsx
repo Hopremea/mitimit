@@ -7749,12 +7749,40 @@ function CommissionsRH({ data, persist, go }) {
     </div>
   </div>);
 }
+// Export Excel des données RH en un seul classeur, une feuille par nature : heures pointées,
+// trajets domicile-travail et déplacements ponctuels (frais professionnels). xlsx chargé à la demande.
+async function exportRHWorkbook(data) {
+  const XLSX = await import("xlsx");
+  const wb = XLSX.utils.book_new();
+  const jour = (ds) => new Date(ds + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "long" });
+  const pgs = Object.entries(data.pointages || {}).sort((a, b) => a[0].localeCompare(b[0]));
+  const addSheet = (rows, empty, name) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.length ? rows : [empty]), name);
+  // Feuille 1 — Heures pointées
+  const heures = pgs.map(([ds, rec]) => {
+    const st = presenceDay(rec);
+    const motifLabel = (PRESENCE_MOTIFS[(rec && rec.motif) || "presence"] || PRESENCE_MOTIFS.presence).label;
+    if (!st) return { Date: ds, Jour: jour(ds), Type: motifLabel, "Arrivée": (rec && rec.arrivee) || "", "Départ": (rec && rec.depart) || "", "Pause (min)": "", "Heures travaillées": "", "Heures sup.": "" };
+    const worked = st.invalid ? 0 : st.worked;
+    const ot = isChronoMotif(st.motif) && !isWeekendDs(ds) ? Math.max(0, worked - PRESENCE_TARGET) : 0;
+    return { Date: ds, Jour: jour(ds), Type: motifLabel, "Arrivée": st.arrivee || "", "Départ": st.depart || "", "Pause (min)": st.pause || 0, "Heures travaillées": Math.round(worked / 60 * 100) / 100, "Heures sup.": Math.round(ot / 60 * 100) / 100 };
+  });
+  addSheet(heures, { Date: "", Jour: "", Type: "", "Arrivée": "", "Départ": "", "Pause (min)": "", "Heures travaillées": "", "Heures sup.": "" }, "Heures");
+  // Feuille 2 — Trajet domicile-travail (un jour de présence pointé = un aller-retour)
+  const s = data.settings || {};
+  const ess = Number(s.fraisEssence != null ? s.fraisEssence : 8), pea = Number(s.fraisPeage != null ? s.fraisPeage : 3.2), ar = s.fraisAR !== false; const mult = ar ? 2 : 1; const coutJour = (ess + pea) * mult;
+  const domicile = pgs.filter(([, r]) => r && (!r.motif || r.motif === "presence") && r.arrivee && r.depart).map(([ds]) => ({ Date: ds, Jour: jour(ds), "Essence (€/trajet)": ess.toFixed(2), "Péage (€/trajet)": pea.toFixed(2), "Aller-retour": ar ? "Oui" : "Non", "Coût du jour (€)": coutJour.toFixed(2), "Prime 50 % (€)": (coutJour * PRIME_KM_RATE).toFixed(2) }));
+  addSheet(domicile, { Date: "", Jour: "", "Essence (€/trajet)": "", "Péage (€/trajet)": "", "Aller-retour": "", "Coût du jour (€)": "", "Prime 50 % (€)": "" }, "Trajet domicile-travail");
+  // Feuille 3 — Trajet ponctuel (frais professionnels remboursés à 100 %)
+  const dep = (data.deplacements || []).slice().sort((a, b) => (a.date || "").localeCompare(b.date || "")).map((d) => { const e = Number(d.essence) || 0, p = Number(d.peage) || 0, au = Number(d.autre) || 0; const t = e + p + au; return { Date: d.date || "", "Destination / motif": d.dest || "", Km: d.km || "", "Essence (€)": e.toFixed(2), "Péage (€)": p.toFixed(2), "Autres (€)": au.toFixed(2), "Frais réels (€)": t.toFixed(2), "Remboursé 100 % (€)": t.toFixed(2) }; });
+  addSheet(dep, { Date: "", "Destination / motif": "", Km: "", "Essence (€)": "", "Péage (€)": "", "Autres (€)": "", "Frais réels (€)": "", "Remboursé 100 % (€)": "" }, "Trajet ponctuel");
+  XLSX.writeFile(wb, "rh-penup3d-" + new Date().toISOString().slice(0, 10) + ".xlsx");
+}
 // Onglet RH : sous-navigation entre le temps de présence (pointage), les frais kilométriques, le salaire et les commissions.
 function RH({ data, persist, go }) {
   const [sub, setSub] = useState("presence");
   const subs = [{ id: "presence", label: "Temps de présence", icon: Clock }, { id: "frais", label: "Frais kilométriques", icon: Navigation }, { id: "salaire", label: "Salaire estimé", icon: Calculator }, { id: "commission", label: "Commissions", icon: Percent }];
   return (<div className="fade">
-    <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>{subs.map((x) => { const Ic = x.icon; return <button key={x.id} className={cx("chip", sub === x.id && "on")} onClick={() => setSub(x.id)} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Ic size={14} />{x.label}</button>; })}</div>
+    <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>{subs.map((x) => { const Ic = x.icon; return <button key={x.id} className={cx("chip", sub === x.id && "on")} onClick={() => setSub(x.id)} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Ic size={14} />{x.label}</button>; })}<button className="btn btn-g btn-s" style={{ marginLeft: "auto" }} onClick={() => exportRHWorkbook(data).catch(() => alert("Export impossible."))} title="Exporter en Excel : heures, trajets domicile-travail et déplacements ponctuels (3 feuilles)"><FileDown size={14} /> Exporter (Excel)</button></div>
     <div style={{ display: sub === "presence" ? "block" : "none" }}><Pointage data={data} persist={persist} /></div>
     <div style={{ display: sub === "frais" ? "block" : "none" }}><FraisKm data={data} persist={persist} /></div>
     <div style={{ display: sub === "salaire" ? "block" : "none" }}><SalaireRH data={data} persist={persist} /></div>
