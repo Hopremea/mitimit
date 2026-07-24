@@ -7525,7 +7525,7 @@ const SAL_PART = 78;                // rémunération apprenti = 78 % du SMIC (b
 // (36ᵉ→43ᵉ h) sont payées +25 %, au-delà (44ᵉ h et plus) +50 %. Le taux HS 25 % = taux de base × 1,25
 // (vérifié : 9,6018 × 1,25 = 12,0023, exactement le taux du bulletin de juin).
 const SAL_MAJ_25 = 1.25, SAL_MAJ_50 = 1.5, SAL_SEUIL_50_MIN = 480; // 8 h/semaine = 480 min à +25 % avant +50 %
-function estimateSalaire({ tauxBase, h25, h50, prime, part = SAL_PART, mutuelle = SAL_MUTUELLE }) {
+function estimateSalaire({ tauxBase, h25, h50, prime, commission = 0, part = SAL_PART, mutuelle = SAL_MUTUELLE }) {
   const tb = Number(tauxBase) || 0;
   const base = tb * SAL_BASE_HOURS;
   const t25 = tb * SAL_MAJ_25, t50 = tb * SAL_MAJ_50;
@@ -7533,13 +7533,33 @@ function estimateSalaire({ tauxBase, h25, h50, prime, part = SAL_PART, mutuelle 
   const hs50 = (Number(h50) || 0) * t50;
   const hs = hs25 + hs50;
   const pr = Number(prime) || 0;
-  const brut = base + hs + pr;
+  const comm = Number(commission) || 0;
+  const brut = base + hs + pr + comm;
   const seuil = part > 0 ? base * (79 / part) : base; // 79 % du SMIC (la base vaut « part » % du SMIC)
   const excess = Math.max(0, brut - seuil);
   const cotisVar = SAL_COTIS_EXCESS * excess;
   const mut = Number(mutuelle) || 0;
   const cotis = mut + cotisVar;
-  return { base, t25, t50, hs25, hs50, hs, prime: pr, brut, seuil, excess, mutuelle: mut, cotisVar, cotis, net: brut - cotis };
+  return { base, t25, t50, hs25, hs50, hs, prime: pr, commission: comm, brut, seuil, excess, mutuelle: mut, cotisVar, cotis, net: brut - cotis };
+}
+// Commission commerciale par facture (partagée entre l'onglet Commissions et le salaire estimé) :
+// 1re facture d'un établissement = référencement (taux1), suivantes = réassort (tauxN). Un indépendant
+// est regroupé par compte, un groupe multi-PDV par site de livraison. Retourne la liste chronologique.
+function computeCommissionRows(data) {
+  const accounts = data.accounts || [];
+  const accOf = (id) => accounts.find((a) => a.id === id);
+  const s = data.settings || {};
+  const r1 = (s.commTaux1 != null ? s.commTaux1 : 4) / 100;
+  const rN = (s.commTauxN != null ? s.commTauxN : 2) / 100;
+  const estabKey = (d) => isGroupe(accOf(d.accountId)) ? "site:" + (d.livraisonSiteId || d.siteId || d.accountId || "") : "acc:" + (d.accountId || d.livraisonSiteId || d.siteId || "");
+  const factures = (data.deals || []).filter((d) => d.type === "Facture").slice()
+    .sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.id || "").localeCompare(b.id || ""));
+  const seen = new Set();
+  return factures.map((d) => {
+    const key = estabKey(d); const first = !seen.has(key); seen.add(key);
+    const rate = first ? r1 : rN; const ca = d.montant || 0;
+    return { d, first, rate, ca, comm: ca * rate };
+  });
 }
 // Estimateur de salaire de fin de mois : taux horaire (base + heures sup.), heures sup. reprises du
 // pointage, indemnités kilométriques du mois versées en prime. Tout reste ajustable manuellement.
@@ -7582,7 +7602,14 @@ function SalaireRH({ data, persist }) {
   const [kmTouched, setKmTouched] = useState(false);
   useEffect(() => { if (!otTouched) { setH25(autoOT.h25); setH50(autoOT.h50); } }, [autoOT.h25, autoOT.h50, otTouched]);
   useEffect(() => { if (!kmTouched) setPrime(autoKm); }, [autoKm, kmTouched]);
-  const r = estimateSalaire({ tauxBase, h25, h50, prime, part, mutuelle });
+  // Commission commerciale du mois : factures facturées ce mois (1re facture d'un établissement à 4 %,
+  // réassort à 2 %). Elle s'ajoute au brut et suit les mêmes taux paramétrés dans l'onglet Commissions.
+  const commRows = useMemo(() => computeCommissionRows(data).filter((x) => (x.d.date || "").startsWith(monthPrefix)), [data.deals, data.accounts, data.settings, monthPrefix]);
+  const autoComm = Math.round(commRows.reduce((a, x) => a + x.comm, 0) * 100) / 100;
+  const [comm, setComm] = useState(autoComm);
+  const [commTouched, setCommTouched] = useState(false);
+  useEffect(() => { if (!commTouched) setComm(autoComm); }, [autoComm, commTouched]);
+  const r = estimateSalaire({ tauxBase, h25, h50, prime, commission: comm, part, mutuelle });
   const memoriser = () => persist((p) => ({ ...p, settings: { ...p.settings, salaireTauxBase: Number(tauxBase) || 0 } }));
   const Line = ({ l, v, strong, color, sub }) => (<div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: strong ? 13.5 : 12.5, fontWeight: strong ? 800 : 500, color: color || "inherit", padding: "3px 0" }}><span>{l}{sub && <span style={{ color: "var(--muted)", fontWeight: 500 }}> {sub}</span>}</span><span className="tnum">{v}</span></div>);
   const totHS = (Number(h25) || 0) + (Number(h50) || 0);
@@ -7590,7 +7617,7 @@ function SalaireRH({ data, persist }) {
     <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--blue)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
       <div>
         <div style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3 }}>Estimation du net à payer · <span style={{ textTransform: "capitalize" }}>{monthName}</span></div>
-        <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3, lineHeight: 1.5 }}>Base {SAL_BASE_HOURS} h + {totHS} h sup. ({h25} h à +25 % · {h50} h à +50 %) + prime (indemnités km) {eur2(prime)}, cotisations apprenti déduites.</div>
+        <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3, lineHeight: 1.5 }}>Base {SAL_BASE_HOURS} h + {totHS} h sup. ({h25} h à +25 % · {h50} h à +50 %) + prime (indemnités km) {eur2(prime)}{(Number(comm) || 0) > 0 ? " + commission " + eur2(comm) : ""}, cotisations apprenti déduites.</div>
       </div>
       <div className="pu-display tnum" style={{ fontSize: 34, color: "var(--blue)", fontWeight: 900 }}>{eur2(r.net)}</div>
     </div>
@@ -7604,6 +7631,7 @@ function SalaireRH({ data, persist }) {
         </div>
         <div style={{ marginBottom: 8, fontSize: 11.5, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><span style={{ color: otTouched ? "var(--muted)" : "var(--green)", fontWeight: 700 }}>{otTouched ? "Valeurs saisies manuellement" : "↻ Réparti automatiquement depuis le pointage (" + autoOT.h25 + " h + " + autoOT.h50 + " h)"}</span>{otTouched && <button className="btn btn-g btn-s" onClick={() => setOtTouched(false)} title="Reprendre la répartition automatique du pointage">↻ Auto</button>}</div>
         <div className="fld"><label style={{ textTransform: "capitalize" }}>Prime — indemnités kilométriques · {monthName} (€)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.01" min="0" value={prime} onChange={(e) => { setKmTouched(true); setPrime(e.target.value); }} />{kmTouched && <button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setKmTouched(false)} title="Reprendre la prime (50 % des frais kilométriques du mois)">↻ {eur2(autoKm)}</button>}</div><span style={{ fontSize: 11, color: "var(--muted)" }}>Domicile-travail : 50 % de {eur2(fraisKmMois)} = {eur2(domicilePrime)}{deplTotalMois > 0 ? " · Déplacements ponctuels remboursés à 100 % = " + eur2(deplTotalMois) : ""}. Total prime : {eur2(autoKm)}.</span></div>
+        <div className="fld" style={{ marginTop: 8 }}><label style={{ textTransform: "capitalize" }}>Commission commerciale · {monthName} (€)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.01" min="0" value={comm} onChange={(e) => { setCommTouched(true); setComm(e.target.value); }} />{commTouched && <button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setCommTouched(false)} title="Reprendre la commission calculée sur les factures du mois">↻ {eur2(autoComm)}</button>}</div><span style={{ fontSize: 11, color: "var(--muted)" }}>Calculée sur les factures du mois : 4 % sur la 1re facture d'un établissement (référencement), 2 % en réassort. {num(commRows.length)} facture{commRows.length > 1 ? "s" : ""} ce mois.</span></div>
         <div style={{ marginTop: 10 }}><button className="btn btn-g btn-s" onClick={memoriser}><Save size={13} /> Mémoriser mon taux horaire</button></div>
         <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 10, lineHeight: 1.5 }}>Statut apprenti : rémunération à {part} % du SMIC, exonération de cotisations salariales jusqu'à 79 % du SMIC, mutuelle {eur2(mutuelle)}. Les heures sup. sont reprises du pointage et réparties par semaine (8 h à +25 %, au-delà à +50 %). Estimation calibrée sur vos bulletins (~1 € près).</div>
       </div>
@@ -7613,6 +7641,7 @@ function SalaireRH({ data, persist }) {
           <Line l="Heures sup. +25 %" sub={"(" + h25 + " h × " + eur2(r.t25) + ")"} v={eur2(r.hs25)} />
           <Line l="Heures sup. +50 %" sub={"(" + h50 + " h × " + eur2(r.t50) + ")"} v={eur2(r.hs50)} />
           {(!kmTouched && deplTotalMois > 0) ? (<><Line l="Prime domicile-travail (50 %)" v={eur2(domicilePrime)} /><Line l="Remboursement déplacements (100 %)" v={eur2(deplTotalMois)} /></>) : <Line l="Prime (indemnités km)" v={eur2(r.prime)} />}
+          {(Number(comm) || 0) > 0 && <Line l="Commission commerciale" sub="(4 % référencement / 2 % réassort)" v={eur2(r.commission)} color="var(--green)" />}
           <div style={{ borderTop: "1px solid var(--line)", margin: "6px 0" }} />
           <Line l="Salaire brut" v={eur2(r.brut)} strong />
           <Line l="Mutuelle santé" v={"− " + eur2(r.mutuelle)} color="var(--muted)" />
@@ -7640,7 +7669,6 @@ function CommissionsRH({ data, persist, go }) {
   const [tauxN, setTauxN] = useState(s.commTauxN != null ? s.commTauxN : 2);
   const [touched, setTouched] = useState(false);
   useEffect(() => { if (touched) return; if (s.commTaux1 != null) setTaux1(s.commTaux1); if (s.commTauxN != null) setTauxN(s.commTauxN); }, [s.commTaux1, s.commTauxN, touched]);
-  const r1 = (Number(taux1) || 0) / 100, rN = (Number(tauxN) || 0) / 100;
   const monthPrefix = new Date().toISOString().slice(0, 7);
   const [periode, setPeriode] = useState("all");
   // Identité de l'« établissement » d'une facture, pour distinguer 1re vente (référencement) et réassort.
@@ -7648,7 +7676,6 @@ function CommissionsRH({ data, persist, go }) {
   // n'est pas renseigné de façon homogène d'une facture à l'autre (sinon deux factures du même magasin
   // seraient comptées deux fois en référencement). Un groupe multi-PDV : chaque magasin (site de livraison)
   // est un établissement distinct, avec repli sur le compte si le site n'est pas précisé.
-  const estabKey = (d) => isGroupe(accOf(d.accountId)) ? "site:" + (d.livraisonSiteId || d.siteId || d.accountId || "") : "acc:" + (d.accountId || d.livraisonSiteId || d.siteId || "");
   // Libellé affiché : pour un groupe multi-PDV, le magasin (site) ; sinon l'enseigne du compte, à défaut
   // le site (cas d'un indépendant sans compte rattaché). accName renvoie « — » quand le compte manque, on
   // ne l'utilise donc que si le compte existe vraiment, pour éviter d'écraser un nom de site valable.
@@ -7658,18 +7685,9 @@ function CommissionsRH({ data, persist, go }) {
     if (isGroupe(a)) return site || (a && a.enseigne) || "—";
     return (a && a.enseigne) || site || "—";
   };
-  // Toutes les factures, chronologiques : la 1re de chaque établissement = référencement (4 %), les
-  // suivantes = réassort (2 %).
-  const rows = useMemo(() => {
-    const factures = (data.deals || []).filter((d) => d.type === "Facture").slice()
-      .sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.id || "").localeCompare(b.id || ""));
-    const seen = new Set();
-    return factures.map((d) => {
-      const key = estabKey(d); const first = !seen.has(key); seen.add(key);
-      const rate = first ? r1 : rN; const ca = d.montant || 0;
-      return { d, first, rate, ca, comm: ca * rate };
-    });
-  }, [data.deals, r1, rN]);
+  // Toutes les factures, chronologiques : la 1re de chaque établissement = référencement (taux1), les
+  // suivantes = réassort (tauxN). Les taux appliqués suivent les taux saisis (aperçu en direct).
+  const rows = useMemo(() => computeCommissionRows({ ...data, settings: { ...data.settings, commTaux1: Number(taux1) || 0, commTauxN: Number(tauxN) || 0 } }), [data.deals, data.accounts, taux1, tauxN]);
   // Périodes disponibles (années présentes dans les factures) + « mois en cours » + « total ».
   const annees = useMemo(() => Array.from(new Set(rows.map((x) => (x.d.date || "").slice(0, 4)).filter(Boolean))).sort((a, b) => b.localeCompare(a)), [rows]);
   const inPeriode = (d) => { const dt = d.date || ""; if (periode === "all") return true; if (periode === "month") return dt.startsWith(monthPrefix); return dt.startsWith(periode); };
