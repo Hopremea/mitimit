@@ -818,6 +818,19 @@ function normalize(d) {
   if (!d.settings.coefBasisTTC) { d.settings.coefTarget = Math.round((d.settings.coefTarget || 1.8) * 1.2 * 100) / 100; d.settings.coefMax = Math.round((d.settings.coefMax || 2.0) * 1.2 * 100) / 100; if (d.settings.coefTarget < 2.2) d.settings.coefTarget = 2.2; if (d.settings.coefMax <= d.settings.coefTarget) d.settings.coefMax = Math.round((d.settings.coefTarget + 0.2) * 100) / 100; d.settings.coefBasisTTC = true; }
   if (!d.settings._tarif2026) { d.products = (d.products || []).map((p) => p.code === "PU3D-KIT-MECA" ? { ...p, code: "PU3D-KIT-MECANIQUE" } : p); d.settings._tarif2026 = true; }
   if (!d.settings._livretRename) { d.products = (d.products || []).map((p) => p.code === "PU3D-LIVRET-DECOUVERTE" ? { ...p, designation: "Livret Découverte" } : p); d.deals = (d.deals || []).map((dl) => ({ ...dl, lines: (dl.lines || []).map((l) => l.code === "PU3D-LIVRET-DECOUVERTE" ? { ...l, designation: "Livret Découverte" } : l) })); d.settings._livretRename = true; }
+  // Coûts de revient : renseigne le coût produit (product.cout) à partir des prix d'achat officiels, et
+  // pour les bobines Fil'Up par taille de lot (lot de 12 = 15,83 · lot de 4 = 5,88 · X3/lot de 3 = 4,52),
+  // afin d'ACTIVER les indicateurs de marge et de valeur de stock. N'écrase jamais un coût déjà saisi.
+  if (!d.settings._seedCouts) {
+    const lotCout = (des) => { const s = des || ""; if (/lot de 12/i.test(s)) return 15.83; if (/lot de 4/i.test(s)) return 5.88; if (/x\s?3\b|lot de 3/i.test(s)) return 4.52; return null; };
+    d.products = (d.products || []).map((p) => {
+      if (p.cout != null || p.coutUsd != null) return p;
+      let c = PA_HT_OFFICIEL[p.code];
+      if (c == null && /^PU3D-FIL-/.test(p.code || "")) c = lotCout(p.designation);
+      return c != null ? { ...p, cout: c } : p;
+    });
+    d.settings._seedCouts = true;
+  }
   // Réconciliation unique : les contacts des établissements déjà archivés sont archivés à leur tour.
   if (!d.settings._contactArchiveSync) { const arch = new Set((d.accounts || []).filter((a) => a.archived).map((a) => a.id)); d.contacts = (d.contacts || []).map((c) => (arch.has(c.accountId) && !c.archived) ? { ...c, archived: true } : c); d.settings._contactArchiveSync = true; }
   if (!d.settings._kind) { d.accounts = (d.accounts || []).map((a) => a.kind ? a : { ...a, kind: isCentraleOuChaine(a) ? "groupe" : "établissement" }); d.settings._kind = true; }
