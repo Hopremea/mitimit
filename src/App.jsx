@@ -2388,6 +2388,23 @@ body:not(.doc-print) .print-area{position:absolute!important;left:0;top:0;width:
 `;
 
 const Badge = ({ color, children }) => (<span className="badge" style={{ background: color + "18", color: darkenHex(color) }}><i className="dot" style={{ background: color }} />{children}</span>);
+// Dictée vocale (Web Speech API) : bouton micro qui transcrit la parole en français et transmet chaque
+// phrase finalisée via onText (le parent l'ajoute au champ). N'apparaît pas si le navigateur ne gère pas.
+function MicDictate({ onText, title }) {
+  const SR = typeof window !== "undefined" ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
+  const recRef = useRef(null); const [on, setOn] = useState(false);
+  useEffect(() => () => { try { if (recRef.current) recRef.current.stop(); } catch (e) {} }, []);
+  if (!SR) return null;
+  const toggle = () => {
+    if (on && recRef.current) { try { recRef.current.stop(); } catch (e) {} return; }
+    const r = new SR(); r.lang = "fr-FR"; r.interimResults = false; r.continuous = true; r.maxAlternatives = 1;
+    r.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i++) { if (e.results[i].isFinal) { const t = (e.results[i][0].transcript || "").trim(); if (t) onText(t); } } };
+    r.onend = () => { setOn(false); recRef.current = null; };
+    r.onerror = () => { setOn(false); recRef.current = null; };
+    try { r.start(); recRef.current = r; setOn(true); } catch (e) { setOn(false); }
+  };
+  return <button type="button" className="iconbtn" onClick={toggle} title={title || "Dicter au micro (transcription vocale)"} style={on ? { color: "#fff", background: "var(--red)", borderColor: "var(--red)" } : {}}><Mic size={15} className={on ? "spin" : ""} /></button>;
+}
 // Étiquette d'étape de l'entonnoir : forme CARRÉE (coins nets + pastille carrée + liseré) pour la
 // distinguer nettement, sur les tuiles établissement, des badges arrondis (type de surface, réseau).
 const StageTag = ({ stage }) => (<span title={"Entonnoir : " + stage.label} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10.5, fontWeight: 800, color: darkenHex(stage.color), background: stage.color + "1f", border: "1.5px solid " + stage.color + "99", borderRadius: 3, padding: "2px 7px" }}><i style={{ width: 9, height: 9, background: stage.color, borderRadius: 2, flexShrink: 0 }} />{stage.label}</span>);
@@ -4753,7 +4770,7 @@ function AccountForm({ acc, accounts, onSave, known = [], onUsage }) {
     <AddrPair postale={f.adressePostale || ""} livraison={f.adresseLivraison || ""} identique={f.livraisonIdentique} onPostale={(v) => up("adressePostale", v)} onLivraison={(v) => up("adresseLivraison", v)} onIdentique={(b) => up("livraisonIdentique", b)} onCoords={(lat, lng) => setF((p) => ({ ...p, lat, lng }))} known={known} />
     <div className="row2"><div className="fld"><label>Site web</label><input value={f.site || ""} onChange={(e) => up("site", e.target.value)} placeholder="https://… (sinon laissez vide)" /></div><div className="fld"><label>Facebook</label><input value={f.facebook || ""} onChange={(e) => up("facebook", e.target.value)} placeholder="URL de la page" /></div></div>
     <div className="fld"><label>Instagram</label><input value={f.instagram || ""} onChange={(e) => up("instagram", e.target.value)} placeholder="URL du compte" /><span style={{ fontSize: 11, color: "var(--muted)" }}>Le lien de la fiche utilise le site web, sinon Facebook, sinon Instagram, sinon une recherche Google. La « Recherche IA » de la fiche peut les retrouver automatiquement.</span></div>
-    <div className="fld"><label>Notes</label><textarea rows={2} value={f.notes} onChange={(e) => up("notes", e.target.value)} /></div>
+    <div className="fld"><label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>Notes <MicDictate title="Dicter une note au micro" onText={(t) => up("notes", ((f.notes || "").trim() + (f.notes && f.notes.trim() ? " " : "") + t))} /></label><textarea rows={2} value={f.notes} onChange={(e) => up("notes", e.target.value)} /></div>
     <div className="fld"><label>Étiquettes <span style={{ color: "var(--muted)", fontWeight: 400 }}>(catégorisation libre)</span></label>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
         {(f.tags || []).map((t) => <span key={t} style={{ fontSize: 11.5, fontWeight: 700, color: "#6d28d9", background: "#f3ecff", border: "1px solid #ddd0fb", borderRadius: 20, padding: "2px 4px 2px 9px", display: "inline-flex", alignItems: "center", gap: 3 }}>#{t}<button type="button" onClick={() => up("tags", (f.tags || []).filter((x) => x !== t))} title="Retirer" style={{ border: "none", background: "none", cursor: "pointer", color: "#6d28d9", padding: 0, display: "inline-flex" }}><X size={13} /></button></span>)}
@@ -6950,7 +6967,7 @@ function Prospection({ data, persist, go }) {
       <div className="row2"><div className="fld"><label>Département</label><input value={edit.departement} onChange={(e) => upE("departement", e.target.value)} placeholder="82 Tarn-et-Garonne" /></div><div className="fld"><label>Région</label><input value={edit.region} onChange={(e) => upE("region", e.target.value)} placeholder="Occitanie" /></div></div>
       <div className="row2"><div className="fld"><label>Téléphone</label><input value={edit.telephone} onChange={(e) => upE("telephone", e.target.value)} /></div><div className="fld"><label>Site web</label><input value={edit.site} onChange={(e) => upE("site", e.target.value)} placeholder="https://…" />{edit.site && edit.site.trim() && <a className="lnk" href={ensureHttp(edit.site)} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, marginTop: 4, display: "inline-flex", alignItems: "center", gap: 4 }}><ExternalLink size={12} /> Ouvrir {cleanDomain(edit.site) || "le site"}</a>}</div></div>
       <div className="row2"><div className="fld"><label>Statut de prospection</label><select value={edit.statut} onChange={(e) => upE("statut", e.target.value)}>{Object.entries(PROSPECT_STATUT).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div><div className="fld"><label>Potentiel</label><select value={edit.potentiel} onChange={(e) => upE("potentiel", e.target.value)}><option value="">— à évaluer —</option>{Object.entries(POTENTIEL_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div></div>
-      <div className="fld"><label>Notes</label><textarea rows={3} value={edit.notes} onChange={(e) => upE("notes", e.target.value)} /></div>
+      <div className="fld"><label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>Notes <MicDictate title="Dicter une note au micro" onText={(t) => upE("notes", ((edit.notes || "").trim() + (edit.notes && edit.notes.trim() ? " " : "") + t))} /></label><textarea rows={3} value={edit.notes} onChange={(e) => upE("notes", e.target.value)} /></div>
       <div className="fld"><label>Étiquettes <span style={{ color: "var(--muted)", fontWeight: 400 }}>(catégorisation libre — ex. « Salon 2026 », « Prioritaire Q3 »)</span></label>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
           {(edit.tags || []).map((t) => <span key={t} style={{ fontSize: 11.5, fontWeight: 700, color: "#6d28d9", background: "#f3ecff", border: "1px solid #ddd0fb", borderRadius: 20, padding: "2px 4px 2px 9px", display: "inline-flex", alignItems: "center", gap: 3 }}>#{t}<button type="button" onClick={() => upE("tags", (edit.tags || []).filter((x) => x !== t))} title="Retirer" style={{ border: "none", background: "none", cursor: "pointer", color: "#6d28d9", padding: 0, display: "inline-flex" }}><X size={13} /></button></span>)}
@@ -9076,7 +9093,7 @@ function EventForm({ event, accounts, onSave, onDelete, isExisting }) {
     <div className="row2"><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div><div className="fld"><label>Heure (optionnel)</label><input type="time" value={f.heure} onChange={(e) => up("heure", e.target.value)} /></div></div>
     <div className="fld"><label>Groupe / établissement lié (optionnel)</label><select value={f.accountId} onChange={(e) => up("accountId", e.target.value)}><option value="">Aucune</option><AccountOptions accounts={accounts} /></select></div>
     <div className="fld"><label>Couleur (par défaut selon le type, modifiable)</label><div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>{["#22C55E", "#3F60AA", "#0EA5A4", "#2563EB", "#F59E0B", "#A855F7", "#0891B2", "#EC4899", "#EF4444", "#475569", "#94A3B8"].map((c) => <button key={c} type="button" onClick={() => up("color", c)} style={{ width: 28, height: 28, borderRadius: 8, background: c, border: f.color === c ? "3px solid var(--ink)" : "1px solid var(--line)", cursor: "pointer" }} />)}<span style={{ fontSize: 11, color: "var(--muted)" }}>{f.color === EVENT_TYPES[f.type]?.color ? "couleur du type" : "couleur personnalisée"}</span></div></div>
-    <div className="fld"><label>Notes</label><textarea rows={3} value={f.notes} onChange={(e) => up("notes", e.target.value)} placeholder="Détails, points à préparer, lien de visio…" /></div>
+    <div className="fld"><label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>Notes <MicDictate title="Dicter une note au micro" onText={(t) => up("notes", ((f.notes || "").trim() + (f.notes && f.notes.trim() ? " " : "") + t))} /></label><textarea rows={3} value={f.notes} onChange={(e) => up("notes", e.target.value)} placeholder="Détails, points à préparer, lien de visio…" /></div>
     <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>{isExisting ? <button className="btn btn-r btn-s" onClick={onDelete}><Trash2 size={14} /> Supprimer</button> : <span />}<button className="btn btn-p" onClick={() => onSave(f)} disabled={!f.titre || !f.date}>Enregistrer</button></div>
   </>);
 }
