@@ -2230,6 +2230,34 @@ ${ACCENT_CSS}
   /* Rangée d'actions des fiches : boutons compacts qui remplissent la largeur au lieu d'un mur vertical */
   .tile-actions{gap:6px;}
   .tile-actions .btn{flex:1 1 auto;min-width:0;justify-content:center;padding:8px 10px;font-size:12px;}
+  /* Pas de défilement horizontal parasite de la page sur téléphone */
+  html,body{overflow-x:hidden;}
+  /* Cibles tactiles confortables (recommandations mobiles) */
+  .btn{min-height:42px;}
+  .btn-s{min-height:36px;}
+  .chip,.chip-all{min-height:34px;}
+  .fld input,.fld select,.fld textarea,.fld .combo input{min-height:42px;font-size:14px;}
+  /* Filtres en pastilles : bandeau horizontal défilant plutôt qu'un empilement (gain de hauteur) */
+  .filtbar .grp{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;max-width:100%;padding-bottom:2px;}
+  .filtbar .grp::-webkit-scrollbar{display:none;}
+  .filtbar .grp>*{flex:0 0 auto;}
+  /* Barre d'actions groupées : bandeau bas défilant horizontalement, jamais tronqué */
+  .bulkbar{left:8px!important;right:8px!important;transform:none!important;max-width:none!important;flex-wrap:nowrap!important;overflow-x:auto;-webkit-overflow-scrolling:touch;justify-content:flex-start!important;bottom:10px!important;}
+  .bulkbar::-webkit-scrollbar{display:none;}
+  .bulkbar>*{flex:0 0 auto;}
+  /* Tableaux : défilement horizontal interne au lieu de déborder la page */
+  .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+}
+@media(max-width:480px){
+  /* Format Galaxy S25 Ultra (~480px de large en portrait) : lecture confortable en une colonne */
+  .main{padding:0 11px 64px;}
+  .topbar h2,.topbar h2.pu-display{font-size:19px;}
+  .card{padding:13px;border-radius:14px;}
+  .sec-h h3{font-size:15px;}
+  /* Grilles de tuiles compactes ramenées à une seule colonne pour éviter les 2 colonnes serrées */
+  .main [style*="minmax(238px"],.main [style*="minmax(230px"],.main [style*="minmax(220px"],.main [style*="minmax(210px"],.main [style*="minmax(200px"]{grid-template-columns:1fr!important;}
+  /* Réduit l'écart des grilles pour densifier verticalement */
+  .main [style*="repeat(auto-fill"]{gap:10px!important;}
 }
 @media print{
 /* Impression d'un document (devis / commande / facture) : on imprime UNIQUEMENT le document. */
@@ -6789,7 +6817,7 @@ function Prospection({ data, persist, go }) {
       </div>); })}
     </>)}
     {selMode && selCount > 0 && view === "actifs" && (
-      <div style={{ position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: 18, zIndex: 40, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "center", maxWidth: "min(960px, 94vw)", background: "var(--card)", border: "1px solid var(--line)", borderRadius: 14, boxShadow: "0 12px 40px rgba(20,32,58,.28)", padding: "10px 14px" }}>
+      <div className="bulkbar" style={{ position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: 18, zIndex: 40, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "center", maxWidth: "min(960px, 94vw)", background: "var(--card)", border: "1px solid var(--line)", borderRadius: 14, boxShadow: "0 12px 40px rgba(20,32,58,.28)", padding: "10px 14px" }}>
         <span style={{ fontWeight: 800, fontSize: 13 }}>{selCount} sélectionné{selCount > 1 ? "s" : ""}</span>
         <span style={{ width: 1, height: 22, background: "var(--line)" }} />
         <select value="" onChange={(e) => { if (e.target.value) { bulkPatch({ statut: e.target.value }); e.target.value = ""; } }} title="Changer le statut de prospection" style={{ padding: "7px 9px", borderRadius: 9, border: "1px solid var(--line)", fontFamily: "inherit", fontSize: 12.5, background: "#fff" }}><option value="">Statut…</option>{Object.entries(PROSPECT_STATUT).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select>
