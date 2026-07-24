@@ -723,7 +723,26 @@ function seedTickets() {
     { id: "t2", date: "2026-05-22", canal: "produit", accountId: "acc_kingjouet", code: "PU3D-STYLO", gravite: "majeur", statut: "en_cours", titre: "Stylo qui chauffe (signalement client final)", description: "Remonté par l'établissement test.", resolution: "", dateResolution: "" },
   ];
 }
-const SETTINGS = { myEmail: "matthis-anael@penup3d.com", tva: 20, theme: "light", coefTarget: 2.2, coefMax: 2.4, coefBasisTTC: true, fxSpot: 0.89, fxMargin: 7, fxDate: "", fxSource: "défaut" };
+// Séquences de relance (cadences façon HubSpot) : modèles multi-étapes qu'on « enrôle » sur un contact,
+// ce qui planifie automatiquement les relances (événements) à J+offset.
+const DEFAULT_SEQUENCES = [
+  { id: "seq_decouverte", name: "Découverte (premier contact)", steps: [
+    { offset: 0, type: "relance", titre: "E-mail de présentation PEN'UP 3D" },
+    { offset: 3, type: "appel", titre: "Appel de suivi" },
+    { offset: 7, type: "relance", titre: "E-mail de relance + proposition d'échantillon" },
+    { offset: 14, type: "relance", titre: "Dernière relance découverte" },
+  ] },
+  { id: "seq_devis", name: "Relance devis", steps: [
+    { offset: 2, type: "relance", titre: "Confirmer la bonne réception du devis" },
+    { offset: 7, type: "appel", titre: "Appel de closing" },
+    { offset: 14, type: "relance", titre: "Relance finale du devis" },
+  ] },
+  { id: "seq_reassort", name: "Réassort / fidélisation", steps: [
+    { offset: 30, type: "relance", titre: "Prise de nouvelles + proposition de réassort" },
+    { offset: 45, type: "appel", titre: "Appel réassort" },
+  ] },
+];
+const SETTINGS = { myEmail: "matthis-anael@penup3d.com", tva: 20, theme: "light", coefTarget: 2.2, coefMax: 2.4, coefBasisTTC: true, fxSpot: 0.89, fxMargin: 7, fxDate: "", fxSource: "défaut", sequences: DEFAULT_SEQUENCES };
 function buildSeed() { return { products: seedProducts(), accounts: seedAccounts(), contacts: seedContacts(), interactions: seedInteractions(), deals: seedDeals(), tickets: seedTickets(), sites: seedSites(), attachments: {}, events: [], rotations: {}, settings: { ...SETTINGS }, _imported: "Seed initial (export WMS du 28/05/2026)" }; }
 // Etat de depart REEL : tout vide, et toutes les migrations de demo neutralisees
 // (drapeaux a true) pour ne jamais reinjecter de donnees fictives. Le seed n'est
@@ -4743,7 +4762,23 @@ function ContactForm({ contact, accounts, contacts, onSave, known = [], sites = 
     <div style={{ display: "flex", justifyContent: "flex-end" }}><button className="btn btn-p" onClick={() => onSave({ ...f, siteIds: [...new Set([...(f.siteIds || []), ...(f.siteId ? [f.siteId] : [])])].filter((id) => id && id !== f.siteId) })}>Enregistrer</button></div>
   </>);
 }
+// Enrôlement dans une séquence de relance : planifie les relances (événements) à J+offset.
+function SequenceEnrollModal({ contact, sequences, onClose, onEnroll }) {
+  const seqs = sequences && sequences.length ? sequences : DEFAULT_SEQUENCES;
+  const [seqId, setSeqId] = useState(seqs[0] ? seqs[0].id : ""); const [start, setStart] = useState(TODAY());
+  const seq = seqs.find((s) => s.id === seqId) || seqs[0];
+  const base = new Date((start || TODAY()) + "T00:00:00");
+  const steps = ((seq && seq.steps) || []).map((st) => ({ ...st, date: isoLocal(new Date(base.getTime() + (Number(st.offset) || 0) * 86400000)) }));
+  return (<Modal title={"Séquence de relance — " + fullName(contact)} onClose={onClose}>
+    <div className="row2"><div className="fld"><label>Séquence</label><select value={seqId} onChange={(e) => setSeqId(e.target.value)}>{seqs.map((s) => <option key={s.id} value={s.id}>{s.name} · {s.steps.length} étapes</option>)}</select></div><div className="fld"><label>Date de départ</label><input type="date" value={start} onChange={(e) => setStart(e.target.value)} /></div></div>
+    <div style={{ marginTop: 6, fontSize: 11.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3, marginBottom: 6 }}>Relances qui seront planifiées</div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{steps.map((st, i) => { const m = EVENT_TYPES[st.type] || EVENT_TYPES.relance; return (<div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", border: "1px solid var(--line)", borderRadius: 10 }}><span style={{ fontSize: 15 }}>{m.icon}</span><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 700, fontSize: 13 }}>{st.titre}</div><div style={{ fontSize: 11.5, color: "var(--muted)" }}>{st.date} · J+{st.offset}</div></div></div>); })}</div>
+    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}><button className="btn btn-g" onClick={onClose}>Annuler</button><button className="btn btn-p" disabled={!seq || !steps.length} onClick={() => onEnroll(seq, steps)}><Zap size={15} /> Enrôler ({steps.length})</button></div>
+  </Modal>);
+}
 function Fiche({ c, account, data, myEmail, settings, deals, interactions, onBack, onEdit, onDelete, onTogglePrincipal, onSaveContact, go, onGoEnseigne, onGoSite, persist, editModal }) {
+  const [seqOpen, setSeqOpen] = useState(false);
+  const enrollSequence = (seq, steps) => { const evs = steps.map((st, i) => ({ id: uid("ev_"), date: st.date, heure: "", titre: st.titre, notes: "Séquence « " + seq.name + " » — étape " + (i + 1) + "/" + steps.length + ".", type: st.type, color: (EVENT_TYPES[st.type] || EVENT_TYPES.relance).color, accountId: c.accountId || "", siteId: c.siteId || "", contactId: c.id, seqId: seq.id, seqStep: i })); persist((p) => ({ ...p, events: [...(p.events || []), ...evs] })); setSeqOpen(false); };
   const [addInt, setAddInt] = useState(false);
   const [intEdit, setIntEdit] = useState(null); const [intView, setIntView] = useState(null); const [syncing, setSyncing] = useState(false); const [syncMsg, setSyncMsg] = useState(null); const [enr, setEnr] = useState(false); const [enrMsg, setEnrMsg] = useState(null); const [preview, setPreview] = useState(null); const [vcardOpen, setVcardOpen] = useState(false); const [msgOpen, setMsgOpen] = useState(false); const [eventEdit, setEventEdit] = useState(null); const [eventView, setEventView] = useState(null);
   const rm = ROLE_META[c.role] || ROLE_META.autre; const dealsVal = deals.reduce((s, d) => s + d.montant, 0); const lastEch = interactions[0]?.date; const ens = account?.enseigne || "";
@@ -4792,7 +4827,7 @@ function Fiche({ c, account, data, myEmail, settings, deals, interactions, onBac
     <div className="card" style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}><EntityPhoto value={c.photo || ""} onChange={(url) => onSaveContact({ ...c, photo: url })} initials={<Silhouette gender={guessGender(c)} size={36} />} bg={avColor(fullName(c))} round size={68} enseigne={[fullName(c), ens].filter(Boolean).join(" ")} groupLogo={account && account.logo} fallback={contactEtabLogo(c, account, data.sites)} linkedinHref={linkedinSearch(c, ens)} persistUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} />
         <div style={{ flex: 1, minWidth: 200 }}><div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}><h2 className="pu-display" style={{ margin: 0, fontSize: 22 }}>{fullName(c)}</h2>{(() => { const grp = account && isGroupe(account); const site = c.siteId ? (data.sites || []).find((s) => s.id === c.siteId) : null; return (<span style={{ display: "inline-flex", gap: 2, alignItems: "center" }}>{grp && <button className="star" title={c.principal ? "Favori du groupe — cliquer pour retirer" : "Définir comme favori du groupe"} onClick={() => onSaveContact({ ...c, principal: !c.principal })}><FavStar kind="groupe" size={18} on={!!c.principal} /></button>}{(!grp || site) && <button className="star" title={(grp ? c.principalEtab : c.principal) ? "Favori de l'établissement — cliquer pour retirer" : "Définir comme favori de l'établissement"} onClick={() => grp ? onSaveContact({ ...c, principalEtab: !c.principalEtab }) : onSaveContact({ ...c, principal: !c.principal })}><FavStar kind="etab" size={18} on={grp ? !!c.principalEtab : !!c.principal} /></button>}</span>); })()}</div><div style={{ color: "var(--muted)", marginTop: 3 }}>{c.fonction || "—"} · <span className="lnk" onClick={onGoEnseigne}>{ens}</span></div><div style={{ marginTop: 9 }}><Badge color={rm.color}>{rm.label}</Badge></div></div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{(c.mobile || c.fixe) && <button className="btn btn-p" onClick={() => callContact()} title="Appeler ce contact et journaliser l'appel"><Phone size={15} /> Appeler</button>}<a className="btn btn-g" href={linkedinSearch(c, ens)} target="_blank" rel="noreferrer"><Linkedin size={15} /> LinkedIn</a><button className="btn btn-g" onClick={enrichir} disabled={enr}><Sparkles size={15} className={enr ? "spin" : ""} /> {enr ? "Recherche…" : "Enrichir (web)"}</button><button className="btn btn-g" onClick={() => setMsgOpen(true)} title="Rédiger un e-mail ou message LinkedIn avec l'IA"><MessageSquare size={15} /> Message IA</button><button className="btn btn-g" onClick={() => setVcardOpen(true)} title="Carte de visite / QR code"><Copy size={15} /> vCard</button><button className="btn btn-g" onClick={onEdit}><Pencil size={15} /></button><button className="btn btn-d" onClick={onDelete}><Trash2 size={15} /></button></div></div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{(c.mobile || c.fixe) && <button className="btn btn-p" onClick={() => callContact()} title="Appeler ce contact et journaliser l'appel"><Phone size={15} /> Appeler</button>}<button className="btn btn-g" onClick={() => setSeqOpen(true)} title="Enrôler ce contact dans une séquence de relance (cadence)"><Zap size={15} /> Séquence</button><a className="btn btn-g" href={linkedinSearch(c, ens)} target="_blank" rel="noreferrer"><Linkedin size={15} /> LinkedIn</a><button className="btn btn-g" onClick={enrichir} disabled={enr}><Sparkles size={15} className={enr ? "spin" : ""} /> {enr ? "Recherche…" : "Enrichir (web)"}</button><button className="btn btn-g" onClick={() => setMsgOpen(true)} title="Rédiger un e-mail ou message LinkedIn avec l'IA"><MessageSquare size={15} /> Message IA</button><button className="btn btn-g" onClick={() => setVcardOpen(true)} title="Carte de visite / QR code"><Copy size={15} /> vCard</button><button className="btn btn-g" onClick={onEdit}><Pencil size={15} /></button><button className="btn btn-d" onClick={onDelete}><Trash2 size={15} /></button></div></div>
       {enrMsg && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 8 }}>{enrMsg}</div>}
       <div style={{ display: "flex", gap: 26, marginTop: 16, flexWrap: "wrap", borderTop: "1px solid var(--line)", paddingTop: 14 }}><Stat label="Échanges" value={interactions.length} /><Stat label="Dernier contact" value={lastEch || "—"} /><Stat label="Documents" value={deals.length} /><Stat label="Valeur cumulée" value={eur(dealsVal)} /></div>
     </div>
@@ -4819,6 +4854,7 @@ function Fiche({ c, account, data, myEmail, settings, deals, interactions, onBac
       <div style={{ textAlign: "center" }}><img src={"https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=" + encodeURIComponent(vcf)} alt="QR contact" width={220} height={220} style={{ borderRadius: 12, border: "1px solid var(--line)" }} /><div style={{ fontSize: 12.5, color: "var(--muted)", margin: "10px 0 14px", lineHeight: 1.5 }}>Scannez ce QR code avec l'appareil photo de votre téléphone pour enregistrer {fullName(c)} dans vos contacts, ou téléchargez la fiche vCard.</div><div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}><button className="btn btn-p" onClick={dl}><Download size={15} /> Télécharger le contact</button>{orgVcf && <button className="btn btn-g" onClick={dlOrg} title={"Télécharger la société « " + account.enseigne + " » en vCard"}><Download size={15} /> Télécharger la société</button>}</div></div>
     </Modal>); })()}
     {msgOpen && <MessageComposer account={account} site={c.siteId ? (data.sites || []).find((x) => x.id === c.siteId) : null} contacts={[c, ...(c.accountId ? data.contacts.filter((x) => x.accountId === c.accountId && x.id !== c.id) : [])]} defaultContactId={c.id} data={data} persist={persist} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onClose={() => setMsgOpen(false)} />}
+    {seqOpen && <SequenceEnrollModal contact={c} sequences={(data.settings || {}).sequences} onClose={() => setSeqOpen(false)} onEnroll={enrollSequence} />}
     {editModal}
   </div>);
 }
