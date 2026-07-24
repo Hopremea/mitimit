@@ -7640,7 +7640,7 @@ function SalaireRH({ data, persist }) {
           <Line l="Salaire de base" sub={"(" + SAL_BASE_HOURS + " h × " + eur2(Number(tauxBase) || 0) + ")"} v={eur2(r.base)} />
           <Line l="Heures sup. +25 %" sub={"(" + h25 + " h × " + eur2(r.t25) + ")"} v={eur2(r.hs25)} />
           <Line l="Heures sup. +50 %" sub={"(" + h50 + " h × " + eur2(r.t50) + ")"} v={eur2(r.hs50)} />
-          {(!kmTouched && deplTotalMois > 0) ? (<><Line l="Prime domicile-travail (50 %)" v={eur2(domicilePrime)} /><Line l="Remboursement déplacements (100 %)" v={eur2(deplTotalMois)} /></>) : <Line l="Prime (indemnités km)" v={eur2(r.prime)} />}
+          {(!kmTouched && deplTotalMois > 0) ? (<><Line l="Prime domicile-travail (50 %)" v={eur2(domicilePrime)} /><Line l="Remboursement de frais professionnels – non soumis à cotisations" v={eur2(deplTotalMois)} /></>) : <Line l="Prime (indemnités km)" v={eur2(r.prime)} />}
           {(Number(comm) || 0) > 0 && <Line l="Commission commerciale" sub="(4 % référencement / 2 % réassort)" v={eur2(r.commission)} color="var(--green)" />}
           <div style={{ borderTop: "1px solid var(--line)", margin: "6px 0" }} />
           <Line l="Salaire brut" v={eur2(r.brut)} strong />
