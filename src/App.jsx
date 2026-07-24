@@ -1587,13 +1587,15 @@ function dealDocCode(data, d) {
 }
 function pdvForecast(data) {
   const map = {};
-  (data.deals || []).filter((d) => d.type === "Commande" && (d.statut === "livre" || d.statut === "accepte" || d.statut === "expediee")).forEach((d) => { (d.lines || []).forEach((l) => { const k = d.accountId + "|" + l.code; if (!map[k]) map[k] = { accountId: d.accountId, code: l.code, designation: l.designation, qte: 0, last: "" }; map[k].qte += l.qte || 0; if ((d.date || "") > map[k].last) map[k].last = d.date; }); });
+  (data.deals || []).filter(isCaSigne).forEach((d) => { (d.lines || []).forEach((l) => { const k = d.accountId + "|" + l.code; if (!map[k]) map[k] = { accountId: d.accountId, code: l.code, designation: l.designation, qte: 0, last: "" }; map[k].qte += l.qte || 0; if ((d.date || "") > map[k].last) map[k].last = d.date; }); });
   const today = new Date();
   return Object.values(map).map((m) => { const rotKey = m.accountId + ":" + m.code; const rot = (data.rotations && data.rotations[rotKey] != null) ? data.rotations[rotKey] : Math.max(1, Math.round(m.qte / 2)); const monthsElapsed = m.last ? Math.max(0, (today - new Date(m.last)) / (1000 * 60 * 60 * 24 * 30.44)) : 0; const stockEst = Math.max(0, m.qte - rot * monthsElapsed); const daysLeft = rot > 0 ? Math.round(stockEst / (rot / 30.44)) : null; return { ...m, rotKey, rot, stockEst: Math.round(stockEst), daysLeft }; });
 }
 // Moteur des indicateurs de pilotage du modèle rasoir/lame. Chaque KPI porte un état: "ok" (calculable), "partiel" (calcul dégradé, donnée manquante), "todo" (plomberie en place, à activer).
 function computeKPIs(data) {
-  const ventes = (data.deals || []).filter((d) => (d.type === "Commande") && (d.statut === "livre" || d.statut === "accepte" || d.statut === "expediee"));
+  // Ventes réalisées = tout document (commande OU facture) accepté/expédié/livré (même logique que le CA signé
+  // du tableau de bord) — une facture livrée est bien une vente, elle était à tort exclue.
+  const ventes = (data.deals || []).filter(isCaSigne);
   const prodByCode = {}; (data.products || []).forEach((p) => { prodByCode[p.code] = p; });
   // Volumes et CA par catégorie
   let uStylo = 0, uConso = 0, caStylo = 0, caConso = 0, caAutre = 0, margeStylo = 0, margeConso = 0, coutsConnus = true;
