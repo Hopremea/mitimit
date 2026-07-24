@@ -2321,6 +2321,35 @@ body:not(.doc-print) .print-area{position:absolute!important;left:0;top:0;width:
   .cal-ev:hover{transform:translateY(-1px);box-shadow:0 4px 10px rgba(20,32,58,.10);}
   .drop:hover{transform:translateY(-1px);}
   .photo-menu button:hover{transform:translateX(2px);}
+  /* ===== Effets de survol enrichis — grossissement, reflet, secousse, chiffres en gras (tous thèmes) ===== */
+  /* Grossissement (accentué sur les formes longilignes : boutons, tuiles, lignes, badges) */
+  .btn:not(:disabled):hover{transform:translateY(-1px) scale(1.025);}
+  .btn-ai:not(:disabled):hover{transform:translateY(-1px) scale(1.035);}
+  .btn-save:hover{transform:translateY(-1px) scale(1.02);}
+  .hrow{transition:background .12s ease,transform .16s cubic-bezier(.2,.8,.2,1),box-shadow .18s ease;}
+  .hrow:hover{transform:scale(1.012);box-shadow:0 4px 14px rgba(20,32,58,.10);position:relative;z-index:1;}
+  .pu-root.dark .hrow:hover{box-shadow:0 4px 14px rgba(0,0,0,.4);}
+  .tile:hover{transform:translateY(-3px) scale(1.012);}
+  .kpi{transition:transform .18s cubic-bezier(.2,.8,.2,1),box-shadow .18s ease;}
+  .kpi:hover{transform:translateY(-2px) scale(1.014);box-shadow:0 12px 26px rgba(20,32,58,.12);}
+  .pu-root.dark .kpi:hover{box-shadow:0 12px 26px rgba(0,0,0,.45);}
+  .funbar{transition:transform .16s cubic-bezier(.2,.8,.2,1),filter .16s ease,box-shadow .16s ease;cursor:default;}
+  .funbar:hover{transform:scale(1.02);filter:brightness(1.07) saturate(1.06);box-shadow:0 6px 18px rgba(20,32,58,.22);}
+  .badge{transition:transform .18s cubic-bezier(.34,1.56,.64,1);}
+  .badge:hover{transform:scale(1.09);}
+  /* Reflet qui balaie de droite à gauche */
+  .btn,.btn-save,.tile,.badge,.kpi{position:relative;overflow:hidden;}
+  .btn::after,.btn-save::after,.tile::after,.badge::after,.kpi::after{content:"";position:absolute;top:-12%;bottom:-12%;width:42%;left:120%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.5),transparent);transform:skewX(-16deg);pointer-events:none;opacity:0;z-index:3;}
+  .btn:not(:disabled):hover::after,.btn-save:hover::after,.tile:hover::after,.badge:hover::after,.kpi:hover::after{animation:shineLR .6s ease;}
+  @keyframes shineLR{0%{left:120%;opacity:0;}15%{opacity:1;}100%{left:-70%;opacity:0;}}
+  /* Secousse / vibration */
+  @keyframes shakeX{0%,100%{transform:translateX(0);}18%{transform:translateX(-2px);}38%{transform:translateX(2px);}58%{transform:translateX(-1.5px);}78%{transform:translateX(1.5px);}}
+  @keyframes iconWiggle{0%,100%{transform:translateY(-1px) scale(1.06) rotate(0);}25%{transform:translateY(-1px) scale(1.06) rotate(-8deg);}75%{transform:translateY(-1px) scale(1.06) rotate(8deg);}}
+  .iconbtn:not(:disabled):hover{animation:iconWiggle .34s ease;}
+  .dup-warn:hover,.alert-shake:hover{animation:shakeX .42s ease;}
+  /* Chiffres en gras au survol (tuiles du tableau de bord, lignes de liste) — !important pour battre le poids inline */
+  .tile:hover .tnum,.hrow:hover .tnum,.kpi:hover .val,.kpi:hover .tnum{font-weight:800!important;}
+  .tnum:hover{font-weight:900!important;}
 }
 @media (prefers-reduced-motion: no-preference){
   .pu-root.dark .btn-g:not(:disabled):hover,
@@ -2898,7 +2927,7 @@ function FunnelTile({ accounts, go }) {
           <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ width: 130, flexShrink: 0, textAlign: "right", fontSize: 12.5, fontWeight: 700, color: "var(--ink)" }}>{r.label}</div>
             <div style={{ flex: 1, display: "flex", justifyContent: "center" }}>
-              <div title={r.count + " établissement(s) · " + pct(r.count) + "%"} style={{ width: w + "%", minWidth: 60, height: 42, borderRadius: 9, background: r.count ? r.color : "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, color: r.count ? onColor(r.color) : "var(--muted)", boxShadow: r.count ? "0 2px 8px " + r.color + "55" : "none", transition: "width .55s cubic-bezier(.22,1,.36,1)" }}>
+              <div className="funbar" title={r.count + " établissement(s) · " + pct(r.count) + "%"} style={{ width: w + "%", minWidth: 60, height: 42, borderRadius: 9, background: r.count ? r.color : "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, color: r.count ? onColor(r.color) : "var(--muted)", boxShadow: r.count ? "0 2px 8px " + r.color + "55" : "none", transition: "width .55s cubic-bezier(.22,1,.36,1), transform .16s cubic-bezier(.2,.8,.2,1), filter .16s ease" }}>
                 <span className="pu-display tnum" style={{ fontSize: 18, fontWeight: 800 }}>{r.count}</span>
                 <span style={{ fontSize: 11, opacity: .85 }}>{pct(r.count)}%</span>
               </div>
@@ -3175,7 +3204,7 @@ function Dashboard({ data, go }) {
     })()}
     <div className="card" style={{ marginBottom: 18 }}><div className="sec-h"><h3 className="pu-display">CA HT en attente par compte</h3><span>devis</span></div>{byEnseigne.length === 0 ? <div className="empty">Aucun devis en attente.</div> : <ResponsiveContainer width="100%" height={220}><BarChart data={byEnseigne} layout="vertical" margin={{ left: 8, right: 16 }}><XAxis type="number" hide /><YAxis type="category" dataKey="name" width={84} tick={{ fontSize: 12, fill: "#6b7589" }} axisLine={false} tickLine={false} /><Tooltip formatter={(v) => eur(v)} cursor={{ fill: "#f4f6fb" }} /><Bar dataKey="value" radius={[0, 8, 8, 0]} barSize={22}>{byEnseigne.map((e, i) => <Cell key={i} fill={e.color} />)}</Bar></BarChart></ResponsiveContainer>}</div>
     <DashSection icon={Boxes} color="#F8B133" title="Stock & approvisionnement" note="valeur en stock & risques de rupture" />
-    {pdvAlerts.length > 0 && (<div className="card" style={{ marginBottom: 18, borderLeft: "4px solid var(--amber)" }}><div className="sec-h"><h3 className="pu-display">Risques de rupture chez vos clients</h3><span>estimation, à calibrer dans Réassort clients</span></div><div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{pdvAlerts.map((f, i) => { const c = f.daysLeft <= 7 ? "var(--red)" : "var(--amber)"; return (<div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}><AlertTriangle size={16} style={{ color: c, flexShrink: 0 }} /><div style={{ fontSize: 13 }}><strong>{accName(f.accountId)}</strong> : risque de rupture <strong>{f.designation}</strong> {f.daysLeft <= 0 ? "imminente" : `dans ${f.daysLeft} j`}.</div></div>); })}</div></div>)}
+    {pdvAlerts.length > 0 && (<div className="card" style={{ marginBottom: 18, borderLeft: "4px solid var(--amber)" }}><div className="sec-h"><h3 className="pu-display">Risques de rupture chez vos clients</h3><span>estimation, à calibrer dans Réassort clients</span></div><div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{pdvAlerts.map((f, i) => { const c = f.daysLeft <= 7 ? "var(--red)" : "var(--amber)"; return (<div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}><AlertTriangle size={16} style={{ color: c, flexShrink: 0 }} /><div style={{ fontSize: 13 }}><strong className="lnk" style={{ fontSize: 13 }} onClick={() => go("accounts", f.accountId)}>{accName(f.accountId)}</strong> : risque de rupture <strong>{f.designation}</strong> {f.daysLeft <= 0 ? "imminente" : `dans ${f.daysLeft} j`}.</div></div>); })}</div></div>)}
     <div className="card" style={{ marginBottom: 18 }}><div className="sec-h"><h3 className="pu-display">Valeur de stock</h3><span>par famille</span></div><ResponsiveContainer width="100%" height={220}><PieChart><Pie data={byFamille} dataKey="value" nameKey="name" innerRadius={52} outerRadius={86} paddingAngle={2}>{byFamille.map((e, i) => <Cell key={i} fill={e.color} />)}</Pie><Tooltip formatter={(v) => eur(v)} /></PieChart></ResponsiveContainer><div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>{byFamille.map((f) => <span key={f.name} style={{ fontSize: 11.5, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 5 }}><i className="dot" style={{ background: f.color }} />{f.name}</span>)}</div></div>
     <DashSection icon={CalendarDays} color="#2bb673" title="À venir" note="prochaines actions planifiées" />
     <div className="card"><div className="sec-h"><h3 className="pu-display">Prochaines actions</h3><span>par échéance</span></div>{actions.length === 0 ? <div className="empty">Aucune action planifiée.</div> : actions.map((a) => (<div key={a.id} className="hrow" style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 0", borderBottom: "1px solid #f0f3f9" }}><div style={{ width: 30, height: 30, borderRadius: 9, background: "var(--blue-l)", color: "var(--blue)", display: "grid", placeItems: "center" }}><Calendar size={15} /></div><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600, fontSize: 13 }}>{a.prochaineAction}</div><div className="lnk" style={{ fontSize: 11.5 }} onClick={() => go("accounts", a.id)}>{a.enseigne}</div></div>{(() => { const n = daysFromToday(a.dateAction); const late = n != null && n < 0; return <span style={{ fontSize: 11.5, color: late ? "var(--red)" : "var(--muted)", fontWeight: late ? 700 : 400, textAlign: "right" }} className="tnum">{a.dateAction ? relDate(a.dateAction) : "—"}{a.dateAction && <><br /><span style={{ fontSize: 10, opacity: .7, fontWeight: 400 }}>{a.dateAction}</span></>}</span>; })()}</div>))}</div>
@@ -3828,7 +3857,7 @@ function AccountDetail({ account, data, persist, go, onBack, onEdit, onAddContac
         {a.notes && <div style={{ marginTop: 12, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5, borderTop: "1px solid var(--line)", paddingTop: 12 }}>{a.notes}</div>}
       </div>
       <div className="card"><div className="sec-h"><h3 className="pu-display">Devis, commandes & factures</h3><button className="btn btn-g btn-s" onClick={() => go("deals", null)}><FileText size={14} /> Tous</button></div>
-        {deals.length === 0 ? <div className="empty">Aucun document.</div> : <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Réf.</th><th>Type</th><th>Date</th><th>Statut</th><th style={{ textAlign: "right" }}>Montant</th><th></th></tr></thead><tbody>{deals.map((d) => { const ds = DEAL_STATUS[d.statut] || DEAL_STATUS.brouillon; return (<tr key={d.id}><td style={{ fontWeight: 700 }}>{docRef(d, { code: dealDocCode(data, d) })}</td><td>{d.type}</td><td className="tnum">{d.date}</td><td><Badge color={ds.color}>{ds.label}</Badge></td><td style={{ textAlign: "right", fontWeight: 700 }} className="tnum">{eur(d.montant)}</td><td style={{ textAlign: "right" }}><button className="iconbtn" title="Aperçu" onClick={() => setPreview(d)}><Eye size={15} /></button></td></tr>); })}</tbody></table></div>}
+        {deals.length === 0 ? <div className="empty">Aucun document.</div> : <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Réf.</th><th>Type</th><th>Date</th><th>Statut</th><th style={{ textAlign: "right" }}>Montant</th><th></th></tr></thead><tbody>{deals.map((d) => { const ds = DEAL_STATUS[d.statut] || DEAL_STATUS.brouillon; return (<tr key={d.id} style={{ cursor: "pointer" }} onClick={() => setPreview(d)}><td style={{ fontWeight: 700 }}>{docRef(d, { code: dealDocCode(data, d) })}</td><td>{d.type}</td><td className="tnum">{d.date}</td><td><Badge color={ds.color}>{ds.label}</Badge></td><td style={{ textAlign: "right", fontWeight: 700 }} className="tnum">{eur(d.montant)}</td><td style={{ textAlign: "right" }}><button className="iconbtn" title="Aperçu" onClick={(e) => { e.stopPropagation(); setPreview(d); }}><Eye size={15} /></button></td></tr>); })}</tbody></table></div>}
       </div>
     </div>
     <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", alignItems: "start", marginTop: 16 }}>
