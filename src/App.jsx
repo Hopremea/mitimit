@@ -6122,6 +6122,40 @@ function applyProspectEnrich(x, r) {
   setIf("notes", r.notes);
   return Object.keys(patch).length ? { ...x, ...patch } : x;
 }
+// Sélection des fiches à enrichir : par catégorie (type de prospect) et, si voulu, en limitant le nombre.
+// Évite d'enrichir « toutes » les fiches d'un coup (crédits + temps) — on cible « indépendants », « autres »,
+// « franchisés », etc., et on peut plafonner le nombre traité.
+function EnrichSelectModal({ prospects, onClose, onLaunch }) {
+  const targets = (prospects || []).filter((p) => !p.accountId && (p.nom || p.enseigne || "").trim());
+  const counts = {}; targets.forEach((p) => { const t = p.type || "autre"; counts[t] = (counts[t] || 0) + 1; });
+  const typeKeys = Object.keys(PROSPECT_TYPES).filter((t) => counts[t]);
+  const [sel, setSel] = useState(() => new Set(typeKeys));
+  const [limit, setLimit] = useState("");
+  const toggle = (t) => setSel((s) => { const n = new Set(s); n.has(t) ? n.delete(t) : n.add(t); return n; });
+  const allOn = typeKeys.length > 0 && typeKeys.every((t) => sel.has(t));
+  const selTypes = typeKeys.filter((t) => sel.has(t));
+  const selCount = selTypes.reduce((a, t) => a + counts[t], 0);
+  const lim = parseInt(limit, 10); const capped = lim > 0 ? lim : 0;
+  const finalCount = capped ? Math.min(capped, selCount) : selCount;
+  return (<Modal title="Enrichir les fiches" onClose={onClose}>
+    <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5, marginBottom: 10 }}>Choisissez les <strong>catégories</strong> à enrichir par recherche web IA (e-mails et téléphones manquants en priorité). Vous pouvez aussi <strong>limiter le nombre</strong> de fiches traitées. Rien n'est inventé, à vérifier ensuite.</div>
+    {typeKeys.length === 0 ? <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Aucune fiche prospect à enrichir.</div> : <>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 700, paddingBottom: 8, marginBottom: 8, borderBottom: "1px solid var(--line)" }}><input type="checkbox" checked={allOn} onChange={() => setSel(allOn ? new Set() : new Set(typeKeys))} style={{ width: 15, height: 15 }} /> Toutes les catégories <span style={{ color: "var(--muted)", fontWeight: 600 }}>· {targets.length}</span></label>
+      <div style={{ display: "grid", gap: 6, marginBottom: 12 }}>
+        {typeKeys.map((t) => (<label key={t} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 600 }}>
+          <input type="checkbox" checked={sel.has(t)} onChange={() => toggle(t)} style={{ width: 15, height: 15 }} />
+          <span style={{ width: 10, height: 10, borderRadius: 3, background: PROSPECT_TYPES[t].color, display: "inline-block", flexShrink: 0 }} />
+          {PROSPECT_TYPES[t].label} <span style={{ color: "var(--muted)", fontWeight: 500 }}>· {counts[t]}</span>
+        </label>))}
+      </div>
+      <div className="fld"><label>Limiter le nombre de fiches (optionnel)</label><input type="number" min="1" value={limit} onChange={(e) => setLimit(e.target.value)} placeholder={"Toutes (" + selCount + ")"} style={{ width: 200 }} /></div>
+    </>}
+    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+      <button className="btn btn-g" onClick={onClose}>Annuler</button>
+      <button className="btn btn-ai" disabled={!finalCount} onClick={() => onLaunch(new Set(selTypes), capped)}><Sparkles size={15} /> Enrichir {finalCount || ""}</button>
+    </div>
+  </Modal>);
+}
 function Prospection({ data, persist, go }) {
   const { prospects } = data;
   const [importOpen, setImportOpen] = useState(false);
@@ -6136,17 +6170,22 @@ function Prospection({ data, persist, go }) {
   const [dupMsg, setDupMsg] = useState(null);
   // Enrichissement en masse de toutes les fiches (priorité e-mails + téléphones), en tâche de fond.
   const [enrichMsg, setEnrichMsg] = useState(null);
+  const [enrichOpen, setEnrichOpen] = useState(false);
   const jobsP = useAiJobs();
   const enriching = jobsP.has("prospects:enrich");
   const enrichJob = jobsP.get("prospects:enrich");
-  const enrichAll = () => {
+  // Enrichissement en masse, filtrable par catégorie (type) et limitable en nombre de fiches.
+  // `types` : Set des types à enrichir (null = tous) ; `limit` : nombre max de fiches (0 = toutes).
+  const enrichAll = (types, limit) => {
     if (aiJobs.has("prospects:enrich")) return;
-    const targets = prospects.filter((p) => !p.accountId && (p.nom || p.enseigne || "").trim());
+    let targets = prospects.filter((p) => !p.accountId && (p.nom || p.enseigne || "").trim());
+    if (types && types.size) targets = targets.filter((p) => types.has(p.type || "autre"));
     if (!targets.length) { setEnrichMsg({ ok: false, t: "Aucun prospect à enrichir." }); return; }
     const missing = targets.filter((p) => !(p.email || "").trim() || !(p.telephone || "").trim());
     const rest = targets.filter((p) => (p.email || "").trim() && (p.telephone || "").trim());
-    const queue = [...missing, ...rest]; // priorité aux fiches sans e-mail / téléphone
-    appConfirm("Enrichir " + queue.length + " fiche(s) prospect via recherche web IA, en priorité les e-mails et téléphones manquants ? Cela peut prendre plusieurs minutes et consomme des crédits. Rien n'est inventé, à vérifier ensuite.", { title: "Enrichir toutes les fiches", confirmLabel: "Lancer" }).then((ok) => {
+    let queue = [...missing, ...rest]; // priorité aux fiches sans e-mail / téléphone
+    if (limit && limit > 0) queue = queue.slice(0, limit);
+    appConfirm("Enrichir " + queue.length + " fiche(s) prospect via recherche web IA, en priorité les e-mails et téléphones manquants ? Cela peut prendre plusieurs minutes et consomme des crédits. Rien n'est inventé, à vérifier ensuite.", { title: "Enrichir les fiches", confirmLabel: "Lancer" }).then((ok) => {
       if (!ok) return;
       let nMail = 0, nTel = 0;
       setEnrichMsg(null);
@@ -6179,20 +6218,34 @@ function Prospection({ data, persist, go }) {
       setEnrichMsg({ ok: true, t: "Recherche terminée sur " + created.length + " prospect(s) importé(s). À vérifier (rien d'inventé)." });
     });
   };
-  // Création des prospects importés (dédoublonnage léger par nom + ville), puis recherche IA optionnelle.
+  // Création des prospects importés, puis recherche IA optionnelle. Dédoublonnage renforcé : on écarte
+  // toute fiche qui correspond à un prospect DÉJÀ enregistré OU à un établissement / groupe / point de
+  // vente existant (clés d'identité : SIRET, adresse, SIREN+ville, cœur de rue, nom+localité…). Le libellé
+  // d'un site (« King Jouet Cahors ») est traité comme le nom de sa fiche établissement.
   const doImport = (drafts, enrich) => {
     const norm = (s) => stripAccentsLow(String(s || "")).replace(/[^a-z0-9]/g, "");
+    // Clés d'identité de tout ce qui existe déjà : prospects, comptes/groupes/établissements et sites.
+    const existingKeys = new Set();
+    const addKeys = (o) => identityKeys(o).forEach((k) => existingKeys.add(k));
+    (prospects || []).forEach(addKeys);
+    (data.accounts || []).forEach((a) => addKeys({ nom: a.enseigne, enseigne: a.enseigne, ville: a.ville, cp: a.cp, adresse: a.adressePostale || a.adresse, siren: a.siren, siret: a.siret, telephone: a.telephone }));
+    (data.sites || []).forEach((s) => addKeys({ nom: s.label, enseigne: s.label, ville: s.ville, adresse: s.adresse, siret: s.siret }));
     const seen = new Set((prospects || []).map((p) => norm(p.nom || p.enseigne) + "|" + norm(p.ville)));
-    const created = [];
+    const created = []; let skipped = 0;
     drafts.forEach((d) => {
-      const key = norm(d.nom) + "|" + norm(d.ville); if (seen.has(key)) return; seen.add(key);
+      const nameKey = norm(d.nom || d.enseigne) + "|" + norm(d.ville);
+      if (seen.has(nameKey)) { skipped++; return; }
+      const dKeys = identityKeys({ nom: d.nom, enseigne: d.enseigne, ville: d.ville, cp: d.cp, adresse: d.adresse, telephone: d.telephone, email: d.email });
+      if (dKeys.some((k) => existingKeys.has(k))) { skipped++; seen.add(nameKey); return; }
+      seen.add(nameKey); dKeys.forEach((k) => existingKeys.add(k)); // évite aussi les doublons internes au lot
       created.push({ id: uid("p_"), nom: d.nom || "", enseigne: d.enseigne || "", type: d.type || "autre", format: "", adresse: d.adresse || "", ville: d.ville || "", cp: d.cp || "", departement: d.departement || "", region: d.region || "", telephone: d.telephone || "", site: d.site || "", email: d.email || "", statut: "a_qualifier", potentiel: "", notes: d.notes || "", source: "Import", accountId: null, createdAt: TODAY(), siren: "", siret: "", raisonSociale: "", formeJuridique: "", contactPrenom: "", contactNom: "", contactFonction: "", contactEmail: "", contactTel: "", contactSource: "", archived: false, archiveReason: "", archiveDate: "", archiveNote: "" });
     });
     setImportOpen(false);
-    if (!created.length) { setEnrichMsg({ ok: false, t: "Aucun nouveau prospect importé (tous déjà présents)." }); return; }
+    const dup = skipped ? " " + skipped + " doublon(s) écarté(s) (prospect ou établissement déjà enregistré)." : "";
+    if (!created.length) { setEnrichMsg({ ok: false, t: "Aucun nouveau prospect importé (tous déjà présents)." + dup }); return; }
     persist((d) => ({ ...d, prospects: [...created, ...(d.prospects || [])] }));
     setFlashIds(created.map((c) => c.id));
-    setEnrichMsg({ ok: true, t: created.length + " prospect(s) importé(s)." + (enrich ? " Recherche web IA lancée en tâche de fond…" : "") });
+    setEnrichMsg({ ok: true, t: created.length + " prospect(s) importé(s)." + dup + (enrich ? " Recherche web IA lancée en tâche de fond…" : "") });
     if (enrich) enrichCreated(created);
   };
   const enrichProspect = async () => {
@@ -6491,7 +6544,7 @@ function Prospection({ data, persist, go }) {
         {hasFilter && <button className="btn btn-ghost btn-s" onClick={() => { setQ(""); setFType("tous"); setFRegion("tous"); }}><X size={13} /> Effacer</button>}
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button className="btn btn-ai" onClick={enrichAll} disabled={enriching} title="Compléter automatiquement toutes les fiches prospect via recherche web, en priorité les e-mails et téléphones manquants (tâche de fond)"><Sparkles size={16} className={enriching ? "spin" : ""} /> {enriching ? ("Enrichissement… " + (enrichJob && enrichJob.total ? enrichJob.done + "/" + enrichJob.total : "")) : "Enrichir les fiches"}</button>
+        <button className="btn btn-ai" onClick={() => setEnrichOpen(true)} disabled={enriching} title="Compléter automatiquement les fiches prospect via recherche web (choix des catégories et du nombre), en priorité les e-mails et téléphones manquants (tâche de fond)"><Sparkles size={16} className={enriching ? "spin" : ""} /> {enriching ? ("Enrichissement… " + (enrichJob && enrichJob.total ? enrichJob.done + "/" + enrichJob.total : "")) : "Enrichir les fiches"}</button>
         <button className="btn btn-ai" onClick={() => setMailingOpen(true)} title="Générer une vague de mails de premier contact personnalisés (angles vrais) et créer des brouillons Gmail"><Mail size={16} /> Mailing</button>
         <button className="btn btn-ghost" onClick={openMergeDoublons} title="Détecter les prospects en double (même SIRET, même adresse, ou même SIREN + ville), les passer en revue et choisir ceux à fusionner"><Copy size={16} /> Fusionner les doublons</button>
         <button className="btn btn-g" onClick={() => setImportOpen(true)} title="Importer une liste de prospects (Excel, CSV ou texte) ; MITMIT peut ensuite les rechercher et compléter automatiquement"><Upload size={16} /> Importer</button>
@@ -6512,6 +6565,7 @@ function Prospection({ data, persist, go }) {
       </div>); })}
     </>)}
     {importOpen && <ProspectImportModal onClose={() => setImportOpen(false)} onImport={doImport} />}
+    {enrichOpen && <EnrichSelectModal prospects={prospects} onClose={() => setEnrichOpen(false)} onLaunch={(types, limit) => { setEnrichOpen(false); enrichAll(types, limit); }} />}
     {edit && <Modal title={edit.nom ? edit.nom : "Nouveau prospect"} onClose={() => { setEdit(null); setPfMsg(null); }} wide>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
         <button type="button" className="btn btn-ai btn-s" onClick={enrichProspect} disabled={pfBusy || !((edit.nom || edit.enseigne || "").trim())} title="Rechercher en ligne le site, les réseaux, l'identité légale (SIREN/SIRET, raison sociale…) et un contact, puis compléter les champs encore vides"><Sparkles size={14} className={pfBusy ? "spin" : ""} /> {pfBusy ? ("Recherche… " + fmtElapsed(pfElapsed)) : "Approfondir la recherche IA"}</button>
