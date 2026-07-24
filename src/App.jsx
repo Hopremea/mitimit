@@ -7774,7 +7774,10 @@ function Pointage({ data, persist }) {
   }, [pointages]);
 
   const badges = useMemo(() => {
-    const anyEarly = allEntries.some((x) => pMin(x.st.arrivee) <= 8 * 60 + 30);
+    // On ne considère que les journées avec un vrai horaire d'arrivée : pMin renvoie null pour les motifs
+    // au forfait (congés, férié…) et « null <= 510 » vaut true en JS — sinon le badge était attribué à tort.
+    const anyEarly = allEntries.some((x) => { const m = pMin(x.st.arrivee); return m != null && m <= 8 * 60 + 30; });
+    const anyLate = allEntries.some((x) => { const m = pMin(x.st.depart); return m != null && m >= 20 * 60; });
     const anyMarathon = allEntries.some((x) => x.st.worked >= 9 * 60);
     const byWeek = {};
     allEntries.forEach((x) => { if (isWeekendDs(x.ds)) return; const d = new Date(x.ds + "T00:00:00"); const mon = new Date(d); mon.setDate(d.getDate() - ((d.getDay() + 6) % 7)); const key = isoLocal(mon); (byWeek[key] = byWeek[key] || new Set()).add(x.ds); });
@@ -7784,6 +7787,7 @@ function Pointage({ data, persist }) {
       { id: "streak5", label: "Assiduité", icon: Flame, color: "#FF5A45", got: streak >= 5, desc: "5 jours ouvrés d'affilée." },
       { id: "perfect", label: "Semaine parfaite", icon: Award, color: "#7c5cf0", got: perfectWeek, desc: "Une semaine complète (lun-ven) pointée." },
       { id: "early", label: "Lève-tôt", icon: Sun, color: "#F8B133", got: anyEarly, desc: "Arriver à 8 h 30 ou avant." },
+      { id: "late", label: "Couche-tard", icon: Moon, color: "#5b54c9", got: anyLate, desc: "Partir à 20 h ou après." },
       { id: "marathon", label: "Marathonien", icon: Zap, color: "#2bb673", got: anyMarathon, desc: "Une journée de 9 h ou plus." },
       { id: "sup10", label: "+10 h sup.", icon: Trophy, color: "#F8B133", got: supAllTime >= 600, desc: "Cumuler 10 h supplémentaires." },
     ];
