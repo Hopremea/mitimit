@@ -4762,6 +4762,23 @@ function ContactForm({ contact, accounts, contacts, onSave, known = [], sites = 
     <div style={{ display: "flex", justifyContent: "flex-end" }}><button className="btn btn-p" onClick={() => onSave({ ...f, siteIds: [...new Set([...(f.siteIds || []), ...(f.siteId ? [f.siteId] : [])])].filter((id) => id && id !== f.siteId) })}>Enregistrer</button></div>
   </>);
 }
+// Fil d'activité unifié d'une fiche contact (façon « record » HubSpot) : échanges, documents et
+// événements fusionnés dans un seul fil chronologique.
+function UnifiedTimeline({ c, data, go }) {
+  const items = [];
+  (data.interactions || []).filter((i) => i.contactId === c.id || (c.accountId && i.accountId === c.accountId && !i.contactId)).forEach((i) => { const m = INT_META[i.type] || INT_META.note; items.push({ date: i.date, heure: i.heure || "", label: m.label, title: i.sujet || m.label, sub: i.resume || "", color: m.color }); });
+  (data.deals || []).filter((d) => c.accountId && d.accountId === c.accountId).forEach((d) => items.push({ date: d.date, heure: "", label: d.type, title: d.ref || d.type, sub: eur(d.montant || 0) + " · " + ((DEAL_STATUS[d.statut] || {}).label || d.statut), color: "#2bb673", onClick: () => go("deals", d.id) }));
+  (data.events || []).filter((e) => e.contactId === c.id).forEach((e) => { const m = EVENT_TYPES[e.type] || EVENT_TYPES.rdv; items.push({ date: e.date, heure: e.heure || "", label: m.label, title: (e.done ? "✓ " : "") + (e.titre || m.label), sub: e.notes || "", color: e.color || m.color }); });
+  const sorted = items.filter((x) => x.date).sort((a, b) => (b.date + (b.heure || "")).localeCompare(a.date + (a.heure || "")));
+  if (!sorted.length) return null;
+  return (<div className="card" style={{ marginBottom: 16 }}><div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: 0 }}><Clock size={15} /> Fil d'activité</h3><span style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 700 }}>{sorted.length}</span></div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 7, maxHeight: 400, overflowY: "auto" }}>{sorted.slice(0, 40).map((x, i) => (
+      <div key={i} onClick={x.onClick} style={{ display: "flex", gap: 10, padding: "8px 10px", border: "1px solid var(--line)", borderLeft: "3px solid " + x.color, borderRadius: 10, cursor: x.onClick ? "pointer" : "default" }}>
+        <div style={{ flexShrink: 0, width: 76, fontSize: 11, color: "var(--muted)", fontWeight: 700 }} className="tnum">{x.date}</div>
+        <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 700, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}><span style={{ color: x.color }}>{x.label}</span> · {x.title}</div>{x.sub && <div style={{ fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{x.sub}</div>}</div>
+      </div>))}</div>
+  </div>);
+}
 // Enrôlement dans une séquence de relance : planifie les relances (événements) à J+offset.
 function SequenceEnrollModal({ contact, sequences, onClose, onEnroll }) {
   const seqs = sequences && sequences.length ? sequences : DEFAULT_SEQUENCES;
@@ -4832,6 +4849,7 @@ function Fiche({ c, account, data, myEmail, settings, deals, interactions, onBac
       <div style={{ display: "flex", gap: 26, marginTop: 16, flexWrap: "wrap", borderTop: "1px solid var(--line)", paddingTop: 14 }}><Stat label="Échanges" value={interactions.length} /><Stat label="Dernier contact" value={lastEch || "—"} /><Stat label="Documents" value={deals.length} /><Stat label="Valeur cumulée" value={eur(dealsVal)} /></div>
     </div>
     <div style={{ marginBottom: 16 }}><EntityAgenda events={contactEvents} onSave={saveEvent} onMerge={async () => { const usage = (u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) })); const groups = await aiMergeEvents(contactEvents, usage); const dropped = (groups || []).reduce((n, g) => n + Math.max(0, g.ids.filter((id) => contactEvents.some((e) => e.id === id)).length - 1), 0); if (dropped > 0) persist((p) => ({ ...p, events: applyEventMerges(p.events, groups) })); return dropped; }} onAdd={() => setEventEdit(newContactEvent())} onOpen={(e) => setEventEdit(e)} onView={(e) => setEventView(e)} onSuggest={async () => { try { const last = interactions[0]; const r = await aiSuggestAction({ enseigne: fullName(c) + (ens ? " — " + ens : ""), stageLabel: account ? stageMeta(account.stage).label : "—", lastInt: last ? (last.date + " — " + (last.sujet || last.type) + (last.resume ? (" : " + last.resume) : "")) : "", caAttente: eur(dealsVal), contactsLabel: fullName(c) + (c.fonction ? " (" + c.fonction + ")" : "") }, (u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))); const d = new Date(Date.now() + r.jours * 86400000).toISOString().slice(0, 10); setEventEdit({ id: "ev_" + Date.now(), date: d, heure: "", titre: r.titre || ("Relancer " + fullName(c)), notes: r.pourquoi || "", type: r.type, color: EVENT_TYPES[r.type].color, accountId: c.accountId || "", siteId: c.siteId || "", contactId: c.id }); } catch (e) { alert("Suggestion IA indisponible ici (fonctionne dans l'app Claude)."); } }} /></div>
+    <UnifiedTimeline c={c} data={data} go={go} />
     <div className="grid" style={{ gridTemplateColumns: "1fr 1.25fr", alignItems: "start" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         <div className="card"><div className="sec-h"><h3 className="pu-display">Coordonnées</h3></div><KV icon={<Mail size={13} />} k="Courriel" v={c.email ? <a href={"mailto:" + c.email} style={{ color: "inherit" }}>{c.email}</a> : ""} /><KV icon={<Phone size={13} />} k="Mobile" v={c.mobile ? <a href={telHref(c.mobile)} style={{ color: "inherit" }} title="Appeler ce mobile">{c.mobile}</a> : ""} /><KV icon={<Phone size={13} />} k="Fixe" v={c.fixe ? <a href={telHref(c.fixe)} style={{ color: "inherit" }} title="Appeler ce fixe">{c.fixe}</a> : ""} />{(() => { const loc = contactLocality(c, data); const hasLoc = !!(loc.site || loc.ville || loc.adresse); return (<><KV icon={<Linkedin size={13} />} k="LinkedIn" v={c.linkedin} last={!hasLoc} />{hasLoc && <><KV icon={<Store size={13} />} k="Site rattaché" v={loc.site ? <span className="lnk" onClick={() => onGoSite && onGoSite(loc.site.id)} title="Ouvrir cet établissement dans l'onglet Groupes & établissements">{loc.site.label || loc.site.adresse}</span> : "Localité du compte"} /><KV icon={<MapPin size={13} />} k="Ville" v={loc.ville} /><KV icon={<MapPin size={13} />} k="Département" v={loc.departement} /><KV icon={<Building2 size={13} />} k="Adresse" v={loc.adresse} last /></>}</>); })()}</div>
@@ -7484,6 +7502,16 @@ function CommandCenter({ data, persist, go }) {
   const md = today.slice(5);
   const anniv = contacts.filter((c) => !c.archived && (c.naissance || "").length >= 10 && (c.naissance || "").slice(5) === md);
   const total = overdue.length + todayEv.length + devisRelance.length + facturesDues.length + dormant.length + anniv.length;
+  // Objectif du mois (CA HT signé = factures) — éditable ici.
+  const monthPrefix = today.slice(0, 7);
+  const caMois = sumMontant(deals.filter((d) => isCaSigne(d) && (d.date || "").startsWith(monthPrefix)));
+  const objCa = Number((data.settings || {}).objCaMois) || 0;
+  const [objEdit, setObjEdit] = useState(false); const [objVal, setObjVal] = useState(objCa);
+  useEffect(() => { setObjVal(objCa); }, [objCa]);
+  const saveObj = () => { persist((p) => ({ ...p, settings: { ...p.settings, objCaMois: Number(objVal) || 0 } })); setObjEdit(false); };
+  const objPct = objCa > 0 ? Math.min(100, Math.round(caMois / objCa * 100)) : 0;
+  // Comptes à activer : meilleur score de priorité (argent en attente, ancienneté, étape).
+  const priAccounts = accounts.filter((a) => !a.archived).map((a) => ({ a, ...priorityScore(a, data) })).filter((x) => x.score >= 35).sort((x, y) => y.score - x.score).slice(0, 6);
   const markDone = (id) => persist((p) => ({ ...p, events: (p.events || []).map((e) => e.id === id ? { ...e, done: true } : e) }));
   const snooze = (id) => persist((p) => ({ ...p, events: (p.events || []).map((e) => e.id === id ? { ...e, date: isoLocal(new Date(Date.now() + 86400000)) } : e) }));
   const evGo = (e) => e.contactId ? go("repertoire", e.contactId) : e.accountId ? go("accounts", e.accountId) : go("agenda");
@@ -7519,6 +7547,16 @@ function CommandCenter({ data, persist, go }) {
       </div>
       <div className="pu-display tnum" style={{ fontSize: 34, color: total === 0 ? "var(--green)" : "var(--blue)", fontWeight: 900 }}>{total}</div>
     </div>
+    <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--green)", padding: "12px 16px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3 }}>🎯 Objectif du mois · CA HT signé</div>
+        {objEdit ? <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}><input type="number" step="100" value={objVal} onChange={(e) => setObjVal(e.target.value)} style={{ width: 120 }} /><button className="btn btn-p btn-s" onClick={saveObj}><Save size={13} /></button></span>
+          : <span style={{ fontSize: 13, fontWeight: 700 }}><span className="tnum">{eur(caMois)}</span>{objCa > 0 ? <span style={{ color: "var(--muted)" }}> / {eur(objCa)}</span> : ""} <button className="iconbtn" title="Définir l'objectif de CA du mois" onClick={() => setObjEdit(true)}><Pencil size={13} /></button></span>}
+      </div>
+      {objCa > 0 && <div style={{ marginTop: 8, height: 10, background: "var(--line)", borderRadius: 6, overflow: "hidden" }}><div style={{ width: objPct + "%", height: "100%", background: objPct >= 100 ? "var(--green)" : "linear-gradient(90deg,#3F60AA,#2bb673)", borderRadius: 6, transition: "width .4s" }} /></div>}
+      {objCa > 0 && <div style={{ fontSize: 11.5, color: objPct >= 100 ? "var(--green)" : "var(--muted)", fontWeight: 700, marginTop: 5 }}>{objPct}% de l'objectif{objPct >= 100 ? " — atteint 🎉" : " · reste " + eur(Math.max(0, objCa - caMois))}</div>}
+      {objCa === 0 && <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4 }}>Aucun objectif défini. Cliquez sur ✏️ pour fixer votre cible de CA mensuel.</div>}
+    </div>
     {total === 0 && <div className="card" style={{ textAlign: "center", padding: "34px 16px", color: "var(--muted)" }}><CheckCircle2 size={34} style={{ color: "var(--green)" }} /><div className="pu-display" style={{ fontSize: 16, marginTop: 8, color: "var(--ink)" }}>Tout est à jour</div><div style={{ fontSize: 12.5, marginTop: 4 }}>Aucune relance en retard, aucun RDV du jour, aucune facture échue. Planifie une action depuis le calendrier ou la prospection.</div></div>}
     <Section title="En retard" color="#FF5A45" icon="⚠️" count={overdue.length}>
       {overdue.map((e) => <Row key={e.id} onClick={() => evGo(e)} icon={evMeta(e).icon} title={evLabel(e)} sub={evSub(e)} right={<span style={{ color: "var(--red)" }}>{relDate(e.date)}</span>} actions={<><button className="iconbtn" title="Reporter à demain" onClick={() => snooze(e.id)}><ChevronRight size={15} /></button><button className="iconbtn" title="Marquer fait" onClick={() => markDone(e.id)}><CheckCircle2 size={15} /></button></>} />)}
@@ -7537,6 +7575,9 @@ function CommandCenter({ data, persist, go }) {
     </Section>
     <Section title="Anniversaires" color="#A855F7" icon="🎂" count={anniv.length}>
       {anniv.map((c) => <Row key={c.id} onClick={() => go("repertoire", c.id)} icon="🎂" title={fullName(c)} sub={[c.fonction, accName(c.accountId)].filter(Boolean).join(" · ") || "Contact"} actions={<button className="iconbtn" title="Ouvrir la fiche" onClick={() => go("repertoire", c.id)}><ChevronRight size={15} /></button>} />)}
+    </Section>
+    <Section title="Comptes à activer (priorité)" color="#0EA5A4" icon="🎯" count={priAccounts.length}>
+      {priAccounts.map(({ a, score, level, color, caAtt, days }) => <Row key={a.id} onClick={() => go("accounts", a.id)} icon="🎯" title={a.enseigne || "Compte"} sub={[caAtt > 0 ? eur(caAtt) + " en attente" : null, days == null ? "jamais contacté" : "vu il y a " + days + " j"].filter(Boolean).join(" · ")} right={<span style={{ color, background: color + "22", borderRadius: 20, padding: "2px 9px" }}>{score} · {level}</span>} />)}
     </Section>
   </div>);
 }
