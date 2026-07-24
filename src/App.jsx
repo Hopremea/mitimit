@@ -7633,7 +7633,8 @@ function SalaireRH({ data, persist }) {
 function CommissionsRH({ data, persist }) {
   const { accounts, sites } = data;
   const s = data.settings || {};
-  const accName = (id) => accounts.find((a) => a.id === id)?.enseigne || "—";
+  const accOf = (id) => accounts.find((a) => a.id === id);
+  const accName = (id) => accOf(id)?.enseigne || "—";
   const siteName = (id) => (sites || []).find((x) => x.id === id)?.label || null;
   const [taux1, setTaux1] = useState(s.commTaux1 != null ? s.commTaux1 : 4);
   const [tauxN, setTauxN] = useState(s.commTauxN != null ? s.commTauxN : 2);
@@ -7642,9 +7643,13 @@ function CommissionsRH({ data, persist }) {
   const r1 = (Number(taux1) || 0) / 100, rN = (Number(tauxN) || 0) / 100;
   const monthPrefix = new Date().toISOString().slice(0, 7);
   const [periode, setPeriode] = useState("all");
-  // Établissement d'une facture : site de livraison, à défaut site de facturation, à défaut le compte.
-  const estabKey = (d) => d.livraisonSiteId || d.siteId || d.accountId || "";
-  const estabLabel = (d) => siteName(d.livraisonSiteId) || siteName(d.siteId) || accName(d.accountId);
+  // Identité de l'« établissement » d'une facture, pour distinguer 1re vente (référencement) et réassort.
+  // Un indépendant = un seul établissement : on regroupe toujours par compte, car le site de livraison
+  // n'est pas renseigné de façon homogène d'une facture à l'autre (sinon deux factures du même magasin
+  // seraient comptées deux fois en référencement). Un groupe multi-PDV : chaque magasin (site de livraison)
+  // est un établissement distinct, avec repli sur le compte si le site n'est pas précisé.
+  const estabKey = (d) => isGroupe(accOf(d.accountId)) ? "site:" + (d.livraisonSiteId || d.siteId || d.accountId || "") : "acc:" + (d.accountId || d.livraisonSiteId || d.siteId || "");
+  const estabLabel = (d) => (isGroupe(accOf(d.accountId)) ? (siteName(d.livraisonSiteId) || siteName(d.siteId)) : null) || accName(d.accountId) || siteName(d.livraisonSiteId) || siteName(d.siteId) || "—";
   // Toutes les factures, chronologiques : la 1re de chaque établissement = référencement (4 %), les
   // suivantes = réassort (2 %).
   const rows = useMemo(() => {
