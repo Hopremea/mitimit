@@ -7802,43 +7802,68 @@ function CommissionsRH({ data, persist, go }) {
   </div>);
 }
 // Export Excel des données RH en un seul classeur, une feuille par nature : heures pointées,
-// trajets domicile-travail et déplacements ponctuels (frais professionnels). xlsx chargé à la demande.
-async function exportRHWorkbook(data) {
-  const XLSX = await import("xlsx");
-  const wb = XLSX.utils.book_new();
-  const jour = (ds) => new Date(ds + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "long" });
+// trajets domicile-travail et déplacements ponctuels (frais professionnels), sous forme de tableaux
+// Markdown à coller directement dans Notion (le tableau s'y convertit automatiquement).
+function buildRHNotion(data) {
+  const jour = (ds) => new Date(ds + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "short" });
+  const dateFr = (ds) => new Date(ds + "T00:00:00").toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
+  const hd = (min) => (min / 60).toFixed(2).replace(".", ",");
+  const cell = (v) => String(v == null ? "" : v).replace(/\|/g, "/");
   const pgs = Object.entries(data.pointages || {}).sort((a, b) => a[0].localeCompare(b[0]));
-  const addSheet = (rows, empty, name) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.length ? rows : [empty]), name);
-  // Feuille 1 — Heures pointées
-  const heures = pgs.map(([ds, rec]) => {
-    const st = presenceDay(rec);
-    const motifLabel = (PRESENCE_MOTIFS[(rec && rec.motif) || "presence"] || PRESENCE_MOTIFS.presence).label;
-    if (!st) return { Date: ds, Jour: jour(ds), Type: motifLabel, "Arrivée": (rec && rec.arrivee) || "", "Départ": (rec && rec.depart) || "", "Pause (min)": "", "Heures travaillées": "", "Heures sup.": "" };
-    const worked = st.invalid ? 0 : st.worked;
-    const ot = isChronoMotif(st.motif) && !isWeekendDs(ds) ? Math.max(0, worked - PRESENCE_TARGET) : 0;
-    return { Date: ds, Jour: jour(ds), Type: motifLabel, "Arrivée": st.arrivee || "", "Départ": st.depart || "", "Pause (min)": st.pause || 0, "Heures travaillées": Math.round(worked / 60 * 100) / 100, "Heures sup.": Math.round(ot / 60 * 100) / 100 };
+  const L = [];
+  // Tableau 1 — Heures pointées
+  L.push("### Heures pointées");
+  L.push("");
+  L.push("| Date | Jour | Type | Arrivée | Départ | Pause | Heures | Heures sup. |");
+  L.push("| --- | --- | --- | --- | --- | --- | --- | --- |");
+  let totH = 0, totOT = 0;
+  pgs.forEach(([ds, rec]) => {
+    const st = presenceDay(rec); if (!st || st.invalid) return;
+    const mot = st.motif && st.motif !== "presence" ? PRESENCE_MOTIFS[st.motif] : null;
+    const ot = isChronoMotif(st.motif) && !isWeekendDs(ds) ? Math.max(0, st.worked - PRESENCE_TARGET) : 0;
+    totH += st.worked; totOT += ot;
+    L.push("| " + [dateFr(ds), jour(ds), cell(mot ? mot.label : "Présence"), mot ? "" : (st.arrivee || ""), mot ? "" : (st.depart || ""), mot ? "" : ((st.pause || 0) + " min"), hd(st.worked), hd(ot)].join(" | ") + " |");
   });
-  addSheet(heures, { Date: "", Jour: "", Type: "", "Arrivée": "", "Départ": "", "Pause (min)": "", "Heures travaillées": "", "Heures sup.": "" }, "Heures");
-  // Feuille 2 — Trajet domicile-travail (un jour de présence pointé = un aller-retour)
+  L.push("| **Total** |  |  |  |  |  | **" + hd(totH) + "** | **" + hd(totOT) + "** |");
+  L.push("");
+  // Tableau 2 — Trajet domicile-travail (un jour de présence pointé = un aller-retour)
   const s = data.settings || {};
   const ess = Number(s.fraisEssence != null ? s.fraisEssence : 8), pea = Number(s.fraisPeage != null ? s.fraisPeage : 3.2), ar = s.fraisAR !== false; const mult = ar ? 2 : 1; const coutJour = (ess + pea) * mult;
-  const domicile = pgs.filter(([, r]) => r && (!r.motif || r.motif === "presence") && r.arrivee && r.depart).map(([ds]) => ({ Date: ds, Jour: jour(ds), "Essence (€/trajet)": ess.toFixed(2), "Péage (€/trajet)": pea.toFixed(2), "Aller-retour": ar ? "Oui" : "Non", "Coût du jour (€)": coutJour.toFixed(2), "Prime 50 % (€)": (coutJour * PRIME_KM_RATE).toFixed(2) }));
-  addSheet(domicile, { Date: "", Jour: "", "Essence (€/trajet)": "", "Péage (€/trajet)": "", "Aller-retour": "", "Coût du jour (€)": "", "Prime 50 % (€)": "" }, "Trajet domicile-travail");
-  // Feuille 3 — Trajet ponctuel (frais professionnels remboursés à 100 %)
-  const dep = (data.deplacements || []).slice().sort((a, b) => (a.date || "").localeCompare(b.date || "")).map((d) => { const e = Number(d.essence) || 0, p = Number(d.peage) || 0, au = Number(d.autre) || 0; const t = e + p + au; return { Date: d.date || "", "Destination / motif": d.dest || "", Km: d.km || "", "Essence (€)": e.toFixed(2), "Péage (€)": p.toFixed(2), "Autres (€)": au.toFixed(2), "Frais réels (€)": t.toFixed(2), "Remboursé 100 % (€)": t.toFixed(2) }; });
-  addSheet(dep, { Date: "", "Destination / motif": "", Km: "", "Essence (€)": "", "Péage (€)": "", "Autres (€)": "", "Frais réels (€)": "", "Remboursé 100 % (€)": "" }, "Trajet ponctuel");
-  XLSX.writeFile(wb, "rh-penup3d-" + new Date().toISOString().slice(0, 10) + ".xlsx");
+  const dom = pgs.filter(([, r]) => r && (!r.motif || r.motif === "presence") && r.arrivee && r.depart);
+  L.push("### Trajet domicile-travail");
+  L.push("");
+  L.push("| Date | Jour | A/R | Coût du jour | Prime 50 % |");
+  L.push("| --- | --- | --- | --- | --- |");
+  dom.forEach(([ds]) => L.push("| " + [dateFr(ds), jour(ds), ar ? "A/R" : "Aller", eur2(coutJour), eur2(coutJour * PRIME_KM_RATE)].join(" | ") + " |"));
+  L.push("| **Total** |  | **" + dom.length + " j** | **" + eur2(coutJour * dom.length) + "** | **" + eur2(coutJour * dom.length * PRIME_KM_RATE) + "** |");
+  L.push("");
+  // Tableau 3 — Déplacements ponctuels (frais professionnels remboursés à 100 %)
+  const dep = (data.deplacements || []).slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  L.push("### Déplacements ponctuels (frais professionnels — remboursés 100 %)");
+  L.push("");
+  L.push("| Date | Destination / motif | Km | Essence | Péage | Autres | Frais réels |");
+  L.push("| --- | --- | --- | --- | --- | --- | --- |");
+  let tt = 0;
+  dep.forEach((d) => { const e = Number(d.essence) || 0, p = Number(d.peage) || 0, au = Number(d.autre) || 0; const t = e + p + au; tt += t; L.push("| " + [d.date || "", cell(d.dest), cell(d.km || ""), eur2(e), eur2(p), eur2(au), eur2(t)].join(" | ") + " |"); });
+  L.push("| **Total** |  |  |  |  |  | **" + eur2(tt) + "** |");
+  return L.join("\n");
 }
 // Onglet RH : sous-navigation entre le temps de présence (pointage), les frais kilométriques, le salaire et les commissions.
 function RH({ data, persist, go }) {
   const [sub, setSub] = useState("presence");
+  const [exportOpen, setExportOpen] = useState(false); const [copied, setCopied] = useState(false);
   const subs = [{ id: "presence", label: "Temps de présence", icon: Clock }, { id: "frais", label: "Frais kilométriques", icon: Navigation }, { id: "salaire", label: "Salaire estimé", icon: Calculator }, { id: "commission", label: "Commissions", icon: Percent }];
   return (<div className="fade">
-    <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>{subs.map((x) => { const Ic = x.icon; return <button key={x.id} className={cx("chip", sub === x.id && "on")} onClick={() => setSub(x.id)} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Ic size={14} />{x.label}</button>; })}<button className="btn btn-g btn-s" style={{ marginLeft: "auto" }} onClick={() => exportRHWorkbook(data).catch(() => alert("Export impossible."))} title="Exporter en Excel : heures, trajets domicile-travail et déplacements ponctuels (3 feuilles)"><FileDown size={14} /> Exporter (Excel)</button></div>
+    <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>{subs.map((x) => { const Ic = x.icon; return <button key={x.id} className={cx("chip", sub === x.id && "on")} onClick={() => setSub(x.id)} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Ic size={14} />{x.label}</button>; })}<button className="btn btn-g btn-s" style={{ marginLeft: "auto" }} onClick={() => { setCopied(false); setExportOpen(true); }} title="Exporter (copier-coller Notion) : heures, trajets domicile-travail et déplacements ponctuels"><Copy size={14} /> Exporter (Notion)</button></div>
     <div style={{ display: sub === "presence" ? "block" : "none" }}><Pointage data={data} persist={persist} /></div>
     <div style={{ display: sub === "frais" ? "block" : "none" }}><FraisKm data={data} persist={persist} /></div>
     <div style={{ display: sub === "salaire" ? "block" : "none" }}><SalaireRH data={data} persist={persist} /></div>
     <div style={{ display: sub === "commission" ? "block" : "none" }}><CommissionsRH data={data} persist={persist} go={go} /></div>
+    {exportOpen && (() => { const txt = buildRHNotion(data); const copy = async () => { try { await navigator.clipboard.writeText(txt); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch (e) { const ta = document.getElementById("rh-export-ta"); if (ta) { ta.focus(); ta.select(); try { document.execCommand("copy"); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch (e2) { } } } }; return (<Modal title="Exporter (copier-coller Notion)" onClose={() => setExportOpen(false)} wide>
+      <div style={{ fontSize: 12.5, color: "var(--muted)", marginBottom: 10, lineHeight: 1.5 }}>Trois tableaux : heures pointées, trajets domicile-travail et déplacements ponctuels (frais professionnels). Cliquez sur <strong>Copier</strong>, puis collez dans Notion : chaque tableau s'y convertit automatiquement.</div>
+      <textarea id="rh-export-ta" readOnly value={txt} onFocus={(e) => e.target.select()} rows={Math.min(24, txt.split("\n").length + 1)} style={{ width: "100%", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, lineHeight: 1.5, whiteSpace: "pre", overflowX: "auto" }} />
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}><button className="btn btn-p" onClick={copy}>{copied ? <><CheckCircle2 size={15} /> Copié !</> : <><Copy size={15} /> Copier</>}</button></div>
+    </Modal>); })()}
   </div>);
 }
 // Simulateur de frais kilométriques : trajet quotidien domicile-travail (essence + péage, aller-retour)
@@ -7867,6 +7892,7 @@ function FraisKm({ data, persist }) {
   useEffect(() => { if (!joursTouched) setJours(presDays); }, [presDays, joursTouched]);
   const [pDate, setPDate] = useState(TODAY()); const [pDest, setPDest] = useState(""); const [pKm, setPKm] = useState(""); const [pEss, setPEss] = useState(0); const [pPea, setPPea] = useState(0); const [pAutre, setPAutre] = useState(0);
   const [editDeplId, setEditDeplId] = useState(null);
+  const [fraisExportOpen, setFraisExportOpen] = useState(false); const [fraisCopied, setFraisCopied] = useState(false);
   const e = Number(essence) || 0, p = Number(peage) || 0, mult = ar ? 2 : 1;
   const coutJour = (e + p) * mult; const totalMois = coutJour * (Number(jours) || 0);
   const pTotal = (Number(pEss) || 0) + (Number(pPea) || 0) + (Number(pAutre) || 0);
@@ -7887,15 +7913,15 @@ function FraisKm({ data, persist }) {
   };
   const modifierDepl = (d) => { setEditDeplId(d.id); setPDate(d.date || TODAY()); setPDest(d.dest || ""); setPKm(d.km || ""); setPEss(d.essence || 0); setPPea(d.peage || 0); setPAutre(d.autre || 0); };
   const supprimerDepl = (id) => persist((pp) => ({ ...pp, deplacements: (pp.deplacements || []).filter((d) => d.id !== id) }));
-  // Export CSV des frais professionnels (déplacements ponctuels remboursés à 100 %), tout l'historique
-  // trié par date — format « note de frais » réutilisable en comptabilité.
-  const exportFraisPro = () => {
-    const rows = deplAll.slice().sort((a, b) => (a.date || "").localeCompare(b.date || "")).map((d) => {
-      const ess = Number(d.essence) || 0, pea = Number(d.peage) || 0, aut = Number(d.autre) || 0; const t = ess + pea + aut;
-      return { Date: d.date || "", "Destination / motif": d.dest || "", Km: d.km || "", "Essence (€)": ess.toFixed(2), "Péage (€)": pea.toFixed(2), "Autres (€)": aut.toFixed(2), "Frais réels (€)": t.toFixed(2), "Remboursé 100 % (€)": t.toFixed(2) };
-    });
-    if (!rows.length) { alert("Aucun frais professionnel enregistré à exporter."); return; }
-    downloadCSV(rows, "frais-professionnels-penup3d-" + new Date().toISOString().slice(0, 10) + ".csv");
+  // Export des frais professionnels (déplacements ponctuels remboursés à 100 %) en tableau Markdown
+  // collable dans Notion — tout l'historique trié par date, format « note de frais ».
+  const fraisProNotion = () => {
+    const cell = (v) => String(v == null ? "" : v).replace(/\|/g, "/");
+    const L = ["### Frais professionnels — déplacements ponctuels (remboursés 100 %)", "", "| Date | Destination / motif | Km | Essence | Péage | Autres | Frais réels |", "| --- | --- | --- | --- | --- | --- | --- |"];
+    let tt = 0;
+    deplAll.slice().sort((a, b) => (a.date || "").localeCompare(b.date || "")).forEach((d) => { const es = Number(d.essence) || 0, pe = Number(d.peage) || 0, au = Number(d.autre) || 0; const t = es + pe + au; tt += t; L.push("| " + [d.date || "", cell(d.dest), cell(d.km || ""), eur2(es), eur2(pe), eur2(au), eur2(t)].join(" | ") + " |"); });
+    L.push("| **Total** |  |  |  |  |  | **" + eur2(tt) + "** |");
+    return L.join("\n");
   };
   const fraisDomicile = coutJour * presDays;
   const grandFrais = fraisDomicile + deplTotalMois;
@@ -7959,10 +7985,15 @@ function FraisKm({ data, persist }) {
           <div className="calc-out" style={{ background: "#eef2fb", marginTop: 8 }}><span className="l">Remboursé (100 % des frais)</span><span className="b pu-display tnum" style={{ color: "var(--blue)" }}>{eur2(pTotal)}</span></div>
         </div>
       </div>
-      <div className="card" style={{ marginTop: 14 }}><div className="sec-h"><h3 className="pu-display" style={{ textTransform: "capitalize" }}>Déplacements enregistrés · {monthName}</h3><div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>{deplTotalMois > 0 && <span style={{ fontSize: 12.5, fontWeight: 800 }}><span style={{ color: "var(--green)" }}>{eur2(deplTotalMois)}</span> · remboursé <span style={{ color: "var(--blue)" }}>{eur2(deplTotalMois)}</span></span>}<button className="btn btn-g btn-s" onClick={exportFraisPro} disabled={deplAll.length === 0} title="Exporter tous les frais professionnels enregistrés en CSV (note de frais)"><FileDown size={14} /> Exporter (CSV)</button></div></div>
+      <div className="card" style={{ marginTop: 14 }}><div className="sec-h"><h3 className="pu-display" style={{ textTransform: "capitalize" }}>Déplacements enregistrés · {monthName}</h3><div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>{deplTotalMois > 0 && <span style={{ fontSize: 12.5, fontWeight: 800 }}><span style={{ color: "var(--green)" }}>{eur2(deplTotalMois)}</span> · remboursé <span style={{ color: "var(--blue)" }}>{eur2(deplTotalMois)}</span></span>}<button className="btn btn-g btn-s" onClick={() => { setFraisCopied(false); setFraisExportOpen(true); }} disabled={deplAll.length === 0} title="Exporter tous les frais professionnels (copier-coller Notion)"><Copy size={14} /> Exporter (Notion)</button></div></div>
         {deplMois.length === 0 ? <div className="empty">Aucun déplacement ponctuel enregistré ce mois. Renseignez-en un ci-dessus puis « Enregistrer ».</div> : <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Date</th><th>Destination / motif</th><th style={{ textAlign: "right" }}>Km</th><th style={{ textAlign: "right" }}>⛽ Essence</th><th style={{ textAlign: "right" }}>🛣️ Péage</th><th style={{ textAlign: "right" }}>Autres</th><th style={{ textAlign: "right" }}>Frais réels</th><th style={{ textAlign: "right" }}>Remboursé (100 %)</th><th></th></tr></thead><tbody>{deplMois.map((d) => { const ess = Number(d.essence) || 0, pea = Number(d.peage) || 0, aut = Number(d.autre) || 0; const t = ess + pea + aut; return (<tr key={d.id}><td className="tnum">{d.date}</td><td>{d.dest || "—"}</td><td style={{ textAlign: "right" }} className="tnum">{d.km ? d.km : "—"}</td><td style={{ textAlign: "right" }} className="tnum">{ess ? eur2(ess) : "—"}</td><td style={{ textAlign: "right" }} className="tnum">{pea ? eur2(pea) : "—"}</td><td style={{ textAlign: "right" }} className="tnum">{aut ? eur2(aut) : "—"}</td><td style={{ textAlign: "right", fontWeight: 700, color: "var(--green)" }} className="tnum">{eur2(t)}</td><td style={{ textAlign: "right", color: "var(--blue)", fontWeight: 700 }} className="tnum">{eur2(t)}</td><td style={{ textAlign: "right", whiteSpace: "nowrap" }}><button className="iconbtn" title="Modifier" onClick={() => modifierDepl(d)}><Pencil size={14} /></button> <button className="iconbtn" title="Supprimer" onClick={() => supprimerDepl(d.id)}><Trash2 size={14} /></button></td></tr>); })}{deplMois.length > 1 && (() => { const tE = deplMois.reduce((s, d) => s + (Number(d.essence) || 0), 0), tP = deplMois.reduce((s, d) => s + (Number(d.peage) || 0), 0), tA = deplMois.reduce((s, d) => s + (Number(d.autre) || 0), 0); return (<tr style={{ borderTop: "2px solid var(--line)", fontWeight: 800 }}><td>Total</td><td></td><td></td><td style={{ textAlign: "right" }} className="tnum">{eur2(tE)}</td><td style={{ textAlign: "right" }} className="tnum">{eur2(tP)}</td><td style={{ textAlign: "right" }} className="tnum">{eur2(tA)}</td><td style={{ textAlign: "right", color: "var(--green)" }} className="tnum">{eur2(deplTotalMois)}</td><td style={{ textAlign: "right", color: "var(--blue)" }} className="tnum">{eur2(deplTotalMois)}</td><td></td></tr>); })()}</tbody></table></div>}
       </div></>
     )}
+    {fraisExportOpen && (() => { const txt = fraisProNotion(); const copy = async () => { try { await navigator.clipboard.writeText(txt); setFraisCopied(true); setTimeout(() => setFraisCopied(false), 1600); } catch (e) { const ta = document.getElementById("frais-export-ta"); if (ta) { ta.focus(); ta.select(); try { document.execCommand("copy"); setFraisCopied(true); setTimeout(() => setFraisCopied(false), 1600); } catch (e2) { } } } }; return (<Modal title="Exporter les frais professionnels (Notion)" onClose={() => setFraisExportOpen(false)} wide>
+      <div style={{ fontSize: 12.5, color: "var(--muted)", marginBottom: 10, lineHeight: 1.5 }}>Tous les déplacements ponctuels enregistrés (frais professionnels remboursés à 100 %). Cliquez sur <strong>Copier</strong>, puis collez dans Notion : le tableau s'y convertit automatiquement.</div>
+      <textarea id="frais-export-ta" readOnly value={txt} onFocus={(e) => e.target.select()} rows={Math.min(22, txt.split("\n").length + 1)} style={{ width: "100%", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, lineHeight: 1.5, whiteSpace: "pre", overflowX: "auto" }} />
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}><button className="btn btn-p" onClick={copy}>{fraisCopied ? <><CheckCircle2 size={15} /> Copié !</> : <><Copy size={15} /> Copier</>}</button></div>
+    </Modal>); })()}
   </div>);
 }
 function PointageEditor({ ds, rec, onSave, onDelete, onClose }) {
