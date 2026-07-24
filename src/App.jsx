@@ -5989,8 +5989,86 @@ Renvoie UNIQUEMENT un objet JSON valide (aucun texte ni balise autour) avec EXAC
   }
   throw lastErr;
 }
+// Import de prospects (Excel/CSV ou liste texte). Reconnaissance souple des colonnes par leur intitulé.
+const PROSPECT_FIELD_ALIASES = { nom: ["nom", "magasin", "etablissement", "prospect", "raisonsociale", "societe", "name", "enseigne"], enseigne: ["groupe", "reseau", "chaine"], ville: ["ville", "commune", "city"], cp: ["cp", "codepostal", "postal", "zip"], adresse: ["adresse", "adr", "address", "rue"], departement: ["departement", "dept", "dpt"], region: ["region"], telephone: ["telephone", "tel", "phone", "portable", "mobile"], email: ["email", "mail", "courriel"], site: ["site", "siteweb", "web", "url"], notes: ["notes", "note", "commentaire", "remarque", "info"] };
+function matchProspectField(h) { const n = stripAccentsLow(String(h || "")).replace(/[^a-z0-9]/g, ""); if (!n) return null; for (const [f, al] of Object.entries(PROSPECT_FIELD_ALIASES)) { if (al.some((a) => n === a || n.includes(a))) return f; } return null; }
+const cpNum = (v) => String(v == null ? "" : v).replace(/[^0-9]/g, "");
+// Liste texte : un prospect par ligne. Colonnes séparées par tabulation ou « ; » (sinon nom seul, avec
+// détection « Nom, Ville » / « Nom - Ville »). En-tête reconnu si la 1re ligne nomme ≥ 2 champs connus.
+function parseProspectText(text) {
+  const lines = String(text || "").replace(/\r/g, "").split("\n").map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return [];
+  const hasTab = lines.some((l) => l.includes("\t"));
+  const sep = hasTab ? "\t" : (lines.some((l) => l.includes(";")) ? ";" : null);
+  const split = (l) => sep ? l.split(sep).map((x) => x.trim()) : [l];
+  const POS = ["nom", "ville", "cp", "telephone", "email"];
+  const firstCols = split(lines[0]).map((x) => matchProspectField(x));
+  const header = sep && firstCols.filter(Boolean).length >= 2 ? firstCols : null;
+  const body = header ? lines.slice(1) : lines;
+  const out = [];
+  body.forEach((l) => {
+    const parts = split(l); const p = {};
+    if (header) header.forEach((f, i) => { if (f && parts[i]) p[f] = parts[i].trim(); });
+    else if (sep) POS.forEach((f, i) => { if (parts[i]) p[f] = parts[i].trim(); });
+    else { const m = l.split(/\s[–-]\s|,\s/); p.nom = (m[0] || l).trim(); if (m[1]) p.ville = m[1].trim(); }
+    if (p.cp) p.cp = cpNum(p.cp);
+    if (p.nom) out.push(p);
+  });
+  return out;
+}
+// Lignes Excel/CSV (objets indexés par en-tête) → brouillons de prospects.
+function mapProspectRows(json) {
+  if (!json || !json.length) return [];
+  const keys = Object.keys(json[0]); const colMap = {};
+  keys.forEach((k) => { const f = matchProspectField(k); if (f && !colMap[f]) colMap[f] = k; });
+  if (!colMap.nom && keys.length) colMap.nom = keys[0];
+  const get = (row, f) => colMap[f] ? String(row[colMap[f]] == null ? "" : row[colMap[f]]).trim() : "";
+  return json.map((row) => ({ nom: get(row, "nom"), enseigne: get(row, "enseigne"), ville: get(row, "ville"), cp: cpNum(get(row, "cp")), adresse: get(row, "adresse"), departement: get(row, "departement"), region: get(row, "region"), telephone: get(row, "telephone"), email: get(row, "email"), site: get(row, "site"), notes: get(row, "notes") })).filter((p) => p.nom);
+}
+function ProspectImportModal({ onClose, onImport }) {
+  const [text, setText] = useState(""); const [drafts, setDrafts] = useState([]); const [enrich, setEnrich] = useState(true); const [msg, setMsg] = useState(null);
+  const fileRef = useRef(null);
+  const applyText = (t) => { setText(t); setDrafts(parseProspectText(t)); setMsg(null); };
+  const onFile = async (file) => {
+    if (!file) return;
+    try {
+      if (/\.(csv|txt|tsv)$/i.test(file.name)) { const t = await file.text(); applyText(t); setMsg({ ok: true, t: file.name + " chargé." }); return; }
+      const buf = await file.arrayBuffer(); const XLSX = await import("xlsx");
+      const wb = XLSX.read(buf, { type: "array" }); const ws = wb.Sheets[wb.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(ws, { defval: "" }); const d = mapProspectRows(json);
+      setDrafts(d); setText(""); setMsg({ ok: d.length > 0, t: d.length ? (file.name + " : " + d.length + " prospect(s) détecté(s).") : "Aucun prospect détecté dans ce fichier." });
+    } catch (e) { setMsg({ ok: false, t: "Lecture du fichier impossible (" + ((e && e.message) || e) + ")." }); }
+  };
+  return (<Modal title="Importer des prospects" onClose={onClose} wide>
+    <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5, marginBottom: 10 }}>Importez un fichier <strong>Excel / CSV</strong> ou collez une <strong>liste texte</strong> (un prospect par ligne). Colonnes reconnues : nom, groupe/réseau, ville, code postal, adresse, téléphone, e-mail… Une simple liste de noms suffit — MITMIT complète le reste par recherche web.</div>
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+      <button className="btn btn-g btn-s" onClick={() => fileRef.current && fileRef.current.click()}><Upload size={14} /> Choisir un fichier Excel / CSV</button>
+      <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.tsv,.txt" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) onFile(f); e.target.value = ""; }} />
+    </div>
+    <div className="fld"><label>Ou collez votre liste (un prospect par ligne)</label><textarea rows={8} value={text} onChange={(e) => applyText(e.target.value)} placeholder={"La Grande Récré, Toulouse\nJouéClub Auch\nKing Jouet; Albi; 81000"} style={{ width: "100%", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12.5 }} /></div>
+    {msg && <div style={{ fontSize: 12, color: msg.ok ? "var(--green)" : "var(--red)", marginTop: 6 }}>{msg.t}</div>}
+    {drafts.length > 0 && <div style={{ marginTop: 10, fontSize: 12.5 }}><strong>{drafts.length} prospect(s) prêt(s) à importer</strong> : <span style={{ color: "var(--muted)" }}>{drafts.slice(0, 8).map((d) => d.nom).join(", ")}{drafts.length > 8 ? "…" : ""}</span></div>}
+    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 600, marginTop: 12 }}><input type="checkbox" checked={enrich} onChange={(e) => setEnrich(e.target.checked)} style={{ width: 15, height: 15 }} /> Lancer la recherche web IA sur les prospects importés (adresse, SIRET, contact…)</label>
+    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}><button className="btn btn-g" onClick={onClose}>Annuler</button><button className="btn btn-p" disabled={!drafts.length} onClick={() => onImport(drafts, enrich)}><Upload size={15} /> Importer {drafts.length || ""}</button></div>
+  </Modal>);
+}
+// Applique le résultat d'un enrichissement IA à une fiche prospect, sans écraser les champs déjà remplis.
+function applyProspectEnrich(x, r) {
+  const patch = {}; const setIf = (k, v) => { if (v && !String(x[k] || "").trim()) patch[k] = v; };
+  if (r.contactEmail && !(x.email || "").trim()) patch.email = r.contactEmail;
+  const tel = r.telephone || r.contactTel || ""; if (tel && !(x.telephone || "").trim()) patch.telephone = tel;
+  setIf("contactEmail", r.contactEmail); setIf("contactTel", r.contactTel);
+  setIf("site", r.site); setIf("facebook", r.facebook); setIf("instagram", r.instagram);
+  setIf("siren", r.siren); setIf("siret", r.siret); setIf("raisonSociale", r.raisonSociale); setIf("formeJuridique", r.formeJuridique);
+  setIf("adresse", r.adresse); setIf("cp", r.cp); setIf("ville", r.ville); setIf("departement", r.departement); setIf("region", r.region);
+  setIf("contactPrenom", r.contactPrenom); setIf("contactNom", r.contactNom); setIf("contactFonction", r.contactFonction);
+  if (r.contactSource && !String(x.contactSource || "").trim()) patch.contactSource = r.contactSource;
+  setIf("notes", r.notes);
+  return Object.keys(patch).length ? { ...x, ...patch } : x;
+}
 function Prospection({ data, persist, go }) {
   const { prospects } = data;
+  const [importOpen, setImportOpen] = useState(false);
   const [q, setQ] = useState(""); const [fType, setFType] = useState("tous"); const [fRegion, setFRegion] = useState("tous"); const [sort, setSort] = useState("type"); const [dir, setDir] = useState("asc"); const [view, setView] = useState("actifs"); const [archiveEdit, setArchiveEdit] = useState(null); const [dupOpen, setDupOpen] = useState(null); const [mailingOpen, setMailingOpen] = useState(false);
   const [edit, setEdit] = useState(null);
   const [zone, setZone] = useState("Occitanie"); const [kind, setKind] = useState("toutes"); const [busy, setBusy] = useState(false); const [aiMsg, setAiMsg] = useState(null); const [aiErr, setAiErr] = useState(null);
@@ -6023,21 +6101,7 @@ function Prospection({ data, persist, go }) {
             const r = await aiEnrichProspect(p, (u) => persist((d) => ({ ...d, claudeUsage: addUsage(d.claudeUsage, u) })));
             if (r.contactEmail && !(p.email || "").trim()) nMail++;
             if ((r.telephone || r.contactTel) && !(p.telephone || "").trim()) nTel++;
-            persist((d) => ({ ...d, prospects: d.prospects.map((x) => {
-              if (x.id !== p.id) return x;
-              const patch = {}; const setIf = (k, v) => { if (v && !String(x[k] || "").trim()) patch[k] = v; };
-              // Priorité : e-mail du magasin (depuis le contact trouvé) et téléphone.
-              if (r.contactEmail && !(x.email || "").trim()) patch.email = r.contactEmail;
-              const tel = r.telephone || r.contactTel || ""; if (tel && !(x.telephone || "").trim()) patch.telephone = tel;
-              setIf("contactEmail", r.contactEmail); setIf("contactTel", r.contactTel);
-              setIf("site", r.site); setIf("facebook", r.facebook); setIf("instagram", r.instagram);
-              setIf("siren", r.siren); setIf("siret", r.siret); setIf("raisonSociale", r.raisonSociale); setIf("formeJuridique", r.formeJuridique);
-              setIf("adresse", r.adresse); setIf("cp", r.cp); setIf("ville", r.ville); setIf("departement", r.departement); setIf("region", r.region);
-              setIf("contactPrenom", r.contactPrenom); setIf("contactNom", r.contactNom); setIf("contactFonction", r.contactFonction);
-              if (r.contactSource && !String(x.contactSource || "").trim()) patch.contactSource = r.contactSource;
-              setIf("notes", r.notes);
-              return Object.keys(patch).length ? { ...x, ...patch } : x;
-            }) }));
+            persist((d) => ({ ...d, prospects: d.prospects.map((x) => x.id === p.id ? applyProspectEnrich(x, r) : x) }));
           } catch (e) {}
           done++; prog(done, queue.length);
           await new Promise((res) => setTimeout(res, 200));
@@ -6045,6 +6109,35 @@ function Prospection({ data, persist, go }) {
         setEnrichMsg({ ok: true, t: "Enrichissement terminé : " + nMail + " e-mail(s) et " + nTel + " téléphone(s) ajoutés sur " + queue.length + " fiche(s). À vérifier (rien d'inventé)." });
       });
     });
+  };
+  // Recherche web IA lancée sur les prospects fraîchement importés (tâche de fond).
+  const enrichCreated = (created) => {
+    if (aiJobs.has("prospects:enrich") || !created.length) return;
+    aiJobs.run("prospects:enrich", "Rechercher les prospects importés", async (prog) => {
+      let done = 0; prog(0, created.length);
+      for (const p of created) {
+        try { const r = await aiEnrichProspect(p, (u) => persist((d) => ({ ...d, claudeUsage: addUsage(d.claudeUsage, u) }))); persist((d) => ({ ...d, prospects: d.prospects.map((x) => x.id === p.id ? applyProspectEnrich(x, r) : x) })); } catch (e) { }
+        done++; prog(done, created.length);
+        await new Promise((res) => setTimeout(res, 200));
+      }
+      setEnrichMsg({ ok: true, t: "Recherche terminée sur " + created.length + " prospect(s) importé(s). À vérifier (rien d'inventé)." });
+    });
+  };
+  // Création des prospects importés (dédoublonnage léger par nom + ville), puis recherche IA optionnelle.
+  const doImport = (drafts, enrich) => {
+    const norm = (s) => stripAccentsLow(String(s || "")).replace(/[^a-z0-9]/g, "");
+    const seen = new Set((prospects || []).map((p) => norm(p.nom || p.enseigne) + "|" + norm(p.ville)));
+    const created = [];
+    drafts.forEach((d) => {
+      const key = norm(d.nom) + "|" + norm(d.ville); if (seen.has(key)) return; seen.add(key);
+      created.push({ id: uid("p_"), nom: d.nom || "", enseigne: d.enseigne || "", type: d.type || "autre", format: "", adresse: d.adresse || "", ville: d.ville || "", cp: d.cp || "", departement: d.departement || "", region: d.region || "", telephone: d.telephone || "", site: d.site || "", email: d.email || "", statut: "a_qualifier", potentiel: "", notes: d.notes || "", source: "Import", accountId: null, createdAt: TODAY(), siren: "", siret: "", raisonSociale: "", formeJuridique: "", contactPrenom: "", contactNom: "", contactFonction: "", contactEmail: "", contactTel: "", contactSource: "", archived: false, archiveReason: "", archiveDate: "", archiveNote: "" });
+    });
+    setImportOpen(false);
+    if (!created.length) { setEnrichMsg({ ok: false, t: "Aucun nouveau prospect importé (tous déjà présents)." }); return; }
+    persist((d) => ({ ...d, prospects: [...created, ...(d.prospects || [])] }));
+    setFlashIds(created.map((c) => c.id));
+    setEnrichMsg({ ok: true, t: created.length + " prospect(s) importé(s)." + (enrich ? " Recherche web IA lancée en tâche de fond…" : "") });
+    if (enrich) enrichCreated(created);
   };
   const enrichProspect = async () => {
     if (!edit || !((edit.nom || edit.enseigne || "").trim())) { setPfMsg({ ok: false, t: "Renseignez d'abord le nom du prospect." }); return; }
@@ -6345,6 +6438,7 @@ function Prospection({ data, persist, go }) {
         <button className="btn btn-ai" onClick={enrichAll} disabled={enriching} title="Compléter automatiquement toutes les fiches prospect via recherche web, en priorité les e-mails et téléphones manquants (tâche de fond)"><Sparkles size={16} className={enriching ? "spin" : ""} /> {enriching ? ("Enrichissement… " + (enrichJob && enrichJob.total ? enrichJob.done + "/" + enrichJob.total : "")) : "Enrichir les fiches"}</button>
         <button className="btn btn-ai" onClick={() => setMailingOpen(true)} title="Générer une vague de mails de premier contact personnalisés (angles vrais) et créer des brouillons Gmail"><Mail size={16} /> Mailing</button>
         <button className="btn btn-ghost" onClick={openMergeDoublons} title="Détecter les prospects en double (même SIRET, même adresse, ou même SIREN + ville), les passer en revue et choisir ceux à fusionner"><Copy size={16} /> Fusionner les doublons</button>
+        <button className="btn btn-g" onClick={() => setImportOpen(true)} title="Importer une liste de prospects (Excel, CSV ou texte) ; MITMIT peut ensuite les rechercher et compléter automatiquement"><Upload size={16} /> Importer</button>
         <button className="btn btn-p" onClick={() => setEdit({ id: "p_" + Date.now(), nom: "", enseigne: "", type: "autre", format: "", adresse: "", ville: "", cp: "", departement: "", region: "", telephone: "", site: "", email: "", statut: "a_qualifier", potentiel: "", notes: "", source: "Saisie manuelle", accountId: null, createdAt: TODAY() })}><Plus size={16} /> Ajouter un prospect</button>
       </div>
     </div>
@@ -6361,6 +6455,7 @@ function Prospection({ data, persist, go }) {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(330px, 1fr))", gap: 12 }}>{g.items.map(card)}</div>
       </div>); })}
     </>)}
+    {importOpen && <ProspectImportModal onClose={() => setImportOpen(false)} onImport={doImport} />}
     {edit && <Modal title={edit.nom ? edit.nom : "Nouveau prospect"} onClose={() => { setEdit(null); setPfMsg(null); }} wide>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
         <button type="button" className="btn btn-ai btn-s" onClick={enrichProspect} disabled={pfBusy || !((edit.nom || edit.enseigne || "").trim())} title="Rechercher en ligne le site, les réseaux, l'identité légale (SIREN/SIRET, raison sociale…) et un contact, puis compléter les champs encore vides"><Sparkles size={14} className={pfBusy ? "spin" : ""} /> {pfBusy ? ("Recherche… " + fmtElapsed(pfElapsed)) : "Approfondir la recherche IA"}</button>
