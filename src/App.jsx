@@ -809,6 +809,18 @@ function normalize(d) {
   d.claudeUsage = d.claudeUsage || { calls: 0, inputTokens: 0, outputTokens: 0 };
   d.events = d.events || [];
   d.settings = { ...SETTINGS, ...(d.settings || {}) };
+  // De facto : quand on n'a pas l'e-mail direct du contact, on met celui de l'établissement ; idem pour
+  // le fixe (ligne fixe du magasin). Backfill unique sur tous les contacts existants (jamais d'écrasement).
+  if (!d.settings._contactEtabContact) {
+    d.contacts = (d.contacts || []).map((c) => {
+      if ((c.email && c.email.trim()) && (c.fixe && c.fixe.trim())) return c;
+      const info = etabContactInfo(c, d.sites, d.accounts); const patch = {};
+      if ((!c.email || !c.email.trim()) && info.email) patch.email = info.email;
+      if ((!c.fixe || !c.fixe.trim()) && info.fixe) patch.fixe = info.fixe;
+      return Object.keys(patch).length ? { ...c, ...patch } : c;
+    });
+    d.settings._contactEtabContact = true;
+  }
   // Thème décomposé : reprend l'ancien réglage combiné « bgTheme » vers couleur + motif, une seule fois.
   if (d.settings.bgColor == null) { const m = LEGACY_BGTHEME[d.settings.bgTheme] || ["cream", "dash"]; d.settings.bgColor = m[0]; d.settings.bgPattern = m[1]; }
   if (d.settings.bgPattern == null) d.settings.bgPattern = "dash";
@@ -4653,8 +4665,30 @@ function Repertoire({ data, persist, go, focus }) {
     {dwell.node}
   </div>);
 }
+// Coordonnées de repli d'un contact : à défaut de l'e-mail / du fixe direct de la personne, on prend
+// ceux de son établissement lié (site de rattachement, à défaut le PDV/siège d'un indépendant, sinon
+// l'e-mail du compte). Utilisé pour compléter automatiquement les fiches contact.
+function etabContactInfo(contact, sites, accounts) {
+  let site = (sites || []).find((s) => s.id === contact.siteId) || null;
+  const acc = (accounts || []).find((a) => a.id === contact.accountId) || null;
+  if (!site && acc && !isGroupe(acc)) site = (sites || []).find((s) => s.accountId === acc.id && (s.type === "pdv" || s.type === "decision")) || null;
+  const email = (site && (site.email || site.contactMail)) || (acc && acc.email) || "";
+  const fixe = (site && site.telFixe) || "";
+  return { email: (email || "").trim(), fixe: (fixe || "").trim() };
+}
 function ContactForm({ contact, accounts, contacts, onSave, known = [], sites = [] }) {
   const [f, setF] = useState(contact); const up = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  // À l'ouverture et à chaque changement d'établissement lié : si l'e-mail ou le fixe direct manque,
+  // on reprend celui de l'établissement (sans jamais écraser une coordonnée déjà saisie).
+  useEffect(() => {
+    setF((p) => {
+      const info = etabContactInfo(p, sites, accounts);
+      const patch = {};
+      if ((!p.email || !p.email.trim()) && info.email) patch.email = info.email;
+      if ((!p.fixe || !p.fixe.trim()) && info.fixe) patch.fixe = info.fixe;
+      return Object.keys(patch).length ? { ...p, ...patch } : p;
+    });
+  }, [f.accountId, f.siteId]);
   const ens = accounts.find((a) => a.id === f.accountId)?.enseigne || "";
   const dup = (contacts || []).length > 0 ? findDuplicateContact(contacts, f.prenom, f.nom, f.email, f.id) : null;
   const acc = accounts.find((a) => a.id === f.accountId) || null;
