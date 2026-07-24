@@ -1208,6 +1208,12 @@ function identityKeys(o) {
   if (ger.length && ville) keys.push("G:" + ger.join("") + "|" + ville);
   return keys;
 }
+// Une fiche est enrichissable dès qu'elle porte AU MOINS un signal d'identité exploitable par la
+// recherche IA (produit en croix) : nom, enseigne, SIRET, SIREN, adresse, ville, téléphone, e-mail ou site.
+function hasProspectIdentity(p) {
+  if (!p) return false;
+  return ["nom", "enseigne", "siret", "siren", "adresse", "ville", "telephone", "email", "site", "contactTel", "contactEmail", "raisonSociale"].some((k) => String(p[k] || "").trim());
+}
 // ===== Mailing de prospection : angles factuels vrais + prompt + génération =====
 // Départements d'Occitanie (deux premiers chiffres du code postal). Liste extensible.
 const OCCITANIE_DEPTS = new Set(["09", "11", "12", "30", "31", "32", "34", "46", "48", "65", "66", "81", "82"]);
@@ -6047,13 +6053,18 @@ function parseJsonObject(text) {
 // adresse, téléphone, contact), analyse JSON robuste et une 2ᵉ tentative en cas d'échec — meilleures
 // performance et fiabilité. N'invente rien (champ laissé vide en cas de doute).
 async function aiEnrichProspect(p, persistUsage, instruction) {
-  const cible = [p.nom, p.enseigne && p.enseigne !== p.nom ? p.enseigne : "", p.adresse, [p.cp, p.ville].filter(Boolean).join(" ")].filter(Boolean).join(" · ");
-  const sys = "Tu enrichis la fiche d'un point de vente français (jouets / loisirs créatifs) à partir du web et des registres officiels (annuaire-entreprises.data.gouv.fr / RNE / INSEE, pappers.fr, societe.com, infogreffe.fr, data.inpi.fr), du site officiel et de la fiche Google. Tu n'inventes JAMAIS une donnée (identifiant, adresse, courriel, nom) : en cas de doute, tu laisses le champ vide. Tu réponds UNIQUEMENT par du JSON valide.";
-  const known = [p.siret ? "SIRET connu : " + p.siret : "", p.siren ? "SIREN connu : " + p.siren : "", p.site ? "Site connu : " + p.site : ""].filter(Boolean).join(" ; ");
-  const user = `Établissement à enrichir : ${cible}.${known ? "\n" + known + "." : ""}
-Recherche ses informations vérifiables. Attention aux homonymes : ne retiens que l'établissement de la ville / adresse indiquée.
+  // Recherche « en produit en croix » : on identifie l'établissement à partir de N'IMPORTE quel signal
+  // disponible sur la fiche (nom, mais aussi SIRET/SIREN, adresse, téléphone, e-mail, site…) et on
+  // complète les champs manquants — Y COMPRIS le nom, qui peut être reconstitué depuis les autres infos.
+  const cible = [p.nom, p.enseigne && p.enseigne !== p.nom ? p.enseigne : "", p.adresse, [p.cp, p.ville].filter(Boolean).join(" ")].filter(Boolean).join(" · ") || "(nom non renseigné — à identifier depuis les données ci-dessous)";
+  const sys = "Tu enrichis la fiche d'un point de vente français (jouets / loisirs créatifs) à partir du web et des registres officiels (annuaire-entreprises.data.gouv.fr / RNE / INSEE, pappers.fr, societe.com, infogreffe.fr, data.inpi.fr), du site officiel et de la fiche Google. Tu fonctionnes comme un produit en croix : à partir de N'IMPORTE quelle donnée déjà connue (nom, SIRET, SIREN, adresse, téléphone, e-mail, site web…), tu retrouves et complètes TOUTES les autres, y compris le nom commercial de l'établissement s'il manque. Tu n'inventes JAMAIS une donnée (identifiant, adresse, courriel, nom) : en cas de doute, tu laisses le champ vide. Tu réponds UNIQUEMENT par du JSON valide.";
+  const known = [p.siret ? "SIRET : " + p.siret : "", p.siren ? "SIREN : " + p.siren : "", p.raisonSociale ? "Raison sociale : " + p.raisonSociale : "", p.adresse ? "Adresse : " + p.adresse : "", [p.cp, p.ville].filter(Boolean).join(" ") ? "Ville : " + [p.cp, p.ville].filter(Boolean).join(" ") : "", (p.telephone || p.contactTel) ? "Téléphone : " + (p.telephone || p.contactTel) : "", (p.email || p.contactEmail) ? "E-mail : " + (p.email || p.contactEmail) : "", p.site ? "Site : " + p.site : ""].filter(Boolean).join(" ; ");
+  const user = `Établissement à enrichir : ${cible}.${known ? "\nDonnées déjà connues (sers-t'en comme point de départ du produit en croix) : " + known + "." : ""}
+Recherche ses informations vérifiables. Attention aux homonymes : ne retiens que l'établissement correspondant aux données connues (même SIRET/SIREN, même adresse, même téléphone…).
+Si le nom n'est pas renseigné, reconstitue-le (enseigne + ville, ou raison sociale) à partir des autres données ; sinon laisse "nom" vide.
 Renvoie UNIQUEMENT un objet JSON valide (aucun texte ni balise autour) avec EXACTEMENT ces clés :
-{"site":"","facebook":"","instagram":"","siren":"","siret":"","raisonSociale":"","formeJuridique":"","adresse":"","cp":"","ville":"","departement":"","region":"","telephone":"","contact":{"prenom":"","nom":"","fonction":"","email":"","telephone":"","source":""},"notes":"","confiance":"haute/moyenne/faible","source":""}
+{"nom":"","site":"","facebook":"","instagram":"","siren":"","siret":"","raisonSociale":"","formeJuridique":"","adresse":"","cp":"","ville":"","departement":"","region":"","telephone":"","contact":{"prenom":"","nom":"","fonction":"","email":"","telephone":"","source":""},"notes":"","confiance":"haute/moyenne/faible","source":""}
+- nom : nom commercial / enseigne de CE point de vente (ex. « King Jouet Cahors »), reconstitué depuis les autres données si absent.
 - site / facebook / instagram : URLs officielles (sinon vide).
 - siren : 9 chiffres de la société (ou RNA « W… » pour une association) ; siret : 14 chiffres de CET établissement à cette adresse (sinon vide).
 - adresse : complète ; telephone : du magasin, format français.
@@ -6071,6 +6082,7 @@ Renvoie UNIQUEMENT un objet JSON valide (aucun texte ni balise autour) avec EXAC
       const o = parseJsonObject(text); const c = o.contact || {};
       if (data.usage && persistUsage) persistUsage(data.usage);
       return {
+        nom: (o.nom || "").trim(),
         site: (o.site || "").trim(), facebook: (o.facebook || "").trim(), instagram: (o.instagram || "").trim(),
         siren: onlyNum(o.siren), siret: onlyNum(o.siret), raisonSociale: (o.raisonSociale || "").trim(), formeJuridique: (o.formeJuridique || "").trim(),
         adresse: (o.adresse || "").trim(), cp: onlyNum(o.cp), ville: (o.ville || "").trim(), departement: (o.departement || "").trim(), region: (o.region || "").trim(),
@@ -6148,6 +6160,7 @@ function ProspectImportModal({ onClose, onImport }) {
 // Applique le résultat d'un enrichissement IA à une fiche prospect, sans écraser les champs déjà remplis.
 function applyProspectEnrich(x, r) {
   const patch = {}; const setIf = (k, v) => { if (v && !String(x[k] || "").trim()) patch[k] = v; };
+  setIf("nom", r.nom); // nom reconstitué par l'IA depuis les autres infos, si la fiche n'en a pas
   if (r.contactEmail && !(x.email || "").trim()) patch.email = r.contactEmail;
   const tel = r.telephone || r.contactTel || ""; if (tel && !(x.telephone || "").trim()) patch.telephone = tel;
   setIf("contactEmail", r.contactEmail); setIf("contactTel", r.contactTel);
@@ -6163,7 +6176,7 @@ function applyProspectEnrich(x, r) {
 // Évite d'enrichir « toutes » les fiches d'un coup (crédits + temps) — on cible « indépendants », « autres »,
 // « franchisés », etc., et on peut plafonner le nombre traité.
 function EnrichSelectModal({ prospects, onClose, onLaunch }) {
-  const targets = (prospects || []).filter((p) => !p.accountId && (p.nom || p.enseigne || "").trim());
+  const targets = (prospects || []).filter((p) => !p.accountId && hasProspectIdentity(p));
   const counts = {}; targets.forEach((p) => { const t = p.type || "autre"; counts[t] = (counts[t] || 0) + 1; });
   const typeKeys = Object.keys(PROSPECT_TYPES).filter((t) => counts[t]);
   const [sel, setSel] = useState(() => new Set(typeKeys));
@@ -6218,7 +6231,7 @@ function Prospection({ data, persist, go }) {
   // `instruction` : consigne libre décrivant ce que l'utilisateur veut enrichir en priorité.
   const enrichAll = (types, limit, instruction) => {
     if (aiJobs.has("prospects:enrich")) return;
-    let targets = prospects.filter((p) => !p.accountId && (p.nom || p.enseigne || "").trim());
+    let targets = prospects.filter((p) => !p.accountId && hasProspectIdentity(p));
     if (types && types.size) targets = targets.filter((p) => types.has(p.type || "autre"));
     if (!targets.length) { setEnrichMsg({ ok: false, t: "Aucun prospect à enrichir." }); return; }
     const missing = targets.filter((p) => !(p.email || "").trim() || !(p.telephone || "").trim());
@@ -6290,12 +6303,15 @@ function Prospection({ data, persist, go }) {
     if (enrich) enrichCreated(created);
   };
   const enrichProspect = async () => {
-    if (!edit || !((edit.nom || edit.enseigne || "").trim())) { setPfMsg({ ok: false, t: "Renseignez d'abord le nom du prospect." }); return; }
+    // Produit en croix : il suffit d'UN signal d'identité (nom, enseigne, SIRET, SIREN, adresse, ville,
+    // téléphone, e-mail ou site) pour lancer la recherche — l'IA reconstitue le reste, y compris le nom.
+    if (!edit || !hasProspectIdentity(edit)) { setPfMsg({ ok: false, t: "Renseignez au moins une info : nom, SIRET/SIREN, adresse, téléphone, e-mail ou site." }); return; }
     setPfBusy(true); setPfMsg(null);
     try {
       const r = await aiEnrichProspect(edit, (u) => persist((d) => ({ ...d, claudeUsage: addUsage(d.claudeUsage, u) })));
       const patch = {}; const filled = [];
       const fillIf = (key, val, label) => { if (val && !String(edit[key] || "").trim()) { patch[key] = val; filled.push(label); } };
+      fillIf("nom", r.nom, "nom");
       fillIf("site", r.site, "site"); fillIf("facebook", r.facebook, "Facebook"); fillIf("instagram", r.instagram, "Instagram");
       fillIf("siren", r.siren, r.siren && r.siren[0] === "W" ? "RNA" : "SIREN"); fillIf("siret", r.siret, "SIRET");
       fillIf("raisonSociale", r.raisonSociale, "raison sociale"); fillIf("formeJuridique", r.formeJuridique, "forme juridique");
@@ -6609,7 +6625,7 @@ function Prospection({ data, persist, go }) {
     {enrichOpen && <EnrichSelectModal prospects={prospects} onClose={() => setEnrichOpen(false)} onLaunch={(types, limit, instruction) => { setEnrichOpen(false); enrichAll(types, limit, instruction); }} />}
     {edit && <Modal title={edit.nom ? edit.nom : "Nouveau prospect"} onClose={() => { setEdit(null); setPfMsg(null); }} wide>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
-        <button type="button" className="btn btn-ai btn-s" onClick={enrichProspect} disabled={pfBusy || !((edit.nom || edit.enseigne || "").trim())} title="Rechercher en ligne le site, les réseaux, l'identité légale (SIREN/SIRET, raison sociale…) et un contact, puis compléter les champs encore vides"><Sparkles size={14} className={pfBusy ? "spin" : ""} /> {pfBusy ? ("Recherche… " + fmtElapsed(pfElapsed)) : "Approfondir la recherche IA"}</button>
+        <button type="button" className="btn btn-ai btn-s" onClick={enrichProspect} disabled={pfBusy || !hasProspectIdentity(edit)} title="Recherche « produit en croix » : à partir de n'importe quelle info connue (nom, SIRET, adresse, téléphone…), retrouver et compléter les champs vides, y compris le nom"><Sparkles size={14} className={pfBusy ? "spin" : ""} /> {pfBusy ? ("Recherche… " + fmtElapsed(pfElapsed)) : "Approfondir la recherche IA"}</button>
         {pfMsg && <span style={{ fontSize: 11.5, color: pfMsg.ok ? "var(--green)" : "var(--red)", fontWeight: 600, display: "inline-flex", alignItems: "flex-start", gap: 5, flex: 1, minWidth: 200, lineHeight: 1.4 }}>{pfMsg.ok ? <CheckCircle2 size={13} style={{ flexShrink: 0, marginTop: 1 }} /> : null}<span>{pfMsg.t}</span></span>}
       </div>
       <div className="row2"><div className="fld"><label>Nom du prospect</label><input value={edit.nom} onChange={(e) => upE("nom", e.target.value)} /></div><div className="fld"><label>Groupe / réseau</label><input value={edit.enseigne} onChange={(e) => upE("enseigne", e.target.value)} placeholder="JouéClub, King Jouet, indépendant…" /></div></div>
