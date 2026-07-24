@@ -176,6 +176,19 @@ function openPrint(title, bodyHtml) {
   w.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>body{font-family:'Segoe UI',Arial,sans-serif;color:#16203a;padding:30px;max-width:800px;margin:auto;line-height:1.45;}h1{font-size:23px;margin:0 0 2px;}h2{font-size:14px;color:#16203a;border-bottom:2px solid #FF5A45;padding-bottom:4px;margin:24px 0 8px;}table{width:100%;border-collapse:collapse;font-size:12px;margin-top:4px;}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #eaeef5;}th{color:#5b6478;font-weight:600;font-size:11px;text-transform:uppercase;}.muted{color:#5b6478;font-size:12px;}.stat{display:inline-block;margin:0 22px 6px 0;font-size:12px;}.stat b{display:block;font-size:16px;}.tag{display:inline-block;font-size:11px;background:#eef2fb;border-radius:6px;padding:2px 8px;margin:0 6px 4px 0;}.foot{margin-top:30px;color:#9aa6bd;font-size:10.5px;border-top:1px solid #eaeef5;padding-top:8px;}</style></head><body>${bodyHtml}<div class="foot">PEN'UP 3D · MITMIT · export du ${new Date().toLocaleDateString("fr-FR")}</div><script>window.onload=function(){setTimeout(function(){window.print();},250);}<\/script></body></html>`);
   w.document.close();
 }
+// Catalogue partageable : corps HTML de la gamme (produits vendables), groupé par famille, prêt à
+// exporter en PDF (via openPrint) et à envoyer au prospect.
+function buildCatalogueHtml(products) {
+  const vend = (products || []).filter((p) => p.vendable !== false);
+  const byFam = {}; vend.forEach((p) => { const f = p.famille || "Autre"; (byFam[f] = byFam[f] || []).push(p); });
+  const fams = Object.keys(byFam).sort((a, b) => a.localeCompare(b, "fr"));
+  let html = `<h1>Catalogue PEN'UP 3D</h1><div class="muted">Gamme · ${vend.length} référence(s) · prix public conseillé (PVC) TTC indicatif.</div>`;
+  fams.forEach((f) => {
+    const rows = byFam[f].slice().sort((a, b) => (a.designation || "").localeCompare(b.designation || "", "fr")).map((p) => `<tr><td><strong>${escapeHtml(p.designation || p.code || "")}</strong></td><td class="muted">${escapeHtml(p.code || "")}</td><td style="text-align:right">${escapeHtml(p.pvc != null ? eur(p.pvc) : "—")}</td></tr>`).join("");
+    html += `<h2>${escapeHtml(f)}</h2><table><thead><tr><th>Désignation</th><th>Référence</th><th style="text-align:right">PVC TTC</th></tr></thead><tbody>${rows}</tbody></table>`;
+  });
+  return html;
+}
 // Construit le corps HTML d'une fiche (groupe ou établissement) pour l'export PDF.
 function ficheBody(title, subtitle, tags, stats, conts, deals, ints, acc, data) {
   const stat = (stats || []).map((s) => `<span class="stat"><b>${escapeHtml(s.v)}</b>${escapeHtml(s.l)}</span>`).join("");
@@ -3113,6 +3126,22 @@ function Dashboard({ data, go }) {
         </div>
       </div>
     ); })()}
+    {(() => {
+      // Brief de la semaine (calcul local, sans IA) : l'essentiel des 7 derniers jours + ce qui arrive.
+      const d7 = isoLocal(new Date(Date.now() - 6 * 86400000)); const today = TODAY(); const in7 = isoLocal(new Date(Date.now() + 7 * 86400000));
+      const inWeek = (dt) => dt && dt >= d7 && dt <= today;
+      const ech = (data.interactions || []).filter((i) => inWeek(i.date)).length;
+      const newP = (data.prospects || []).filter((p) => inWeek(p.createdAt)).length;
+      const devEnv = deals.filter((x) => x.type === "Devis" && inWeek(x.date)).length;
+      const caSig7 = sumMontant(deals.filter((x) => isCaSigne(x) && inWeek(x.date)));
+      const rdv = (data.events || []).filter((e) => !e.done && e.date >= today && e.date <= in7).length;
+      const relance = deals.filter((x) => isDevisEnAttente(x) && x.statut === "envoye").length;
+      const stat = (label, val, color) => (<div className="hrow" style={{ flex: "1 1 130px", minWidth: 118, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 12, padding: "10px 12px" }}><div className="pu-display tnum" style={{ fontSize: 21, fontWeight: 800, color }}>{val}</div><div style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 600 }}>{label}</div></div>);
+      return (<div className="card" style={{ marginBottom: 18, borderLeft: "4px solid #7c5cf0" }}>
+        <div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><CalendarDays size={16} style={{ color: "#7c5cf0" }} /> Brief de la semaine</h3><span>7 derniers jours</span></div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>{stat("Échanges", ech, "#0EA5A4")}{stat("Nouveaux prospects", newP, "#3F60AA")}{stat("Devis envoyés", devEnv, "var(--yellow-d)")}{stat("CA signé", eur(caSig7), "#2bb673")}{stat("RDV à venir (7 j)", rdv, "#A855F7")}{stat("Devis à relancer", relance, "#FF5A45")}</div>
+      </div>);
+    })()}
     <DashSection icon={LayoutDashboard} color="#3F60AA" title="Synthèse" note="indicateurs clés & entonnoir" />
     <div className="grid kpis" style={{ marginBottom: 18 }}>{kpis.map((k, i) => (<div className="card kpi" key={i} style={{ animationDelay: `${i * 80}ms` }}><div className="ic" style={{ background: k.bg, color: k.fg }}>{k.ic}</div><div className="lab">{k.lab}</div><div className="val pu-display tnum">{k.val}</div><div className="sub">{k.sub}</div></div>))}</div>
     <FunnelTile accounts={accounts} go={go} />
@@ -5372,6 +5401,15 @@ function DevisPreview({ deal, account, settings, products = [], data = {}, onClo
         <div style={{ fontSize: 11.5, color: "#6b7589", marginTop: 7 }}>Merci d'indiquer la référence {ref} lors de votre virement.</div>
       </div>}
       {deal.type === "Commande" && deal.signature && <div style={{ marginTop: 22, display: "flex", justifyContent: "flex-end" }}><div style={{ border: "1px solid #eef1f7", borderRadius: 8, padding: "10px 14px", minWidth: 240, textAlign: "center" }}><div style={{ fontSize: 11, color: "#6b7589", fontWeight: 700, marginBottom: 4 }}>Bon pour accord{deal.signataire ? " — " + deal.signataire : ""}{deal.signatureDate ? " · " + deal.signatureDate : ""}</div><img src={deal.signature} alt="Signature" style={{ maxWidth: 240, maxHeight: 90, display: "block", margin: "0 auto" }} /></div></div>}
+      {deal.type === "Devis" && <div style={{ marginTop: 22, display: "flex", justifyContent: "flex-end" }}>
+        <div style={{ border: "1px solid #d9deea", borderRadius: 8, padding: "12px 14px", width: 320 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: "#16203a", marginBottom: 9 }}>Bon pour accord</div>
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 11.5, color: "#16203a", lineHeight: 1.5 }}><span style={{ display: "inline-block", width: 14, height: 14, border: "1.6px solid #16203a", borderRadius: 3, flexShrink: 0, marginTop: 1 }} /><span>J'accepte ce devis (bon pour accord) et en autorise la mise en commande.</span></label>
+          <div style={{ fontSize: 11, color: "#6b7589", marginTop: 11, lineHeight: 1.9 }}>Nom &amp; fonction : ________________________<br />Date : ____________&nbsp;&nbsp;Signature :</div>
+          <div style={{ height: 42 }} />
+          <div style={{ fontSize: 10, color: "#6b7589", borderTop: "1px dashed #d9deea", paddingTop: 6, lineHeight: 1.5 }}>À cocher et signer ici, <strong>ou</strong> à confirmer par simple réponse à notre e-mail avec la mention « bon pour accord ».</div>
+        </div>
+      </div>}
       <div style={{ marginTop: 26, fontSize: 10.5, color: "#6b7589", borderTop: "1px solid #eef1f7", paddingTop: 10, lineHeight: 1.7 }}>
         {titre === "DEVIS" && <div>Devis valable 30 jours.</div>}
         <div><strong>Livraison {zc.label}</strong> — franco de port dès {zc.seuil} € HT de commande ; en deçà, participation forfaitaire de {zc.part} € HT aux frais de port.</div>
@@ -5557,7 +5595,7 @@ function Stock({ data, persist }) {
   const cntStatut = (k) => products.filter((p) => statusOf(p) === k).length;
   const hasFilter = q || fam !== "Tous" || filtStatut !== "tous";
   return (<div className="fade">
-    <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}><div style={{ position: "relative", flex: 1, minWidth: 200 }}><Search size={15} style={{ position: "absolute", left: 11, top: 11, color: "var(--muted)" }} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher par référence ou code…" style={{ width: "100%", padding: "9px 11px 9px 32px", border: "1px solid var(--line)", borderRadius: 11, fontFamily: "inherit", fontSize: 13.5 }} /></div><GroupBar value={grp} onChange={setGrp} dir={dir} onToggleDir={() => setDir((d) => d === "asc" ? "desc" : "asc")} options={[{ id: "catalogue", label: "ordre catalogue" }, { id: "etat", label: "état" }, { id: "famille", label: "famille" }]} /><button className="btn btn-ghost" onClick={() => downloadCSV(list.map((p) => ({ Code: p.code, Designation: p.designation, Famille: p.famille, Dispo: p.dispo, Seuil: p.seuil, VentesMois: effVentes(p), VentesMois_auto: ventesMoisAuto(p) != null ? "oui" : "non", Couverture_jours: coverage(p) || "", Etat: statusOf(p), Poids_g: p.poidsG, Vente: p.vendable ? "oui" : "non", PVC_TTC: p.pvc, PVC_HT: pvcHtOf(p) != null ? Math.round(pvcHtOf(p) * 100) / 100 : "", Prix_pro_HT: p.cessionHT != null ? p.cessionHT : "" })), "stock-penup3d-" + new Date().toISOString().slice(0, 10) + ".csv")}><FileDown size={15} /> Export CSV</button><button className="btn btn-p" title="Génère la page de commande HTML à jour, avec seulement les produits en vente et leurs images" onClick={() => { const html = buildBonCommandeHTML(products); const blob = new Blob([html], { type: "text/html;charset=utf-8" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "bon_de_commande_penup3d.html"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); }}><Download size={15} /> Bon de commande (HTML)</button><button className="btn btn-ghost" disabled={shopBusy} title="Met à jour les disponibilités depuis le stock Shopify (lecture seule, par SKU)" onClick={syncShopify}><RefreshCw size={15} /> {shopBusy ? "Synchro…" : "Stock Shopify"}</button></div>
+    <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}><div style={{ position: "relative", flex: 1, minWidth: 200 }}><Search size={15} style={{ position: "absolute", left: 11, top: 11, color: "var(--muted)" }} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher par référence ou code…" style={{ width: "100%", padding: "9px 11px 9px 32px", border: "1px solid var(--line)", borderRadius: 11, fontFamily: "inherit", fontSize: 13.5 }} /></div><GroupBar value={grp} onChange={setGrp} dir={dir} onToggleDir={() => setDir((d) => d === "asc" ? "desc" : "asc")} options={[{ id: "catalogue", label: "ordre catalogue" }, { id: "etat", label: "état" }, { id: "famille", label: "famille" }]} /><button className="btn btn-ghost" onClick={() => downloadCSV(list.map((p) => ({ Code: p.code, Designation: p.designation, Famille: p.famille, Dispo: p.dispo, Seuil: p.seuil, VentesMois: effVentes(p), VentesMois_auto: ventesMoisAuto(p) != null ? "oui" : "non", Couverture_jours: coverage(p) || "", Etat: statusOf(p), Poids_g: p.poidsG, Vente: p.vendable ? "oui" : "non", PVC_TTC: p.pvc, PVC_HT: pvcHtOf(p) != null ? Math.round(pvcHtOf(p) * 100) / 100 : "", Prix_pro_HT: p.cessionHT != null ? p.cessionHT : "" })), "stock-penup3d-" + new Date().toISOString().slice(0, 10) + ".csv")}><FileDown size={15} /> Export CSV</button><button className="btn btn-p" title="Génère la page de commande HTML à jour, avec seulement les produits en vente et leurs images" onClick={() => { const html = buildBonCommandeHTML(products); const blob = new Blob([html], { type: "text/html;charset=utf-8" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "bon_de_commande_penup3d.html"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); }}><Download size={15} /> Bon de commande (HTML)</button><button className="btn btn-g" title="Catalogue de la gamme (prix public conseillé), groupé par famille — export PDF à partager au prospect" onClick={() => openPrint("Catalogue PEN'UP 3D", buildCatalogueHtml(products))}><Printer size={15} /> Catalogue (PDF)</button><button className="btn btn-ghost" disabled={shopBusy} title="Met à jour les disponibilités depuis le stock Shopify (lecture seule, par SKU)" onClick={syncShopify}><RefreshCw size={15} /> {shopBusy ? "Synchro…" : "Stock Shopify"}</button></div>
     {shopMsg && <div style={{ marginBottom: 12, fontSize: 12.5, fontWeight: 600, color: shopMsg.startsWith("Échec") ? "var(--red)" : "var(--blue)" }}>{shopMsg}</div>}
     <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "stretch", marginBottom: 14 }}>
       <FilterGroup label="Famille" color="#3F60AA">{familles.map((ff) => ff === "Tous" ? <AllChip key={ff} active={fam === "Tous"} onClick={() => setFam("Tous")}>Tous</AllChip> : <button key={ff} className={cx("chip", fam === ff && "on")} onClick={() => setFam(ff)} style={fam === ff ? { background: "#3F60AA", borderColor: "#3F60AA", color: "#fff" } : {}}>{ff}</button>)}</FilterGroup>
