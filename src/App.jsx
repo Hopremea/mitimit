@@ -809,6 +809,7 @@ function normalize(d) {
   // Listes / segments de prospects (Brevo/HubSpot) et vues enregistrées (Notion/Airtable) : structures
   // persistées, initialisées si absentes.
   d.prospectLists = Array.isArray(d.prospectLists) ? d.prospectLists.map((l) => ({ id: l.id, name: l.name || "Liste", ids: Array.isArray(l.ids) ? l.ids : [] })) : [];
+  d.emailTemplates = Array.isArray(d.emailTemplates) ? d.emailTemplates : seedEmailTemplates();
   d.accounts = d.accounts.map((a) => (!a.adressePostale && a.adresseLivraison) ? { ...a, adressePostale: a.adresseLivraison, livraisonIdentique: true } : a);
   d.accounts = d.accounts.map((a) => ({ ...a, nature: a.nature || guessNature(a) }));
   // Auto-réparation idempotente du champ « kind » (groupe / établissement) : couvre les comptes
@@ -4811,9 +4812,45 @@ function AccountForm({ acc, accounts, onSave, known = [], onUsage }) {
   </>);
 }
 
+// Modèles d'e-mails / réponses réutilisables (bibliothèque). Placeholders libres ({enseigne}, {ref}…)
+// que l'on remplace au moment de coller le message.
+function seedEmailTemplates() {
+  return [
+    { id: "tpl_relance", name: "Relance de devis", subject: "Votre devis PEN'UP 3D", body: "Bonjour,\n\nJe reviens vers vous au sujet du devis {ref} envoyé le {date}. Restez-vous intéressé(e) ? Je reste disponible pour en échanger ou l'ajuster si besoin.\n\nBien cordialement,\nMatthis-Anaël Prevedello — PEN'UP 3D" },
+    { id: "tpl_rdv", name: "Confirmation de rendez-vous", subject: "Confirmation de notre rendez-vous", body: "Bonjour,\n\nJe vous confirme notre rendez-vous du {date}. N'hésitez pas si un autre créneau vous convient mieux.\n\nÀ très bientôt,\nPEN'UP 3D" },
+    { id: "tpl_merci", name: "Remerciement après visite", subject: "Merci pour votre accueil", body: "Bonjour,\n\nMerci pour le temps que vous m'avez accordé. Je reste à votre disposition pour toute question sur la gamme PEN'UP 3D et vous transmets le catalogue en pièce jointe.\n\nBien cordialement," },
+    { id: "tpl_catalogue", name: "Envoi de catalogue", subject: "Catalogue PEN'UP 3D — gamme et tarifs", body: "Bonjour,\n\nComme convenu, voici le catalogue de la gamme PEN'UP 3D avec les prix conseillés. Je peux vous préparer un devis adapté à votre point de vente dès que vous le souhaitez.\n\nBien cordialement," },
+  ];
+}
+function EmailTemplatesModal({ templates, onClose, persist }) {
+  const [edit, setEdit] = useState(null); const [copied, setCopied] = useState(null);
+  const list = templates || [];
+  const save = (t) => persist((d) => ({ ...d, emailTemplates: (d.emailTemplates || []).some((x) => x.id === t.id) ? d.emailTemplates.map((x) => x.id === t.id ? t : x) : [...(d.emailTemplates || []), t] }));
+  const del = (id) => { appConfirm("Supprimer ce modèle ?", { title: "Supprimer le modèle" }).then((ok) => { if (ok) persist((d) => ({ ...d, emailTemplates: (d.emailTemplates || []).filter((x) => x.id !== id) })); }); };
+  const copy = (t) => { const txt = (t.subject ? "Objet : " + t.subject + "\n\n" : "") + (t.body || ""); try { navigator.clipboard.writeText(txt); setCopied(t.id); setTimeout(() => setCopied(null), 1600); } catch (e) {} };
+  if (edit) {
+    const up = (k, v) => setEdit((e) => ({ ...e, [k]: v }));
+    return (<Modal title={list.some((x) => x.id === edit.id) ? "Modifier le modèle" : "Nouveau modèle"} onClose={() => setEdit(null)} wide>
+      <div className="fld"><label>Nom du modèle</label><input value={edit.name} onChange={(e) => up("name", e.target.value)} placeholder="Ex. Relance de devis" /></div>
+      <div className="fld"><label>Objet</label><input value={edit.subject} onChange={(e) => up("subject", e.target.value)} placeholder="Objet de l'e-mail" /></div>
+      <div className="fld"><label>Corps <span style={{ color: "var(--muted)", fontWeight: 400 }}>(placeholders libres : {"{enseigne}"}, {"{ref}"}, {"{date}"}…)</span> <MicDictate title="Dicter le corps" onText={(x) => up("body", ((edit.body || "").trim() + (edit.body && edit.body.trim() ? " " : "") + x))} /></label><textarea rows={9} value={edit.body} onChange={(e) => up("body", e.target.value)} style={{ width: "100%", fontSize: 13 }} /></div>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 6 }}><button className="btn btn-g" onClick={() => setEdit(null)}>Annuler</button><button className="btn btn-p" disabled={!((edit.name || "").trim())} onClick={() => { save({ ...edit, name: edit.name.trim() }); setEdit(null); }}><Save size={15} /> Enregistrer</button></div>
+    </Modal>);
+  }
+  return (<Modal title="Modèles d'e-mails" onClose={onClose} wide>
+    <div style={{ fontSize: 12.5, color: "var(--muted)", marginBottom: 10 }}>Réponses et messages réutilisables. « Copier » place l'objet + le corps dans le presse-papiers, à coller dans Gmail ou ailleurs. Les {"{placeholders}"} sont à remplacer au moment de l'envoi.</div>
+    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}><button className="btn btn-p btn-s" onClick={() => setEdit({ id: uid("tpl_"), name: "", subject: "", body: "" })}><Plus size={14} /> Nouveau modèle</button></div>
+    {list.length === 0 ? <div className="empty">Aucun modèle. Créez votre premier modèle réutilisable.</div> : <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{list.map((t) => (
+      <div key={t.id} className="hrow" style={{ border: "1px solid var(--line)", borderRadius: 11, padding: "10px 12px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><strong style={{ fontSize: 13.5 }}>{t.name || "Sans nom"}</strong>{t.subject && <span style={{ fontSize: 11.5, color: "var(--muted)" }}>· {t.subject}</span>}<span style={{ flex: 1 }} /><button className="btn btn-g btn-s" onClick={() => copy(t)}><Copy size={13} /> {copied === t.id ? "Copié !" : "Copier"}</button><button className="iconbtn" onClick={() => setEdit(t)} title="Modifier"><Pencil size={14} /></button><button className="iconbtn" style={{ color: "var(--red)" }} onClick={() => del(t.id)} title="Supprimer"><Trash2 size={14} /></button></div>
+        <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6, whiteSpace: "pre-wrap", maxHeight: 66, overflow: "hidden", lineHeight: 1.5 }}>{t.body}</div>
+      </div>
+    ))}</div>}
+  </Modal>);
+}
 function Repertoire({ data, persist, go, focus }) {
   const { contacts, accounts, deals, interactions, settings } = data;
-  const [openId, setOpenId] = useState(null); const [q, setQ] = useState(""); const [filt, setFilt] = useState("tous"); const [editC, setEditC] = useState(null); const [grp, setGrp] = useState("alpha"); const [dir, setDir] = useState("asc"); const [view, setView] = useState("actifs");
+  const [openId, setOpenId] = useState(null); const [q, setQ] = useState(""); const [filt, setFilt] = useState("tous"); const [editC, setEditC] = useState(null); const [grp, setGrp] = useState("alpha"); const [dir, setDir] = useState("asc"); const [view, setView] = useState("actifs"); const [tplOpen, setTplOpen] = useState(false);
   const unarchiveContact = (id) => persist((p) => ({ ...p, contacts: p.contacts.map((c) => c.id === id ? { ...c, archived: false } : c) }));
   const archivedContacts = contacts.filter((c) => c.archived);
   const dwell = useDwellPreview();
@@ -4837,6 +4874,7 @@ function Repertoire({ data, persist, go, focus }) {
       <div style={{ position: "relative", flex: 1, minWidth: 200 }}><Search size={15} style={{ position: "absolute", left: 11, top: 11, color: "var(--muted)" }} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un contact, une fonction, un courriel…" style={{ width: "100%", padding: "9px 11px 9px 32px", border: "1px solid var(--line)", borderRadius: 11, fontFamily: "inherit", fontSize: 13.5 }} /></div>
       <GroupBar value={grp} onChange={setGrp} dir={dir} onToggleDir={() => setDir((d) => d === "asc" ? "desc" : "asc")} options={[{ id: "alpha", label: "A → Z" }, { id: "enseigne", label: "groupe / établissement" }, { id: "role", label: "rôle" }, { id: "ville", label: "ville" }, { id: "departement", label: "département" }]} />
       <button className="btn btn-ghost" onClick={() => downloadCSV(contacts.map((c) => { const acc = accounts.find((a) => a.id === c.accountId); return { Prenom: c.prenom, Nom: c.nom, Fonction: c.fonction, Role: (ROLE_META[c.role] || { label: c.role }).label, Email: c.email, Mobile: c.mobile, Fixe: c.fixe, Ville: contactLocality(c, data).ville, Departement: contactLocality(c, data).departement, LinkedIn: c.linkedin, Enseigne: acc ? acc.enseigne : "", Principal: c.principal ? "oui" : "" }; }), "contacts-penup3d-" + new Date().toISOString().slice(0, 10) + ".csv")} title="Exporter en CSV"><FileDown size={15} /> CSV</button>
+      <button className="btn btn-g" onClick={() => setTplOpen(true)} title="Bibliothèque de modèles d'e-mails / réponses réutilisables (à copier-coller)"><Mail size={15} /> Modèles d'e-mails</button>
       <button className="btn btn-p" onClick={() => setEditC({ id: "c_" + Date.now(), accountId: accounts[0]?.id || "", prenom: "", nom: "", fonction: "", role: "autre", email: "", mobile: "", fixe: "", linkedin: "", ville: "", departement: "", adresse: "", principal: false, notes: "", createdAt: TODAY() })}><Plus size={16} /> Nouveau contact</button>
     </div>
     <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
@@ -4856,6 +4894,7 @@ function Repertoire({ data, persist, go, focus }) {
     })()}
     </>)}
     {editC && !openId && <Modal title={contacts.some((x) => x.id === editC.id) ? "Modifier le contact" : "Nouveau contact"} onClose={() => setEditC(null)} wide><ContactForm contact={editC} accounts={accounts} contacts={contacts} sites={data.sites} known={collectKnownAddresses(data)} onSave={(x) => { saveContact(x); setEditC(null); }} /></Modal>}
+    {tplOpen && <EmailTemplatesModal templates={data.emailTemplates} onClose={() => setTplOpen(false)} persist={persist} />}
     {dwell.node}
   </div>);
 }
