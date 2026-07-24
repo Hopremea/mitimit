@@ -5646,7 +5646,7 @@ const shapePath = (type) => type === "pin" ? "M0,0 C-6.5,-8 -6.5,-15 0,-15 C6.5,
   : "M0,-10 L2.9,-3.1 L10,-3.1 L4.2,1.6 L6.4,9 L0,4.6 L-6.4,9 L-4.2,1.6 L-10,-3.1 L-2.9,-3.1 Z";
 const siteColor = (s, account) => s.type === "penup" || s.type === "usine" || s.type === "entrepot" ? "#FFD212" : s.type === "decision" ? enseigneColor(account) : (SURFACE_COLOR[s.typeSurface] || "#9aa6bd");
 function Carte({ data, persist, go, focus }) {
-  const { sites, accounts } = data;
+  const { sites, accounts, prospects } = data;
   const accOf = (id) => accounts.find((x) => x.id === id);
   // Sites archivés (ou dont le compte est archivé) : exclus de la carte et de la liste.
   const isArch = (s) => { if (s.archived) return true; const a = accOf(s.accountId); return !!(a && a.archived); };
@@ -5689,6 +5689,31 @@ function Carte({ data, persist, go, focus }) {
   const usedSurfaces = TYPE_SURFACE.filter((t) => placed.some((st) => st.typeSurface === t && !(st.type === "penup" || st.type === "entrepot" || st.type === "usine")));
   const shown = placed.filter(visible); const visibleIds = new Set(shown.map((x) => x.id));
   const entrepot = placed.find((x) => x.type === "entrepot");
+  // Prospects de l'onglet Prospection : affichés sur la carte quand le filtre d'entonnoir « Prospect »
+  // est actif. Ce sont des fiches encore non converties (pas de compte rattaché), qu'on géolocalise à la
+  // demande depuis leur adresse pour les positionner à côté des établissements déjà enregistrés.
+  const showProspects = filtStage.includes("prospect");
+  const activeProspects = useMemo(() => showProspects ? (prospects || []).filter((p) => !p.archived && !p.accountId && p.statut !== "converti" && (p.nom || p.enseigne || "").trim()) : [], [showProspects, prospects]);
+  const prospPlaced = activeProspects.filter((p) => p.lat != null && p.lng != null);
+  // Géocodage paresseux des prospects visibles sans coordonnées (BAN), séquentiel et mémorisé dans la
+  // fiche pour ne le faire qu'une fois. On mémorise aussi les tentatives échouées le temps de la session.
+  const geoAttempted = useRef(new Set());
+  useEffect(() => {
+    if (!showProspects) return;
+    let cancelled = false;
+    (async () => {
+      for (const p of activeProspects) {
+        if (cancelled) break;
+        if ((p.lat != null && p.lng != null) || geoAttempted.current.has(p.id)) continue;
+        const addr = [p.adresse, p.cp, p.ville].filter(Boolean).join(", ").trim();
+        geoAttempted.current.add(p.id);
+        if (!addr) continue;
+        try { const g = await geocodeAdresse(addr); if (g && !cancelled) persist((d) => ({ ...d, prospects: (d.prospects || []).map((x) => x.id === p.id ? { ...x, lat: g.lat, lng: g.lng } : x) })); } catch (e) { }
+        await new Promise((r) => setTimeout(r, 300));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [showProspects, activeProspects.length]);
   // Mode tournée : ordonne les établissements visibles au plus proche voisin depuis l'entrepôt et ouvre l'itinéraire Google Maps.
   const runTournee = () => {
     const stops = shown.filter((s) => s.lat && s.lng && s.type !== "penup" && s.type !== "entrepot" && s.type !== "usine");
@@ -5770,7 +5795,7 @@ function Carte({ data, persist, go, focus }) {
     if (showRoads) roadsLayer.current.addTo(mapInst.current); else mapInst.current.removeLayer(roadsLayer.current);
   }, [mapReady, showRoads]);
   // Marqueurs : un divIcon SVG par site (forme = type, couleur = enseigne), surbrillance + étiquette sur le sélectionné.
-  const markerKey = useMemo(() => shown.map((p) => p.id + ":" + p.lat + ":" + p.lng + ":" + siteColor(p, accOf(p.accountId))).join("|") + "#" + sel, [shown, sel]);
+  const markerKey = useMemo(() => shown.map((p) => p.id + ":" + p.lat + ":" + p.lng + ":" + siteColor(p, accOf(p.accountId))).join("|") + "#" + sel + "#P" + prospPlaced.map((p) => p.id + ":" + p.lat + ":" + p.lng).join("|"), [shown, sel, prospPlaced]);
   useEffect(() => {
     if (!mapReady || !markersLayer.current) return;
     const lg = markersLayer.current; lg.clearLayers();
@@ -5782,6 +5807,17 @@ function Carte({ data, persist, go, focus }) {
       const m = LF.marker([p.lat, p.lng], { icon, zIndexOffset: on ? 1000 : 0, title: p.label }).addTo(lg);
       m.on("click", () => setSel(p.id));
       if (on) m.bindTooltip(p.label, { permanent: true, direction: "top", offset: [0, -W * 2 / 3], className: "site-tip" }).openTooltip();
+    });
+    // Prospects (onglet Prospection) : cercle pointillé couleur « Prospect » pour les distinguer des
+    // établissements enregistrés. Clic → ouverture de l'onglet Prospection.
+    const PCOL = stageMeta("prospect").color;
+    prospPlaced.forEach((p) => {
+      const nom = p.nom || p.enseigne || "Prospect";
+      const html = `<svg width="24" height="24" viewBox="-13 -13 26 26" style="overflow:visible;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))"><circle cx="0" cy="0" r="8" fill="${PCOL}" fill-opacity="0.9" stroke="#fff" stroke-width="2" stroke-dasharray="3 2"/></svg>`;
+      const icon = LF.divIcon({ html, className: "site-marker", iconSize: [24, 24], iconAnchor: [12, 12] });
+      const m = LF.marker([p.lat, p.lng], { icon, zIndexOffset: -100, title: nom }).addTo(lg);
+      m.bindTooltip(nom + " · Prospect", { direction: "top", offset: [0, -10], className: "site-tip" });
+      m.on("click", () => go("prospection", p.id));
     });
   }, [mapReady, markerKey]);
   // Routes de livraison : trait pointillé animé entrepôt → destination (ligne droite ou itinéraire OSRM réel).
@@ -5804,7 +5840,7 @@ function Carte({ data, persist, go, focus }) {
     if (target) { setSel(target.id); if (target.lat != null && target.lng != null && mapInst.current) mapInst.current.flyTo([target.lat, target.lng], 13, { duration: 0.8 }); }
   }, [mapReady, focus && focus.n]);
   return (<div className="fade">
-    <div className="card" style={{ marginBottom: 12, padding: "10px 14px" }}><div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}><div style={{ fontSize: 12.5, color: "var(--muted)", fontWeight: 600 }}><MapPin size={13} style={{ verticalAlign: -2, marginRight: 4 }} />{shown.length} site{shown.length > 1 ? "s" : ""} affiché{shown.length > 1 ? "s" : ""}{placed.length !== shown.length ? " · " + placed.length + " géolocalisé" + (placed.length > 1 ? "s" : "") : ""}{(liveSites.length - placed.length) > 0 ? " · " + (liveSites.length - placed.length) + " à géolocaliser" : ""}</div><div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}><label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, marginRight: 4 }} title="Tracer les itinéraires de livraison réels (routier) plutôt qu'à vol d'oiseau"><input type="checkbox" checked={useOSRM} onChange={(e) => setUseOSRM(e.target.checked)} style={{ width: 14, height: 14 }} />Itinéraires réels</label><button className={cx("btn", "btn-s", showRoads ? "btn-p" : "btn-g")} onClick={() => setShowRoads((v) => !v)} title="Afficher / masquer les grands axes routiers (autoroutes, nationales)"><Navigation size={15} /> Axes routiers</button><button className={cx("btn", "btn-s", showLegend ? "btn-p" : "btn-g")} onClick={() => setShowLegend((v) => !v)} title="Afficher / masquer la légende des couleurs et formes"><Layers size={15} /> Légende</button><button className="btn btn-g btn-s" onClick={runTournee} title="Itinéraire optimisé des établissements affichés (selon les filtres)"><Navigation size={15} /> Tournée</button><button className="btn btn-p btn-s" onClick={() => setEdit({ id: "s_" + Date.now(), accountId: accounts[0]?.id || null, label: "", type: "pdv", adresse: "", lat: null, lng: null, siret: "", typeSurface: "", adresseLivraison: "", livraisonIdentique: true, contactId: "" })}><Plus size={15} /> Ajouter un site</button></div></div>
+    <div className="card" style={{ marginBottom: 12, padding: "10px 14px" }}><div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}><div style={{ fontSize: 12.5, color: "var(--muted)", fontWeight: 600 }}><MapPin size={13} style={{ verticalAlign: -2, marginRight: 4 }} />{shown.length} site{shown.length > 1 ? "s" : ""} affiché{shown.length > 1 ? "s" : ""}{placed.length !== shown.length ? " · " + placed.length + " géolocalisé" + (placed.length > 1 ? "s" : "") : ""}{(liveSites.length - placed.length) > 0 ? " · " + (liveSites.length - placed.length) + " à géolocaliser" : ""}{showProspects && activeProspects.length > 0 ? " · " + prospPlaced.length + "/" + activeProspects.length + " prospect" + (activeProspects.length > 1 ? "s" : "") + " (onglet Prospection)" : ""}</div><div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}><label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, marginRight: 4 }} title="Tracer les itinéraires de livraison réels (routier) plutôt qu'à vol d'oiseau"><input type="checkbox" checked={useOSRM} onChange={(e) => setUseOSRM(e.target.checked)} style={{ width: 14, height: 14 }} />Itinéraires réels</label><button className={cx("btn", "btn-s", showRoads ? "btn-p" : "btn-g")} onClick={() => setShowRoads((v) => !v)} title="Afficher / masquer les grands axes routiers (autoroutes, nationales)"><Navigation size={15} /> Axes routiers</button><button className={cx("btn", "btn-s", showLegend ? "btn-p" : "btn-g")} onClick={() => setShowLegend((v) => !v)} title="Afficher / masquer la légende des couleurs et formes"><Layers size={15} /> Légende</button><button className="btn btn-g btn-s" onClick={runTournee} title="Itinéraire optimisé des établissements affichés (selon les filtres)"><Navigation size={15} /> Tournée</button><button className="btn btn-p btn-s" onClick={() => setEdit({ id: "s_" + Date.now(), accountId: accounts[0]?.id || null, label: "", type: "pdv", adresse: "", lat: null, lng: null, siret: "", typeSurface: "", adresseLivraison: "", livraisonIdentique: true, contactId: "" })}><Plus size={15} /> Ajouter un site</button></div></div>
       {tourneeOrder && <div style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 10 }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}><strong style={{ fontSize: 13 }}><Navigation size={14} style={{ verticalAlign: -2 }} /> Tournée proposée ({tourneeOrder.length} arrêt{tourneeOrder.length > 1 ? "s" : ""})</strong><button className="iconbtn" onClick={() => setTourneeOrder(null)} title="Fermer"><X size={15} /></button></div><ol style={{ margin: "8px 0 0", paddingLeft: 20, fontSize: 12.5, lineHeight: 1.7 }}>{tourneeOrder.map((s, i) => { const prev = i === 0 ? (entrepot && entrepot.lat ? entrepot : null) : tourneeOrder[i - 1]; const dk = prev ? distanceKm(prev.lat, prev.lng, s.lat, s.lng) : null; return (<li key={s.id}><span className="lnk" onClick={() => selectSite(s)}>{s.label || "Établissement"}</span>{dk != null ? <span style={{ color: "var(--muted)" }}> · {num(Math.round(dk))} km</span> : null}</li>); })}</ol><div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6 }}>Itinéraire au plus proche voisin depuis l'entrepôt, ouvert dans Google Maps (max 9 arrêts).</div></div>}</div>
     <div className="filtbar">
       <div className="grp"><span className="lbl">Type de surface</span><AllChip active={filtSurf.length === 0} onClick={() => setFiltSurf([])}>Toutes</AllChip>{usedSurfaces.map((t) => { const col = SURFACE_COLOR[t] || "#9aa6bd"; return <button key={t} className={cx("chip", filtSurf.includes(t) && "on")} onClick={() => tog(filtSurf, setFiltSurf, t)} style={filtSurf.includes(t) ? { background: col, borderColor: col, color: onColor(col) } : { borderLeft: `4px solid ${col}` }}>{t}</button>; })}</div>
@@ -5826,6 +5862,7 @@ function Carte({ data, persist, go, focus }) {
           <div><div style={{ fontWeight: 800, color: "var(--muted)", fontSize: 10.5, letterSpacing: ".04em", marginBottom: 6 }}>FORME = TYPE DE SITE</div><div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>{[{ s: "pin", c: "#6b7589", vb: "-10 -16 20 20", l: "Point de vente" }, { s: "towers", c: "#6b7589", vb: "-12 -12 24 24", l: "Siège / décision" }, { s: "warehouse", c: "#6b7589", vb: "-11 -12 22 22", l: "Entrepôt" }, { s: "factory", c: "#6b7589", vb: "-12 -11 24 22", l: "Usine / fabricant" }, { s: "star", c: "#FFD212", vb: "-11 -11 22 22", l: "Siège PEN'UP" }].map((it) => <span key={it.s} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><svg width="17" height="17" viewBox={it.vb}><path d={shapePath(it.s)} fill={it.c} stroke="#fff" strokeWidth={1} /></svg>{it.l}</span>)}</div></div>
           <div><div style={{ fontWeight: 800, color: "var(--muted)", fontSize: 10.5, letterSpacing: ".04em", marginBottom: 6 }}>COULEUR = TYPE DE SURFACE</div><div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>{TYPE_SURFACE.map((t) => <span key={t} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><i className="dot" style={{ background: SURFACE_COLOR[t] }} />{t}</span>)}<span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><i className="dot" style={{ background: "#FFD212" }} />PEN'UP 3D · entrepôt · usine</span><span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><i className="dot" style={{ background: "#9aa6bd" }} />Non précisé</span></div></div>
           <div><div style={{ fontWeight: 800, color: "var(--muted)", fontSize: 10.5, letterSpacing: ".04em", marginBottom: 6 }}>CARRÉ = NIVEAU ENTONNOIR</div><div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>{STAGES.map((s) => <span key={s.id} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><i style={{ width: 10, height: 10, borderRadius: 2, background: s.color, display: "inline-block", border: "1px solid #fff", boxShadow: "0 0 0 1px var(--line)" }} />{s.label}</span>)}</div></div>
+          <div style={{ flex: "1 1 100%" }}><div style={{ fontWeight: 800, color: "var(--muted)", fontSize: 10.5, letterSpacing: ".04em", marginBottom: 6 }}>CERCLE POINTILLÉ = PROSPECT (ONGLET PROSPECTION)</div><div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 11.5, color: "var(--muted)" }}><svg width="18" height="18" viewBox="-13 -13 26 26"><circle cx="0" cy="0" r="8" fill={stageMeta("prospect").color} fillOpacity="0.9" stroke="#fff" strokeWidth="2" strokeDasharray="3 2" /></svg>Prospects non encore convertis, affichés quand le filtre d'entonnoir « Prospect » est actif. Clic → onglet Prospection.</div></div>
           {usedAccounts.some(isGroupe) && <div><div style={{ fontWeight: 800, color: "var(--muted)", fontSize: 10.5, letterSpacing: ".04em", marginBottom: 6 }}>SIÈGES = COULEUR DU GROUPE</div><div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>{usedAccounts.filter(isGroupe).map((a) => <span key={a.id} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><i className="dot" style={{ background: enseigneColor(a) }} />{a.enseigne}</span>)}</div></div>}
         </div></div>}
       </div>
@@ -6009,7 +6046,7 @@ function parseJsonObject(text) {
 // Enrichissement IA d'UNE fiche prospect : une seule requête web (site, réseaux, identité légale,
 // adresse, téléphone, contact), analyse JSON robuste et une 2ᵉ tentative en cas d'échec — meilleures
 // performance et fiabilité. N'invente rien (champ laissé vide en cas de doute).
-async function aiEnrichProspect(p, persistUsage) {
+async function aiEnrichProspect(p, persistUsage, instruction) {
   const cible = [p.nom, p.enseigne && p.enseigne !== p.nom ? p.enseigne : "", p.adresse, [p.cp, p.ville].filter(Boolean).join(" ")].filter(Boolean).join(" · ");
   const sys = "Tu enrichis la fiche d'un point de vente français (jouets / loisirs créatifs) à partir du web et des registres officiels (annuaire-entreprises.data.gouv.fr / RNE / INSEE, pappers.fr, societe.com, infogreffe.fr, data.inpi.fr), du site officiel et de la fiche Google. Tu n'inventes JAMAIS une donnée (identifiant, adresse, courriel, nom) : en cas de doute, tu laisses le champ vide. Tu réponds UNIQUEMENT par du JSON valide.";
   const known = [p.siret ? "SIRET connu : " + p.siret : "", p.siren ? "SIREN connu : " + p.siren : "", p.site ? "Site connu : " + p.site : ""].filter(Boolean).join(" ; ");
@@ -6021,7 +6058,7 @@ Renvoie UNIQUEMENT un objet JSON valide (aucun texte ni balise autour) avec EXAC
 - siren : 9 chiffres de la société (ou RNA « W… » pour une association) ; siret : 14 chiffres de CET établissement à cette adresse (sinon vide).
 - adresse : complète ; telephone : du magasin, format français.
 - contact : dirigeant ou responsable identifié, coordonnées issues de la meilleure source publique ; "source" = d'où vient l'info.
-- notes : une phrase factuelle (univers produits, implantation) ; "source" = registre / source principale.`;
+- notes : une phrase factuelle (univers produits, implantation) ; "source" = registre / source principale.${instruction && instruction.trim() ? "\n\nPRIORITÉ DEMANDÉE PAR L'UTILISATEUR (concentre ta recherche là-dessus, sans rien inventer, et résume les trouvailles dans \"notes\") :\n" + instruction.trim() : ""}`;
   const body = { model: "claude-haiku-4-5", max_tokens: 1500, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search" }] };
   const onlyNum = (v) => (typeof v === "string" ? v.replace(/[^0-9A-Za-z]/g, "") : "");
   let lastErr;
@@ -6131,6 +6168,7 @@ function EnrichSelectModal({ prospects, onClose, onLaunch }) {
   const typeKeys = Object.keys(PROSPECT_TYPES).filter((t) => counts[t]);
   const [sel, setSel] = useState(() => new Set(typeKeys));
   const [limit, setLimit] = useState("");
+  const [instruction, setInstruction] = useState("");
   const toggle = (t) => setSel((s) => { const n = new Set(s); n.has(t) ? n.delete(t) : n.add(t); return n; });
   const allOn = typeKeys.length > 0 && typeKeys.every((t) => sel.has(t));
   const selTypes = typeKeys.filter((t) => sel.has(t));
@@ -6149,10 +6187,11 @@ function EnrichSelectModal({ prospects, onClose, onLaunch }) {
         </label>))}
       </div>
       <div className="fld"><label>Limiter le nombre de fiches (optionnel)</label><input type="number" min="1" value={limit} onChange={(e) => setLimit(e.target.value)} placeholder={"Toutes (" + selCount + ")"} style={{ width: 200 }} /></div>
+      <div className="fld"><label>Que voulez-vous enrichir en priorité ? (optionnel)</label><textarea rows={3} value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder={"Ex. : trouver l'e-mail du responsable achats et les horaires d'ouverture ; vérifier le SIRET et la surface de vente ; récupérer les réseaux sociaux…"} style={{ width: "100%", fontSize: 12.5 }} /><span style={{ fontSize: 11, color: "var(--muted)" }}>Laissez vide pour la recherche standard (e-mails et téléphones manquants en priorité).</span></div>
     </>}
     <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
       <button className="btn btn-g" onClick={onClose}>Annuler</button>
-      <button className="btn btn-ai" disabled={!finalCount} onClick={() => onLaunch(new Set(selTypes), capped)}><Sparkles size={15} /> Enrichir {finalCount || ""}</button>
+      <button className="btn btn-ai" disabled={!finalCount} onClick={() => onLaunch(new Set(selTypes), capped, instruction)}><Sparkles size={15} /> Enrichir {finalCount || ""}</button>
     </div>
   </Modal>);
 }
@@ -6175,8 +6214,9 @@ function Prospection({ data, persist, go }) {
   const enriching = jobsP.has("prospects:enrich");
   const enrichJob = jobsP.get("prospects:enrich");
   // Enrichissement en masse, filtrable par catégorie (type) et limitable en nombre de fiches.
-  // `types` : Set des types à enrichir (null = tous) ; `limit` : nombre max de fiches (0 = toutes).
-  const enrichAll = (types, limit) => {
+  // `types` : Set des types à enrichir (null = tous) ; `limit` : nombre max de fiches (0 = toutes) ;
+  // `instruction` : consigne libre décrivant ce que l'utilisateur veut enrichir en priorité.
+  const enrichAll = (types, limit, instruction) => {
     if (aiJobs.has("prospects:enrich")) return;
     let targets = prospects.filter((p) => !p.accountId && (p.nom || p.enseigne || "").trim());
     if (types && types.size) targets = targets.filter((p) => types.has(p.type || "autre"));
@@ -6185,7 +6225,8 @@ function Prospection({ data, persist, go }) {
     const rest = targets.filter((p) => (p.email || "").trim() && (p.telephone || "").trim());
     let queue = [...missing, ...rest]; // priorité aux fiches sans e-mail / téléphone
     if (limit && limit > 0) queue = queue.slice(0, limit);
-    appConfirm("Enrichir " + queue.length + " fiche(s) prospect via recherche web IA, en priorité les e-mails et téléphones manquants ? Cela peut prendre plusieurs minutes et consomme des crédits. Rien n'est inventé, à vérifier ensuite.", { title: "Enrichir les fiches", confirmLabel: "Lancer" }).then((ok) => {
+    const consigne = (instruction || "").trim();
+    appConfirm("Enrichir " + queue.length + " fiche(s) prospect via recherche web IA" + (consigne ? ", selon votre consigne" : ", en priorité les e-mails et téléphones manquants") + " ? Cela peut prendre plusieurs minutes et consomme des crédits. Rien n'est inventé, à vérifier ensuite.", { title: "Enrichir les fiches", confirmLabel: "Lancer" }).then((ok) => {
       if (!ok) return;
       let nMail = 0, nTel = 0;
       setEnrichMsg(null);
@@ -6193,7 +6234,7 @@ function Prospection({ data, persist, go }) {
         let done = 0; prog(0, queue.length);
         for (const p of queue) {
           try {
-            const r = await aiEnrichProspect(p, (u) => persist((d) => ({ ...d, claudeUsage: addUsage(d.claudeUsage, u) })));
+            const r = await aiEnrichProspect(p, (u) => persist((d) => ({ ...d, claudeUsage: addUsage(d.claudeUsage, u) })), consigne);
             if (r.contactEmail && !(p.email || "").trim()) nMail++;
             if ((r.telephone || r.contactTel) && !(p.telephone || "").trim()) nTel++;
             persist((d) => ({ ...d, prospects: d.prospects.map((x) => x.id === p.id ? applyProspectEnrich(x, r) : x) }));
@@ -6565,7 +6606,7 @@ function Prospection({ data, persist, go }) {
       </div>); })}
     </>)}
     {importOpen && <ProspectImportModal onClose={() => setImportOpen(false)} onImport={doImport} />}
-    {enrichOpen && <EnrichSelectModal prospects={prospects} onClose={() => setEnrichOpen(false)} onLaunch={(types, limit) => { setEnrichOpen(false); enrichAll(types, limit); }} />}
+    {enrichOpen && <EnrichSelectModal prospects={prospects} onClose={() => setEnrichOpen(false)} onLaunch={(types, limit, instruction) => { setEnrichOpen(false); enrichAll(types, limit, instruction); }} />}
     {edit && <Modal title={edit.nom ? edit.nom : "Nouveau prospect"} onClose={() => { setEdit(null); setPfMsg(null); }} wide>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
         <button type="button" className="btn btn-ai btn-s" onClick={enrichProspect} disabled={pfBusy || !((edit.nom || edit.enseigne || "").trim())} title="Rechercher en ligne le site, les réseaux, l'identité légale (SIREN/SIRET, raison sociale…) et un contact, puis compléter les champs encore vides"><Sparkles size={14} className={pfBusy ? "spin" : ""} /> {pfBusy ? ("Recherche… " + fmtElapsed(pfElapsed)) : "Approfondir la recherche IA"}</button>
