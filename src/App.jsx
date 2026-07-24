@@ -5651,8 +5651,9 @@ function Carte({ data, persist, go, focus }) {
     const wheelEl = mapEl.current;
     wheelEl.addEventListener("wheel", onWheel, { passive: false });
     setTimeout(() => { try { map.invalidateSize(); } catch (e) { } }, 60);
-    const pts = sites.filter((p) => p.lat && p.lng).map((p) => [p.lat, p.lng]);
-    if (pts.length === 1) map.setView(pts[0], 12); else if (pts.length > 1) map.fitBounds(pts, { padding: [40, 40], maxZoom: 13 });
+    // Au démarrage/rafraîchissement, la carte reste centrée sur la France métropolitaine
+    // (vue initiale [46.6, 2.4] zoom 6) plutôt que recadrée sur les sites. Le bouton « ⤢ »
+    // permet de recadrer sur l'ensemble des sites à la demande.
     setMapReady(true);
     return () => { clearTimeout(idleT); try { wheelEl.removeEventListener("wheel", onWheel); } catch (e) { } try { map.remove(); } catch (e) { } mapInst.current = null; markersLayer.current = null; routesLayer.current = null; roadsLayer.current = null; setMapReady(false); };
   }, [LF]);
