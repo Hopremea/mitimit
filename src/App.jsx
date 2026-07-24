@@ -7405,8 +7405,79 @@ function Connexions({ data, persist, autoBackup }) {
   </div>);
 }
 
+// Command Center « Aujourd'hui » (inspiré de la home HubSpot) : agrège en une file d'attente priorisée
+// tout ce qui demande une action — RDV/relances en retard et du jour, devis à relancer, factures à
+// encaisser, anniversaires — avec accès direct à la fiche concernée et actions rapides.
+function CommandCenter({ data, persist, go }) {
+  const { accounts, contacts, deals } = data;
+  const today = TODAY();
+  const hour = new Date().getHours();
+  const greet = hour < 12 ? "Bonjour" : hour < 18 ? "Bon après-midi" : "Bonsoir";
+  const accName = (id) => accounts.find((a) => a.id === id)?.enseigne || "";
+  const events = (data.events || []).filter((e) => !e.done);
+  const overdue = events.filter((e) => (e.date || "") < today).sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const todayEv = events.filter((e) => (e.date || "") === today).sort((a, b) => (a.heure || "").localeCompare(b.heure || ""));
+  const devisRelance = deals.filter((d) => isDevisEnAttente(d) && d.statut === "envoye" && (daysFromToday(d.date) ?? 0) <= -5).sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const facturesDues = deals.filter((d) => isCaSigne(d) && !((d.datePaiement || "").trim()) && (daysFromToday(d.date) ?? 0) <= -30).sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const md = today.slice(5);
+  const anniv = contacts.filter((c) => !c.archived && (c.naissance || "").length >= 10 && (c.naissance || "").slice(5) === md);
+  const total = overdue.length + todayEv.length + devisRelance.length + facturesDues.length + anniv.length;
+  const markDone = (id) => persist((p) => ({ ...p, events: (p.events || []).map((e) => e.id === id ? { ...e, done: true } : e) }));
+  const snooze = (id) => persist((p) => ({ ...p, events: (p.events || []).map((e) => e.id === id ? { ...e, date: isoLocal(new Date(Date.now() + 86400000)) } : e) }));
+  const evGo = (e) => e.contactId ? go("repertoire", e.contactId) : e.accountId ? go("accounts", e.accountId) : go("agenda");
+  const evMeta = (e) => EVENT_TYPES[e.type] || EVENT_TYPES.rdv;
+  const evLabel = (e) => e.titre || evMeta(e).label;
+  const evSub = (e) => { const who = accName(e.accountId); const m = evMeta(e).label; return [m, who, e.heure].filter(Boolean).join(" · "); };
+  const Row = ({ onClick, icon, iconColor, title, sub, right, actions }) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "8px 11px", border: "1px solid var(--line)", borderRadius: 11, background: "var(--card)" }}>
+      <span style={{ fontSize: 16, flexShrink: 0, color: iconColor }}>{icon}</span>
+      <div onClick={onClick} style={{ flex: 1, minWidth: 0, cursor: onClick ? "pointer" : "default" }}>
+        <div style={{ fontWeight: 700, fontSize: 13.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{title}</div>
+        <div style={{ color: "var(--muted)", fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub}</div>
+      </div>
+      {right != null && <span style={{ flexShrink: 0, fontSize: 12, fontWeight: 700 }}>{right}</span>}
+      {actions && <span style={{ display: "flex", gap: 5, flexShrink: 0 }}>{actions}</span>}
+    </div>
+  );
+  const Section = ({ title, color, icon, count, children }) => count === 0 ? null : (
+    <div className="card" style={{ marginBottom: 14, borderLeft: "4px solid " + color, padding: "12px 16px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 9 }}>
+        <span style={{ fontSize: 16 }}>{icon}</span>
+        <h3 className="pu-display" style={{ margin: 0, fontSize: 14.5 }}>{title}</h3>
+        <span style={{ fontSize: 11.5, color: onColor(color), background: color, borderRadius: 20, padding: "1px 9px", fontWeight: 800 }}>{count}</span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>{children}</div>
+    </div>
+  );
+  return (<div className="fade">
+    <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--blue)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+      <div>
+        <div className="pu-display" style={{ fontSize: 20 }}>{greet} 👋</div>
+        <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3 }}>{total === 0 ? "Rien d'urgent : tu es à jour." : "Tu as " + total + " action" + (total > 1 ? "s" : "") + " prioritaire" + (total > 1 ? "s" : "") + " aujourd'hui."}</div>
+      </div>
+      <div className="pu-display tnum" style={{ fontSize: 34, color: total === 0 ? "var(--green)" : "var(--blue)", fontWeight: 900 }}>{total}</div>
+    </div>
+    {total === 0 && <div className="card" style={{ textAlign: "center", padding: "34px 16px", color: "var(--muted)" }}><CheckCircle2 size={34} style={{ color: "var(--green)" }} /><div className="pu-display" style={{ fontSize: 16, marginTop: 8, color: "var(--ink)" }}>Tout est à jour</div><div style={{ fontSize: 12.5, marginTop: 4 }}>Aucune relance en retard, aucun RDV du jour, aucune facture échue. Planifie une action depuis le calendrier ou la prospection.</div></div>}
+    <Section title="En retard" color="#FF5A45" icon="⚠️" count={overdue.length}>
+      {overdue.map((e) => <Row key={e.id} onClick={() => evGo(e)} icon={evMeta(e).icon} title={evLabel(e)} sub={evSub(e)} right={<span style={{ color: "var(--red)" }}>{relDate(e.date)}</span>} actions={<><button className="iconbtn" title="Reporter à demain" onClick={() => snooze(e.id)}><ChevronRight size={15} /></button><button className="iconbtn" title="Marquer fait" onClick={() => markDone(e.id)}><CheckCircle2 size={15} /></button></>} />)}
+    </Section>
+    <Section title="Aujourd'hui" color="#3F60AA" icon="📅" count={todayEv.length}>
+      {todayEv.map((e) => <Row key={e.id} onClick={() => evGo(e)} icon={evMeta(e).icon} title={evLabel(e)} sub={evSub(e)} right={e.heure || null} actions={<button className="iconbtn" title="Marquer fait" onClick={() => markDone(e.id)}><CheckCircle2 size={15} /></button>} />)}
+    </Section>
+    <Section title="Devis à relancer" color="#F8B133" icon="📄" count={devisRelance.length}>
+      {devisRelance.map((d) => <Row key={d.id} onClick={() => go("deals", d.id)} icon="📄" title={(d.ref || "Devis") + (accName(d.accountId) ? " · " + accName(d.accountId) : "")} sub={"Envoyé " + relDate(d.date) + " · en attente"} right={eur(d.montant || 0)} />)}
+    </Section>
+    <Section title="Factures à encaisser" color="#2bb673" icon="💶" count={facturesDues.length}>
+      {facturesDues.map((d) => <Row key={d.id} onClick={() => go("deals", d.id)} icon="💶" title={(d.ref || "Facture") + (accName(d.accountId) ? " · " + accName(d.accountId) : "")} sub={"Émise " + relDate(d.date) + " · non pointée payée"} right={<span style={{ color: "var(--red)" }}>{eur(d.montant || 0)}</span>} />)}
+    </Section>
+    <Section title="Anniversaires" color="#A855F7" icon="🎂" count={anniv.length}>
+      {anniv.map((c) => <Row key={c.id} onClick={() => go("repertoire", c.id)} icon="🎂" title={fullName(c)} sub={[c.fonction, accName(c.accountId)].filter(Boolean).join(" · ") || "Contact"} actions={<button className="iconbtn" title="Ouvrir la fiche" onClick={() => go("repertoire", c.id)}><ChevronRight size={15} /></button>} />)}
+    </Section>
+  </div>);
+}
 const TABS = [
   // Pilotage
+  { id: "today", group: "Pilotage", label: "Aujourd'hui", icon: Zap, title: "Aujourd'hui", sub: "Vos actions prioritaires du jour" },
   { id: "dash", group: "Pilotage", label: "Tableau de bord", icon: LayoutDashboard, title: "Tableau de bord", sub: "Vue d'ensemble du pilotage B2B" },
   { id: "agenda", group: "Pilotage", label: "Calendrier", icon: CalendarDays, title: "Calendrier", sub: "Prochaines actions, RDV et échéances" },
   { id: "carte", group: "Pilotage", label: "Carte", icon: MapIcon, title: "Carte des groupes & établissements", sub: "Implantations et fiches établissement" },
@@ -9090,7 +9161,7 @@ export default function App() {
   // sur le dernier onglet consulté plutôt que sur le tableau de bord. L'id est validé contre TABS.
   // Au démarrage, on restaure l'onglet ET la fiche ouverte de la dernière session : après une mise à
   // jour du logiciel ou un simple rechargement, on reste là où on naviguait, pas sur le tableau de bord.
-  const [tab, setTab] = useState(() => { const o = readSavedNav(); return o ? o.tab : "dash"; });
+  const [tab, setTab] = useState(() => { const o = readSavedNav(); return o ? o.tab : "today"; });
   const [focus, setFocus] = useState(() => { const o = readSavedNav(); return o ? o.focus : null; });
   const [navKey, setNavKey] = useState(0);
   useEffect(() => { try { localStorage.setItem(NAV_STATE_KEY, JSON.stringify({ tab, focus })); } catch (e) { } }, [tab, focus]);
@@ -9306,7 +9377,7 @@ export default function App() {
     const h = navHist.current; if (h.pos <= 0) return; h.pos -= 1; navApply(h.stack[h.pos]); syncNavBtns();
   }, [navApply, syncNavBtns]);
   const navFwd = useCallback(() => { const h = navHist.current; if (h.pos >= h.stack.length - 1) return; h.pos += 1; navApply(h.stack[h.pos]); syncNavBtns(); }, [navApply, syncNavBtns]);
-  const navHome = useCallback(() => { navPush("dash", null); setTab("dash"); setFocus(null); setNavKey((k) => k + 1); }, [navPush]);
+  const navHome = useCallback(() => { navPush("today", null); setTab("today"); setFocus(null); setNavKey((k) => k + 1); }, [navPush]);
   const fc = (t) => (focus && focus.tab === t) ? focus : null;
   const theme = data.settings.theme || "light";
   const bgColor = data.settings.bgColor || "cream";
@@ -9468,6 +9539,7 @@ export default function App() {
         </div>
       )}
       <div className="print-area" style={coldStart ? { display: "none" } : undefined}>
+      {tab === "today" && <CommandCenter key={"today-" + navKey} data={data} persist={persist} go={go} />}
       {tab === "dash" && <Dashboard key={"dash-" + navKey} data={data} go={go} />}
       {tab === "performance" && <Performance key={"performance-" + navKey} data={data} go={go} />}
       {tab === "stats" && <Statistiques key={"stats-" + navKey} data={data} />}
