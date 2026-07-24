@@ -2698,7 +2698,7 @@ function ActivityChart({ deals }) {
     while (n < 60) {
       const key = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, "0")}`;
       const label = cur.toLocaleDateString("fr-FR", { month: "short" }).replace(".", "") + " " + String(cur.getFullYear()).slice(2);
-      const cmds = deals.filter((x) => x.type === "Commande" && isCaSigne(x) && (x.date || "").startsWith(key));
+      const cmds = deals.filter((x) => isCaSigne(x) && (x.date || "").startsWith(key));
       arr.push({ key, label, ca: cmds.reduce((s, x) => s + (x.montant || 0), 0), qte: cmds.reduce((s, x) => s + (x.qte || 0), 0), cmd: cmds.length });
       if (key === endKey) break;
       cur.setMonth(cur.getMonth() + 1);
@@ -2955,7 +2955,7 @@ function Dashboard({ data, go }) {
       const now = new Date(); const y = now.getFullYear(), mo = now.getMonth();
       const key = new Date().toISOString().slice(0, 7);
       const signedThis = deals.filter((d) => isCaSigne(d) && (d.date || "").startsWith(key));
-      const caMois = sumMontant(signedThis); const cmdMois = signedThis.filter((d) => d.type === "Commande").length;
+      const caMois = sumMontant(signedThis); const cmdMois = signedThis.length;
       const objCa = Number(data.settings.objCaMois) || 0; const objCmd = Number(data.settings.objCmdMois) || 0;
       // Jours ouvrés (lun-ven) écoulés vs total du mois → extrapolation linéaire (run-rate) de fin de mois.
       const bizDays = (from, to) => { let n = 0; const d = new Date(from); while (d <= to) { const w = d.getDay(); if (w !== 0 && w !== 6) n++; d.setDate(d.getDate() + 1); } return n; };
@@ -3032,7 +3032,7 @@ function Dashboard({ data, go }) {
       // le délai depuis sa dernière commande signée à son intervalle habituel entre commandes. Au-delà de
       // 1,5× l'intervalle moyen (et > 45 j), on signale un décrochage AVANT qu'il ne devienne dormant.
       const churn = accounts.map((a) => {
-        const dates = deals.filter((d) => d.accountId === a.id && d.type === "Commande" && isCaSigne(d) && d.date).map((d) => d.date).sort();
+        const dates = deals.filter((d) => d.accountId === a.id && isCaSigne(d) && d.date).map((d) => d.date).sort();
         if (dates.length < 3) return null;
         const gaps = []; for (let i = 1; i < dates.length; i++) gaps.push((new Date(dates[i]) - new Date(dates[i - 1])) / 86400000);
         const avg = gaps.reduce((s, x) => s + x, 0) / gaps.length;
@@ -6853,7 +6853,7 @@ function Statistiques({ data }) {
       const rows = A.filter((a) => !a.archived).map((a) => {
         const signed = D.filter((d) => d.accountId === a.id && isCaSigne(d));
         const ca = sumMontant(signed);
-        const cmds = signed.filter((d) => d.type === "Commande");
+        const cmds = signed;
         const panier = cmds.length ? ca / cmds.length : 0;
         const lastDate = signed.map((d) => d.date).filter(Boolean).sort().pop() || "";
         const pdv = (data.sites || []).filter((s) => s.accountId === a.id && (s.type === "pdv" || s.type === "decision")).length || (isGroupe(a) ? 0 : 1);
