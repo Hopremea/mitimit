@@ -2831,7 +2831,21 @@ function commercialGame(data) {
     { id: "ct", icon: Users, color: "#2bb673", label: "Ajouter 2 contacts", done: ctWeek, target: 2 },
   ];
   const questsDone = quests.filter((q) => q.done >= q.target).length;
-  return { xp, level, levelName, xpPct, streak, signed: signed.length, quests, questsDone };
+  // Trophées permanents, dérivés de l'activité commerciale réelle (comme les badges du pointage).
+  const totalSigne = signed.reduce((s, d) => s + (d.montant || 0), 0);
+  const badges = [
+    { id: "b_ex", label: "Premier contact", icon: Mail, color: "#6366F1", got: interactions.length >= 1, desc: "Journaliser un premier échange." },
+    { id: "b_devis", label: "Premier devis", icon: FileText, color: "#F8B133", got: deals.length >= 1, desc: "Créer un premier devis ou une commande." },
+    { id: "b_vente", label: "Première vente", icon: Trophy, color: "#2bb673", got: signed.length >= 1, desc: "Signer une première vente." },
+    { id: "b_conv", label: "Convertisseur", icon: GitBranch, color: "#7c5cf0", got: convertis.length >= 1, desc: "Convertir un prospect en client." },
+    { id: "b_chasse", label: "Chasseur", icon: Navigation, color: "#0EA5A4", got: prospects.length >= 10, desc: "10 prospects en base de prospection." },
+    { id: "b_carnet", label: "Carnet fourni", icon: Users, color: "#3F60AA", got: contacts.length >= 25, desc: "25 contacts au répertoire." },
+    { id: "b_ca5k", label: "5 000 € signés", icon: TrendingUp, color: "#2bb673", got: totalSigne >= 5000, desc: "5 000 € HT de ventes signées." },
+    { id: "b_ca20k", label: "20 000 € signés", icon: Trophy, color: "#F8B133", got: totalSigne >= 20000, desc: "20 000 € HT de ventes signées." },
+    { id: "b_streak10", label: "Régularité", icon: Flame, color: "#FF5A45", got: streak >= 10, desc: "10 jours d'activité d'affilée." },
+  ];
+  const gotBadges = badges.filter((b) => b.got).length;
+  return { xp, level, levelName, xpPct, streak, signed: signed.length, quests, questsDone, badges, gotBadges };
 }
 function Dashboard({ data, go }) {
   const { accounts, deals, products, contacts } = data;
@@ -2896,6 +2910,10 @@ function Dashboard({ data, go }) {
               </div>
             ); })}
           </div>
+        </div>
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3, display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 10 }}><Trophy size={13} /> Trophées commerciaux · {g.gotBadges}/{g.badges.length}</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>{g.badges.map((b) => { const Ic = b.icon; return (<div key={b.id} title={b.desc + (b.got ? " — débloqué" : " — à débloquer")} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 20, fontSize: 12, fontWeight: 700, border: "1px solid", borderColor: b.got ? b.color : "var(--line)", color: b.got ? "#fff" : "var(--muted)", background: b.got ? b.color : "transparent", opacity: b.got ? 1 : .5 }}><Ic size={13} />{b.label}</div>); })}</div>
         </div>
       </div>
     ); })()}
