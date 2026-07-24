@@ -9,7 +9,7 @@ import {
   LifeBuoy, Repeat, Zap, Map as MapIcon, Send, ExternalLink, Link2,
   Layers, ShoppingCart, Navigation, Copy, Sparkles, Camera, Image as ImageIcon, Palette, Mic, MessageSquare, Video, Archive, ArchiveRestore,
   Download, Paperclip, Moon, Sun, ChevronRight, ChevronDown, CalendarDays,
-  Wand2, Scissors, Check,
+  Wand2, Scissors, Check, CheckSquare, Tag as TagIcon, ListChecks, Bookmark,
   Clock, Flame, Trophy, Award, Coffee,
   GitBranch, Save, FileDown, ArrowDown, ArrowUp, Undo2,
   Globe, Facebook, Instagram, Menu, Home,
@@ -792,7 +792,10 @@ function autoClassifyStages(d) {
 function normalize(d) {
   const __secured = securedFrom({ ...SETTINGS, ...(d.settings || {}) });
   d.products = (d.products || seedProducts()).map((p) => { const o = { cout: null, ...p }; if (o.vendable === undefined) { const unitaire = /^PU3D-FIL-/.test(o.code) && !/^lot/i.test(o.designation || ""); const kit = (o.code || "").includes("-KIT-"); o.vendable = !(unitaire || kit); } if (o.poidsG === undefined || o.poidsG === null) { if (o.poidsKg != null) { o.poidsG = Math.round(o.poidsKg * 1000); } else { o.poidsG = Math.round(poidsProvisoire(o.code, o.designation) * 1000); o.poidsEstime = true; } } delete o.poidsKg; if (o.coutInit === undefined) { const parts = coutRevientParts(o.code, o.designation); if (parts) { o.coutUsd = parts.usd; o.coutEurFixe = parts.eur; } o.coutInit = true; } if (o.coutUsd != null) o.cout = deriveCout(o, __secured); return o; });
-  d.accounts = (d.accounts || seedAccounts()).map((a) => ({ adresseLivraison: "", adressePostale: "", livraisonIdentique: true, ville: "", typeSurface: "", lat: null, lng: null, stageLog: [], nature: "", code: "", siren: "", formeJuridique: "", raisonSociale: "", site: "", facebook: "", instagram: "", archived: false, archiveReason: "", archiveDate: "", archiveNote: "", ...a }));
+  d.accounts = (d.accounts || seedAccounts()).map((a) => ({ adresseLivraison: "", adressePostale: "", livraisonIdentique: true, ville: "", typeSurface: "", lat: null, lng: null, stageLog: [], nature: "", code: "", siren: "", formeJuridique: "", raisonSociale: "", site: "", facebook: "", instagram: "", archived: false, archiveReason: "", archiveDate: "", archiveNote: "", tags: [], ...a }));
+  // Listes / segments de prospects (Brevo/HubSpot) et vues enregistrées (Notion/Airtable) : structures
+  // persistées, initialisées si absentes.
+  d.prospectLists = Array.isArray(d.prospectLists) ? d.prospectLists.map((l) => ({ id: l.id, name: l.name || "Liste", ids: Array.isArray(l.ids) ? l.ids : [] })) : [];
   d.accounts = d.accounts.map((a) => (!a.adressePostale && a.adresseLivraison) ? { ...a, adressePostale: a.adresseLivraison, livraisonIdentique: true } : a);
   d.accounts = d.accounts.map((a) => ({ ...a, nature: a.nature || guessNature(a) }));
   // Auto-réparation idempotente du champ « kind » (groupe / établissement) : couvre les comptes
@@ -823,7 +826,8 @@ function normalize(d) {
   d.contacts = (d.contacts || seedContacts()).map((c) => { const n = { departement: "", principalEtab: false, ...c }; if (n.fixe === undefined) { n.fixe = n.mobile || ""; n.mobile = n.telephone || ""; } delete n.telephone; return n; });
   d.interactions = d.interactions || seedInteractions();
   d.deals = (d.deals || seedDeals()).map((x) => ({ tva: 20, lines: [], qte: 0, prestoStatus: "", prestoRef: "", prestoDate: "", converti: false, livraisonSiteId: "", zoneLivraison: "", datePaiement: "", ...x, montant: x.lines && x.lines.length ? dealMontant(x.lines) : (x.montant || 0) }));
-  d.tickets = d.tickets || []; d.rotations = d.rotations || {}; d.savedCalcs = d.savedCalcs || []; d.prospects = (d.prospects || seedProspects()).map((p) => ({ enseigne: "", type: "autre", format: "", adresse: "", ville: "", cp: "", departement: "", region: "", telephone: "", site: "", email: "", statut: "a_qualifier", potentiel: "", notes: "", source: "", accountId: null, createdAt: TODAY(), siren: "", siret: "", raisonSociale: "", formeJuridique: "", contactPrenom: "", contactNom: "", contactFonction: "", contactEmail: "", contactTel: "", contactSource: "", archived: false, archiveReason: "", archiveDate: "", archiveNote: "", ...p }));
+  d.tickets = d.tickets || []; d.rotations = d.rotations || {}; d.savedCalcs = d.savedCalcs || []; d.prospects = (d.prospects || seedProspects()).map((p) => ({ enseigne: "", type: "autre", format: "", adresse: "", ville: "", cp: "", departement: "", region: "", telephone: "", site: "", email: "", statut: "a_qualifier", potentiel: "", notes: "", source: "", accountId: null, createdAt: TODAY(), siren: "", siret: "", raisonSociale: "", formeJuridique: "", contactPrenom: "", contactNom: "", contactFonction: "", contactEmail: "", contactTel: "", contactSource: "", archived: false, archiveReason: "", archiveDate: "", archiveNote: "", tags: [], ...p })).map((p) => Array.isArray(p.tags) ? p : { ...p, tags: [] });
+  d.settings = d.settings || {}; d.settings.prospectionViews = Array.isArray(d.settings.prospectionViews) ? d.settings.prospectionViews : [];
   { const sm = {}; seedProspects().forEach((s) => { sm[s.id] = s; }); d.prospects = d.prospects.map((p) => { if (p.id === "p_jc_mtb" && p.siren === "918164757") { const s = sm["p_jc_mtb"] || {}; p = { ...p, siren: "", raisonSociale: "", formeJuridique: "", contactPrenom: "", contactNom: "", contactFonction: "", contactSource: "", notes: s.notes || p.notes }; } const s = sm[p.id]; if (s && !p.siren && (s.siren || s.contactNom)) p = { ...p, siren: p.siren || s.siren, raisonSociale: p.raisonSociale || s.raisonSociale, formeJuridique: p.formeJuridique || s.formeJuridique, contactPrenom: p.contactPrenom || s.contactPrenom, contactNom: p.contactNom || s.contactNom, contactFonction: p.contactFonction || s.contactFonction, contactTel: p.contactTel || s.contactTel, contactSource: p.contactSource || s.contactSource }; if (s && s.siret && !p.siret) p = { ...p, siret: s.siret }; return p; }); } d.sites = Array.isArray(d.sites) ? d.sites.map((s) => ({ accountId: null, type: "pdv", adresse: "", lat: null, lng: null, notes: "", contactPrenom: "", contactNom: "", contactTel: "", contactMail: "", contactId: "", typeSurface: "", siret: "", adresseLivraison: "", livraisonIdentique: true, ...s })) : seedSites();
   { const sim = {}; seedSites().forEach((s) => { sim[s.id] = s; }); d.sites = d.sites.map((s) => { const o = sim[s.id]; return (o && !s.siret && o.siret) ? { ...s, siret: o.siret } : s; }); }
   d.attachments = d.attachments || {};
@@ -3773,6 +3777,7 @@ function AccountDetail({ account, data, persist, go, onBack, onEdit, onAddContac
         <EntityPhoto value={a.logo || ""} onChange={(url) => saveAccount({ logo: url })} initials={(a.enseigne || "?").slice(0, 1).toUpperCase()} bg={st.color} size={64} enseigne={[a.enseigne, a.ville].filter(Boolean).join(" ")} persistUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} />
         <div style={{ flex: 1, minWidth: 220 }}><div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}><h2 className="pu-display" style={{ margin: 0, fontSize: 23 }}>{a.enseigne}</h2>{a.code && <span style={{ fontWeight: 800, fontSize: 13, letterSpacing: ".04em", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 8, padding: "3px 9px", color: "var(--ink)" }} className="tnum">{a.code}</span>}<Badge color={st.color}>{st.label}</Badge>{isGroupe(a) ? <Badge color="#3F60AA">Groupe</Badge> : <Badge color="#7a8699">Établissement</Badge>}</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9 }}><Badge color={(NATURE_META[a.nature] || NATURE_META.DV).color}>{(NATURE_META[a.nature] || NATURE_META.DV).label}</Badge><Badge color={seg.color}>{seg.label}</Badge>{a.ville && <span style={{ color: "var(--muted)", fontSize: 12.5, display: "inline-flex", alignItems: "center", gap: 4 }}><MapPin size={13} />{a.ville}</span>}</div>
+          {(a.tags || []).length > 0 && <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 7 }}>{(a.tags || []).map((t) => <span key={t} style={{ fontSize: 10.5, fontWeight: 700, color: "#6d28d9", background: "#f3ecff", border: "1px solid #ddd0fb", borderRadius: 20, padding: "1px 8px" }}>#{t}</span>)}</div>}
           {(a.siren || a.formeJuridique) && <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}><Building2 size={13} />{[a.formeJuridique, a.siren && ("SIREN " + a.siren)].filter(Boolean).join(" · ")}</div>}</div>
         <div className="tile-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{(() => { const sl = smartLink(a); const SI = sl.Icon; return <a className="btn btn-g" href={sl.url} target="_blank" rel="noreferrer" title={a.site || a.facebook || a.instagram ? sl.url : "Rechercher cet établissement sur Google"}><SI size={15} /> {sl.label}</a>; })()}<button className="btn btn-ai" onClick={runFicheAI} disabled={aiBusy} title="Rechercher en ligne le site, les réseaux sociaux et l'identité légale (comme la prospection)"><Sparkles size={15} className={aiBusy ? "spin" : ""} /> {aiBusy ? ("Recherche… " + fmtElapsed(aiElapsed)) : "Recherche IA"}</button><button className="btn btn-g" onClick={() => setChatOpen(true)} title="Conseil IA : discuter de ce compte (analyse, prochaine action, arguments de vente)"><MessageSquare size={15} /> Conseil IA</button><button className="btn btn-g" onClick={() => setGmapOpen(true)} title="Voir la fiche Google de cet établissement dans le logiciel"><MapPin size={15} /> Fiche Google</button>{a.lat && <button className="btn btn-g" onClick={() => go("carte", a.id)}><MapIcon size={15} /> Carte</button>}<button className="btn btn-g" onClick={() => openPrint("Fiche " + (a.enseigne || ""), ficheBody(a.enseigne || "Établissement", [a.code, (NATURE_META[a.nature] || {}).label, a.ville].filter(Boolean).join(" · "), [isGroupe(a) ? "Groupe" : "Établissement", stageMeta(a.stage).label], [{ l: "CA HT en attente", v: eur(caAttente) }, { l: "CA HT signé", v: eur(caSigne) }, { l: "Contacts", v: num(conts.length) }, { l: "Documents", v: num(deals.length) }], conts, deals, accInteractions, a, data))}><Printer size={15} /> PDF</button>{a.archived ? <button className="btn btn-g" onClick={unArchive} title="Réactiver : remettre dans les listes actives"><ArchiveRestore size={15} /> Désarchiver</button> : <button className="btn btn-g" onClick={() => setArchiveOpen(true)} title="Archiver : parcours commercial arrêté"><Archive size={15} /> Archiver</button>}<button className="btn btn-g" onClick={onEdit}><Pencil size={15} /> Modifier</button>{onDelete && <button className="btn btn-g" style={{ color: "var(--red)" }} onClick={onDelete}><Trash2 size={15} /> Supprimer</button>}</div>
       </div>
@@ -4682,6 +4687,12 @@ function AccountForm({ acc, accounts, onSave, known = [], onUsage }) {
     <div className="row2"><div className="fld"><label>Site web</label><input value={f.site || ""} onChange={(e) => up("site", e.target.value)} placeholder="https://… (sinon laissez vide)" /></div><div className="fld"><label>Facebook</label><input value={f.facebook || ""} onChange={(e) => up("facebook", e.target.value)} placeholder="URL de la page" /></div></div>
     <div className="fld"><label>Instagram</label><input value={f.instagram || ""} onChange={(e) => up("instagram", e.target.value)} placeholder="URL du compte" /><span style={{ fontSize: 11, color: "var(--muted)" }}>Le lien de la fiche utilise le site web, sinon Facebook, sinon Instagram, sinon une recherche Google. La « Recherche IA » de la fiche peut les retrouver automatiquement.</span></div>
     <div className="fld"><label>Notes</label><textarea rows={2} value={f.notes} onChange={(e) => up("notes", e.target.value)} /></div>
+    <div className="fld"><label>Étiquettes <span style={{ color: "var(--muted)", fontWeight: 400 }}>(catégorisation libre)</span></label>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+        {(f.tags || []).map((t) => <span key={t} style={{ fontSize: 11.5, fontWeight: 700, color: "#6d28d9", background: "#f3ecff", border: "1px solid #ddd0fb", borderRadius: 20, padding: "2px 4px 2px 9px", display: "inline-flex", alignItems: "center", gap: 3 }}>#{t}<button type="button" onClick={() => up("tags", (f.tags || []).filter((x) => x !== t))} title="Retirer" style={{ border: "none", background: "none", cursor: "pointer", color: "#6d28d9", padding: 0, display: "inline-flex" }}><X size={13} /></button></span>)}
+        <input placeholder="Ajouter + Entrée" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); const t = e.target.value.trim(); if (t) { up("tags", Array.from(new Set([...(f.tags || []), t]))); e.target.value = ""; } } }} style={{ flex: 1, minWidth: 160, padding: "6px 9px", border: "1px solid var(--line)", borderRadius: 8, fontFamily: "inherit", fontSize: 12.5 }} />
+      </div>
+    </div>
     {canAttach && indepList.length > 0 && <div className="fld"><label>Rattacher des établissements existants à ce groupe</label><div style={{ fontSize: 11, color: "var(--muted)", margin: "-2px 0 6px", lineHeight: 1.5 }}>Cochez les établissements indépendants qui font partie de cette chaîne : ils rejoindront le groupe avec leurs contacts, devis et échanges (le doublon est évité).</div><div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 220, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 10, padding: 8 }}>{indepList.map((a) => (<label key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer", padding: "4px 6px", borderRadius: 7, background: attachSel.includes(a.id) ? "var(--blue-l)" : "transparent" }}><input type="checkbox" checked={attachSel.includes(a.id)} onChange={() => toggleAttach(a.id)} /><span style={{ fontWeight: 600 }}>{a.enseigne || "Sans nom"}</span>{a.ville && <span style={{ color: "var(--muted)" }}>· {a.ville}</span>}</label>))}</div>{attachSel.length > 0 && <span style={{ fontSize: 11.5, color: "var(--blue)", fontWeight: 700, marginTop: 4, display: "inline-block" }}>{attachSel.length} établissement(s) à rattacher</span>}</div>}
     <div style={{ display: "flex", justifyContent: "flex-end" }}><button className="btn btn-p" onClick={() => onSave(f, attachSel)}>Enregistrer{canAttach && attachSel.length > 0 ? " et rattacher" : ""}</button></div>
   </>);
@@ -6287,6 +6298,8 @@ function Prospection({ data, persist, go }) {
   const { prospects } = data;
   const [importOpen, setImportOpen] = useState(false);
   const [q, setQ] = useState(""); const [fType, setFType] = useState("tous"); const [fRegion, setFRegion] = useState("tous"); const [sort, setSort] = useState("type"); const [dir, setDir] = useState("asc"); const [view, setView] = useState("actifs"); const [archiveEdit, setArchiveEdit] = useState(null); const [dupOpen, setDupOpen] = useState(null); const [mailingOpen, setMailingOpen] = useState(false);
+  const [fTag, setFTag] = useState("tous"); const [fList, setFList] = useState("tous");
+  const [selMode, setSelMode] = useState(false); const [selIds, setSelIds] = useState(() => new Set());
   const [edit, setEdit] = useState(null);
   const [zone, setZone] = useState("Occitanie"); const [kind, setKind] = useState("toutes"); const [busy, setBusy] = useState(false); const [aiMsg, setAiMsg] = useState(null); const [aiErr, setAiErr] = useState(null);
   const aiElapsed = useElapsed(busy);
@@ -6304,15 +6317,11 @@ function Prospection({ data, persist, go }) {
   // Enrichissement en masse, filtrable par catégorie (type) et limitable en nombre de fiches.
   // `types` : Set des types à enrichir (null = tous) ; `limit` : nombre max de fiches (0 = toutes) ;
   // `instruction` : consigne libre décrivant ce que l'utilisateur veut enrichir en priorité.
-  const enrichAll = (types, limit, instruction) => {
-    if (aiJobs.has("prospects:enrich")) return;
-    let targets = prospects.filter((p) => !p.accountId && hasProspectIdentity(p));
-    if (types && types.size) targets = targets.filter((p) => types.has(p.type || "autre"));
-    if (!targets.length) { setEnrichMsg({ ok: false, t: "Aucun prospect à enrichir." }); return; }
-    const missing = targets.filter((p) => !(p.email || "").trim() || !(p.telephone || "").trim());
-    const rest = targets.filter((p) => (p.email || "").trim() && (p.telephone || "").trim());
-    let queue = [...missing, ...rest]; // priorité aux fiches sans e-mail / téléphone
-    if (limit && limit > 0) queue = queue.slice(0, limit);
+  // Lance l'enrichissement IA sur une file de fiches déjà constituée (utilisé par « Enrichir les fiches »
+  // ET par les actions groupées « Enrichir la sélection »).
+  const runEnrichQueue = (queue, instruction) => {
+    if (aiJobs.has("prospects:enrich")) { setEnrichMsg({ ok: false, t: "Un enrichissement est déjà en cours." }); return; }
+    if (!queue || !queue.length) { setEnrichMsg({ ok: false, t: "Aucune fiche enrichissable." }); return; }
     const consigne = (instruction || "").trim();
     appConfirm("Enrichir " + queue.length + " fiche(s) prospect via recherche web IA" + (consigne ? ", selon votre consigne" : ", en priorité les e-mails et téléphones manquants") + " ? Cela peut prendre plusieurs minutes et consomme des crédits. Rien n'est inventé, à vérifier ensuite.", { title: "Enrichir les fiches", confirmLabel: "Lancer" }).then((ok) => {
       if (!ok) return;
@@ -6333,6 +6342,16 @@ function Prospection({ data, persist, go }) {
         setEnrichMsg({ ok: true, t: "Enrichissement terminé : " + nMail + " e-mail(s) et " + nTel + " téléphone(s) ajoutés sur " + queue.length + " fiche(s). À vérifier (rien d'inventé)." });
       });
     });
+  };
+  const enrichAll = (types, limit, instruction) => {
+    let targets = prospects.filter((p) => !p.accountId && hasProspectIdentity(p));
+    if (types && types.size) targets = targets.filter((p) => types.has(p.type || "autre"));
+    if (!targets.length) { setEnrichMsg({ ok: false, t: "Aucun prospect à enrichir." }); return; }
+    const missing = targets.filter((p) => !(p.email || "").trim() || !(p.telephone || "").trim());
+    const rest = targets.filter((p) => (p.email || "").trim() && (p.telephone || "").trim());
+    let queue = [...missing, ...rest]; // priorité aux fiches sans e-mail / téléphone
+    if (limit && limit > 0) queue = queue.slice(0, limit);
+    runEnrichQueue(queue, instruction);
   };
   // Recherche web IA lancée sur les prospects fraîchement importés (tâche de fond).
   const enrichCreated = (created) => {
@@ -6441,7 +6460,29 @@ function Prospection({ data, persist, go }) {
   const rank = { fort: 0, moyen: 1, faible: 2, "": 3 };
   // Listing actif : on exclut les prospects archivés et ceux déjà convertis en compte (statut « converti »
   // ou accountId présent) — une fois converti, le commerce vit dans l'onglet Groupes & établissements.
-  const list = prospects.filter((p) => !p.archived && !p.accountId && p.statut !== "converti" && (fType === "tous" || p.type === fType) && (fRegion === "tous" || p.region === fRegion) && (q === "" || [p.nom, p.enseigne, p.ville, p.adresse, p.notes].join(" ").toLowerCase().includes(q.toLowerCase())));
+  // Étiquettes (tags) connues et listes / vues enregistrées (features Notion / Brevo / Salesforce).
+  const allTags = Array.from(new Set(prospects.filter((p) => !p.archived && !p.accountId).flatMap((p) => p.tags || []))).sort((a, b) => a.localeCompare(b, "fr"));
+  const lists = data.prospectLists || [];
+  const savedViews = (data.settings && data.settings.prospectionViews) || [];
+  const listById = (id) => lists.find((l) => l.id === id) || null;
+  const list = prospects.filter((p) => !p.archived && !p.accountId && p.statut !== "converti" && (fType === "tous" || p.type === fType) && (fRegion === "tous" || p.region === fRegion) && (fTag === "tous" || (p.tags || []).includes(fTag)) && (fList === "tous" || !listById(fList) || (listById(fList).ids || []).includes(p.id)) && (q === "" || [p.nom, p.enseigne, p.ville, p.adresse, p.notes, (p.tags || []).join(" ")].join(" ").toLowerCase().includes(q.toLowerCase())));
+  // ===== Sélection multiple & actions groupées (façon HubSpot / Salesforce / Monday) =====
+  const toggleSel = (id) => setSelIds((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const selectAllVisible = () => setSelIds(new Set(list.map((p) => p.id)));
+  const clearSel = () => setSelIds(new Set());
+  const selCount = selIds.size;
+  const bulkPatch = (patch) => { persist((d) => ({ ...d, prospects: d.prospects.map((p) => selIds.has(p.id) ? { ...p, ...patch } : p) })); };
+  const bulkArchive = () => { appConfirm("Archiver " + selCount + " fiche(s) ? Elles quittent le listing actif (réactivables ensuite).", { title: "Archiver la sélection", confirmLabel: "Archiver" }).then((ok) => { if (!ok) return; persist((d) => ({ ...d, prospects: d.prospects.map((p) => selIds.has(p.id) ? { ...p, archived: true, archiveReason: p.archiveReason || "autre", archiveDate: p.archiveDate || TODAY() } : p) })); clearSel(); }); };
+  const bulkDelete = () => { appConfirm("Supprimer définitivement " + selCount + " fiche(s) prospect ?", { title: "Supprimer la sélection" }).then((ok) => { if (!ok) return; persist((d) => ({ ...d, prospects: d.prospects.filter((p) => !selIds.has(p.id)), prospectLists: (d.prospectLists || []).map((l) => ({ ...l, ids: l.ids.filter((id) => !selIds.has(id)) })) })); clearSel(); }); };
+  const bulkAddTag = () => { const t = (window.prompt("Étiquette à ajouter aux " + selCount + " fiche(s) sélectionnée(s) :", "") || "").trim(); if (!t) return; persist((d) => ({ ...d, prospects: d.prospects.map((p) => selIds.has(p.id) ? { ...p, tags: Array.from(new Set([...(p.tags || []), t])) } : p) })); };
+  const bulkEnrich = () => { const queue = prospects.filter((p) => selIds.has(p.id) && !p.accountId && hasProspectIdentity(p)); if (!queue.length) { setEnrichMsg({ ok: false, t: "Aucune fiche enrichissable dans la sélection." }); return; } runEnrichQueue(queue); };
+  const bulkAddToList = (listId) => { persist((d) => ({ ...d, prospectLists: (d.prospectLists || []).map((l) => l.id === listId ? { ...l, ids: Array.from(new Set([...(l.ids || []), ...selIds])) } : l) })); setDupMsg({ ok: true, t: selCount + " fiche(s) ajoutée(s) à la liste « " + ((listById(listId) || {}).name || "") + " »." }); setTimeout(() => setDupMsg(null), 4000); };
+  const bulkNewList = () => { const nm = (window.prompt("Nom de la nouvelle liste :", "") || "").trim(); if (!nm) return; const id = uid("list_"); persist((d) => ({ ...d, prospectLists: [...(d.prospectLists || []), { id, name: nm, ids: [...selIds] }] })); setFList(id); setDupMsg({ ok: true, t: "Liste « " + nm + " » créée avec " + selCount + " fiche(s)." }); setTimeout(() => setDupMsg(null), 4000); };
+  // ===== Vues enregistrées (Notion / Airtable / Salesforce list views) =====
+  const applyView = (v) => { if (!v) return; setQ(v.q || ""); setFType(v.fType || "tous"); setFRegion(v.fRegion || "tous"); setFTag(v.fTag || "tous"); setFList(v.fList || "tous"); setSort(v.sort || "type"); setDir(v.dir || "asc"); };
+  const saveView = () => { const nm = (window.prompt("Nom de cette vue (filtres + tri) :", "") || "").trim(); if (!nm) return; const v = { id: uid("view_"), name: nm, q, fType, fRegion, fTag, fList, sort, dir }; persist((d) => ({ ...d, settings: { ...d.settings, prospectionViews: [...((d.settings && d.settings.prospectionViews) || []), v] } })); };
+  const delView = (id) => { appConfirm("Supprimer cette vue enregistrée ?", { title: "Supprimer la vue" }).then((ok) => { if (ok) persist((d) => ({ ...d, settings: { ...d.settings, prospectionViews: ((d.settings && d.settings.prospectionViews) || []).filter((v) => v.id !== id) } })); }); };
+  const delList = (id) => { appConfirm("Supprimer cette liste ? (les fiches ne sont pas supprimées)", { title: "Supprimer la liste" }).then((ok) => { if (!ok) return; persist((d) => ({ ...d, prospectLists: (d.prospectLists || []).filter((l) => l.id !== id) })); if (fList === id) setFList("tous"); }); };
   const archivedProspects = prospects.filter((p) => p.archived && !p.accountId);
   const activeCount = prospects.filter((p) => !p.archived && !p.accountId && p.statut !== "converti").length;
   const GROUP_DEFS = {
@@ -6656,15 +6697,17 @@ function Prospection({ data, persist, go }) {
       finally { setBusy(false); }
     });
   };
-  const hasFilter = q || fType !== "tous" || fRegion !== "tous";
-  const card = (p) => { const tm = PROSPECT_TYPES[p.type] || PROSPECT_TYPES.autre; const sm = PROSPECT_STATUT[p.statut] || PROSPECT_STATUT.a_qualifier; const pm = POTENTIEL_META[p.potentiel]; return (
-    <div key={p.id} ref={(el) => { if (el) cardRefs.current[p.id] = el; }} className={cx("card", "tile", flashIds && flashIds.has(p.id) && "prospect-flash")} style={{ display: "flex", flexDirection: "column", gap: 8 }} onClick={() => setEdit(p)}>
+  const hasFilter = q || fType !== "tous" || fRegion !== "tous" || fTag !== "tous" || fList !== "tous";
+  const clearFilters = () => { setQ(""); setFType("tous"); setFRegion("tous"); setFTag("tous"); setFList("tous"); };
+  const card = (p) => { const tm = PROSPECT_TYPES[p.type] || PROSPECT_TYPES.autre; const sm = PROSPECT_STATUT[p.statut] || PROSPECT_STATUT.a_qualifier; const pm = POTENTIEL_META[p.potentiel]; const picked = selIds.has(p.id); return (
+    <div key={p.id} ref={(el) => { if (el) cardRefs.current[p.id] = el; }} className={cx("card", "tile", flashIds && flashIds.has(p.id) && "prospect-flash")} style={{ display: "flex", flexDirection: "column", gap: 8, outline: picked ? "2px solid var(--blue)" : "none", outlineOffset: -1 }} onClick={() => selMode ? toggleSel(p.id) : setEdit(p)}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-        <div style={{ minWidth: 0 }}><div style={{ fontWeight: 800, fontSize: 14.5 }} className="pu-display">{p.nom}</div>{p.enseigne && p.enseigne !== p.nom && <div style={{ fontSize: 12, color: "var(--muted)" }}>{p.enseigne}</div>}</div>
+        <div style={{ minWidth: 0, display: "flex", alignItems: "flex-start", gap: 8 }}>{selMode && <input type="checkbox" checked={picked} onChange={() => toggleSel(p.id)} onClick={(e) => e.stopPropagation()} style={{ width: 16, height: 16, marginTop: 2, flexShrink: 0 }} />}<div style={{ minWidth: 0 }}><div style={{ fontWeight: 800, fontSize: 14.5 }} className="pu-display">{p.nom}</div>{p.enseigne && p.enseigne !== p.nom && <div style={{ fontSize: 12, color: "var(--muted)" }}>{p.enseigne}</div>}</div></div>
         {pm && <Badge color={pm.color}>{pm.label}</Badge>}
       </div>
       <div style={{ fontSize: 12.5, color: "var(--muted)", display: "flex", alignItems: "flex-start", gap: 6 }}><MapPin size={14} style={{ flexShrink: 0, marginTop: 1 }} /><span>{[p.adresse, ((p.cp || "") + " " + (p.ville || "")).trim()].filter(Boolean).join(", ")}</span></div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 2 }}><Badge color={tm.color}>{tm.label}</Badge>{p.region && <Badge color="#9aa6bd">{p.region}</Badge>}<Badge color={sm.color}>{sm.label}</Badge></div>
+      {(p.tags || []).length > 0 && <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{(p.tags || []).map((t) => <span key={t} onClick={(e) => { e.stopPropagation(); setFTag(t); }} title={"Filtrer sur l'étiquette « " + t + " »"} style={{ fontSize: 10.5, fontWeight: 700, color: "#6d28d9", background: "#f3ecff", border: "1px solid #ddd0fb", borderRadius: 20, padding: "1px 8px", cursor: "pointer" }}>#{t}</span>)}</div>}
       {(p.contactNom || p.siren || p.siret) && <div style={{ fontSize: 12, color: "var(--muted)", display: "flex", flexWrap: "wrap", gap: 10, marginTop: 2 }}>{p.contactNom && <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><User size={13} />{[p.contactPrenom, p.contactNom].filter(Boolean).join(" ")}{p.contactFonction ? (" · " + p.contactFonction) : ""}</span>}{p.siren && <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Building2 size={12} />SIREN {p.siren}</span>}{p.siret && <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }} title="SIRET de l'établissement"><MapPin size={12} />SIRET {p.siret}</span>}</div>}
       <div style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center", flexWrap: "wrap" }} onClick={(e) => e.stopPropagation()}>
         <a className="iconbtn" href={mapsUrl(p)} target="_blank" rel="noreferrer" title="Voir sur Google Maps"><MapPin size={15} /></a>
@@ -6701,6 +6744,8 @@ function Prospection({ data, persist, go }) {
     <div className="filtbar">
       <FilterGroup label="Type" color="#3F60AA"><AllChip active={fType === "tous"} onClick={() => setFType("tous")}>Tous</AllChip>{Object.entries(PROSPECT_TYPES).map(([k, v]) => <button key={k} className={cx("chip", fType === k && "on")} onClick={() => setFType(k)} style={fType === k ? { background: v.color, borderColor: v.color, color: onColor(v.color) } : {}}>{v.label}</button>)}</FilterGroup>
       <FilterGroup label="Région" color="#2bb673"><AllChip active={fRegion === "tous"} onClick={() => setFRegion("tous")}>Toutes</AllChip>{regions.map((r) => <button key={r} className={cx("chip", fRegion === r && "on")} onClick={() => setFRegion(r)} style={fRegion === r ? { background: "#2bb673", borderColor: "#2bb673", color: onColor("#2bb673") } : {}}>{r}</button>)}</FilterGroup>
+      {allTags.length > 0 && <FilterGroup label="Étiquette" color="#7c5cf0"><AllChip active={fTag === "tous"} onClick={() => setFTag("tous")}>Toutes</AllChip>{allTags.map((t) => <button key={t} className={cx("chip", fTag === t && "on")} onClick={() => setFTag(fTag === t ? "tous" : t)} style={fTag === t ? { background: "#7c5cf0", borderColor: "#7c5cf0", color: onColor("#7c5cf0") } : {}}>#{t}</button>)}</FilterGroup>}
+      {lists.length > 0 && <FilterGroup label="Liste" color="#F8B133"><AllChip active={fList === "tous"} onClick={() => setFList("tous")}>Toutes</AllChip>{lists.map((l) => <button key={l.id} className={cx("chip", fList === l.id && "on")} onClick={() => setFList(fList === l.id ? "tous" : l.id)} style={fList === l.id ? { background: "#F8B133", borderColor: "#F8B133", color: onColor("#F8B133") } : {}} title="Filtrer sur cette liste"><span onClick={(e) => { if (fList === l.id) { e.stopPropagation(); delList(l.id); } }} style={fList === l.id ? { textDecoration: "underline dotted" } : {}}>{l.name}</span> <span style={{ opacity: .7 }}>({(l.ids || []).length})</span></button>)}</FilterGroup>}
     </div>
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -6709,9 +6754,17 @@ function Prospection({ data, persist, go }) {
           <select value={sort} onChange={(e) => setSort(e.target.value)} style={{ padding: "9px 12px", borderRadius: "10px 0 0 10px", border: "1px solid var(--line)", borderRight: "none", fontFamily: "inherit", fontSize: 13 }}><option value="type">Grouper par type</option><option value="statut">Grouper par statut</option><option value="region">Grouper par région</option><option value="enseigne">Grouper par groupe / établissement</option><option value="potentiel">Grouper par potentiel</option><option value="ville">Grouper par ville</option></select>
           <button onClick={() => setDir((d) => d === "asc" ? "desc" : "asc")} title={dir === "asc" ? "Ordre croissant (cliquer pour inverser)" : "Ordre décroissant (cliquer pour inverser)"} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 11px", border: "1px solid var(--line)", borderRadius: "0 10px 10px 0", background: "#fff", cursor: "pointer", color: "var(--blue)" }}>{dir === "asc" ? <ArrowDown size={15} /> : <ArrowUp size={15} />}</button>
         </div>
-        {hasFilter && <button className="btn btn-ghost btn-s" onClick={() => { setQ(""); setFType("tous"); setFRegion("tous"); }}><X size={13} /> Effacer</button>}
+        <div style={{ display: "inline-flex", alignItems: "stretch" }} title="Vues enregistrées : rappelez un jeu de filtres + tri en un clic">
+          <select value="" onChange={(e) => { const v = e.target.value; if (v === "__save") saveView(); else if (v.startsWith("del:")) delView(v.slice(4)); else applyView(savedViews.find((x) => x.id === v)); e.target.value = ""; }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid var(--line)", fontFamily: "inherit", fontSize: 13, background: "#fff", color: "var(--blue)" }}>
+            <option value="">Vues…{savedViews.length ? " (" + savedViews.length + ")" : ""}</option>
+            {savedViews.length > 0 && <optgroup label="Appliquer une vue">{savedViews.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</optgroup>}
+            <optgroup label="Gérer">{hasFilter || sort !== "type" || dir !== "asc" ? <option value="__save">＋ Enregistrer la vue actuelle…</option> : null}{savedViews.map((v) => <option key={"d" + v.id} value={"del:" + v.id}>🗑 Supprimer « {v.name} »</option>)}</optgroup>
+          </select>
+        </div>
+        {hasFilter && <button className="btn btn-ghost btn-s" onClick={clearFilters}><X size={13} /> Effacer</button>}
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button className={cx("btn", selMode ? "btn-p" : "btn-g")} onClick={() => { setSelMode((v) => !v); if (selMode) clearSel(); }} title="Sélection multiple : cocher des fiches pour leur appliquer une action groupée (statut, type, étiquette, liste, enrichissement…)"><CheckSquare size={16} /> {selMode ? "Terminer la sélection" : "Sélectionner"}</button>
         <button className="btn btn-ai" onClick={() => setEnrichOpen(true)} disabled={enriching} title="Compléter automatiquement les fiches prospect via recherche web (choix des catégories et du nombre), en priorité les e-mails et téléphones manquants (tâche de fond)"><Sparkles size={16} className={enriching ? "spin" : ""} /> {enriching ? ("Enrichissement… " + (enrichJob && enrichJob.total ? enrichJob.done + "/" + enrichJob.total : "")) : "Enrichir les fiches"}</button>
         <button className="btn btn-ai" onClick={() => setMailingOpen(true)} title="Générer une vague de mails de premier contact personnalisés (angles vrais) et créer des brouillons Gmail"><Mail size={16} /> Mailing</button>
         <button className="btn btn-ghost" onClick={openMergeDoublons} title="Détecter les prospects en double (même SIRET, même adresse, ou même SIREN + ville), les passer en revue et choisir ceux à fusionner"><Copy size={16} /> Fusionner les doublons</button>
@@ -6721,10 +6774,11 @@ function Prospection({ data, persist, go }) {
     </div>
     {dupMsg && <div className="card" style={{ borderLeft: "4px solid " + (dupMsg.ok ? "var(--green)" : "#9aa6bd"), marginBottom: 12, fontSize: 12.5 }}>{dupMsg.t}</div>}
     {enrichMsg && <div className="card" style={{ borderLeft: "4px solid " + (enrichMsg.ok ? "var(--green)" : "var(--red)"), marginBottom: 12, fontSize: 12.5 }}>{enrichMsg.t}</div>}
-    <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>{list.length} prospect(s){list.length !== activeCount ? " sur " + activeCount : ""} · groupés par {gd.label.toLowerCase()}</div>
+    <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}><span>{list.length} prospect(s){list.length !== activeCount ? " sur " + activeCount : ""} · groupés par {gd.label.toLowerCase()}</span>{selMode && <><button className="btn btn-ghost btn-s" onClick={selectAllVisible}><CheckSquare size={13} /> Tout sélectionner ({list.length})</button>{selCount > 0 && <button className="btn btn-ghost btn-s" onClick={clearSel}><X size={13} /> Désélectionner ({selCount})</button>}</>}</div>
     {list.length === 0 ? <div className="card empty">Aucun prospect ne correspond.</div> : groups.map((g) => { const m = gd.meta ? gd.meta(g.key) : null; const lbl = m ? m.label : g.key; const col = m ? m.color : "#9aa6bd"; return (
       <div key={g.key} style={{ marginBottom: 20 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "2px 0 12px", paddingBottom: 8, borderBottom: "2px solid " + col + "33" }}>
+          {selMode && (() => { const allIn = g.items.every((x) => selIds.has(x.id)); return <input type="checkbox" checked={allIn} onChange={() => setSelIds((s) => { const n = new Set(s); if (allIn) g.items.forEach((x) => n.delete(x.id)); else g.items.forEach((x) => n.add(x.id)); return n; })} title={allIn ? "Tout décocher dans ce groupe" : "Tout cocher dans ce groupe"} style={{ width: 16, height: 16 }} />; })()}
           <span style={{ width: 11, height: 11, borderRadius: 4, background: col, display: "inline-block", flexShrink: 0 }} />
           <span className="pu-display" style={{ fontWeight: 800, fontSize: 15 }}>{lbl}</span>
           <span style={{ fontSize: 11.5, color: "var(--muted)", background: "var(--bg)", borderRadius: 20, padding: "2px 10px", fontWeight: 700 }}>{g.items.length}</span>
@@ -6732,6 +6786,21 @@ function Prospection({ data, persist, go }) {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(330px, 1fr))", gap: 12 }}>{g.items.map(card)}</div>
       </div>); })}
     </>)}
+    {selMode && selCount > 0 && view === "actifs" && (
+      <div style={{ position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: 18, zIndex: 40, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "center", maxWidth: "min(960px, 94vw)", background: "var(--card)", border: "1px solid var(--line)", borderRadius: 14, boxShadow: "0 12px 40px rgba(20,32,58,.28)", padding: "10px 14px" }}>
+        <span style={{ fontWeight: 800, fontSize: 13 }}>{selCount} sélectionné{selCount > 1 ? "s" : ""}</span>
+        <span style={{ width: 1, height: 22, background: "var(--line)" }} />
+        <select value="" onChange={(e) => { if (e.target.value) { bulkPatch({ statut: e.target.value }); e.target.value = ""; } }} title="Changer le statut de prospection" style={{ padding: "7px 9px", borderRadius: 9, border: "1px solid var(--line)", fontFamily: "inherit", fontSize: 12.5, background: "#fff" }}><option value="">Statut…</option>{Object.entries(PROSPECT_STATUT).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select>
+        <select value="" onChange={(e) => { if (e.target.value) { bulkPatch({ type: e.target.value }); e.target.value = ""; } }} title="Changer le type" style={{ padding: "7px 9px", borderRadius: 9, border: "1px solid var(--line)", fontFamily: "inherit", fontSize: 12.5, background: "#fff" }}><option value="">Type…</option>{Object.entries(PROSPECT_TYPES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select>
+        <select value="" onChange={(e) => { if (e.target.value) { bulkPatch({ potentiel: e.target.value === "__none" ? "" : e.target.value }); e.target.value = ""; } }} title="Changer le potentiel" style={{ padding: "7px 9px", borderRadius: 9, border: "1px solid var(--line)", fontFamily: "inherit", fontSize: 12.5, background: "#fff" }}><option value="">Potentiel…</option>{Object.entries(POTENTIEL_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}<option value="__none">— non évalué —</option></select>
+        <button className="btn btn-g btn-s" onClick={bulkAddTag} title="Ajouter une étiquette à la sélection"><TagIcon size={14} /> Étiquette</button>
+        <select value="" onChange={(e) => { const v = e.target.value; if (v === "__new") bulkNewList(); else if (v) bulkAddToList(v); e.target.value = ""; }} title="Ajouter la sélection à une liste" style={{ padding: "7px 9px", borderRadius: 9, border: "1px solid var(--line)", fontFamily: "inherit", fontSize: 12.5, background: "#fff" }}><option value="">Liste…</option>{lists.map((l) => <option key={l.id} value={l.id}>+ {l.name}</option>)}<option value="__new">＋ Nouvelle liste…</option></select>
+        <button className="btn btn-ai btn-s" onClick={bulkEnrich} disabled={enriching} title="Enrichir uniquement les fiches sélectionnées"><Sparkles size={14} /> Enrichir</button>
+        <button className="btn btn-g btn-s" onClick={bulkArchive}><Archive size={14} /> Archiver</button>
+        <button className="btn btn-g btn-s" style={{ color: "var(--red)" }} onClick={bulkDelete}><Trash2 size={14} /> Supprimer</button>
+        <button className="iconbtn" onClick={() => { clearSel(); }} title="Vider la sélection"><X size={16} /></button>
+      </div>
+    )}
     {importOpen && <ProspectImportModal onClose={() => setImportOpen(false)} onImport={(drafts, enrich, mode, opts) => mode === "update" ? doUpdateImport(drafts, opts) : doImport(drafts, enrich)} />}
     {enrichOpen && <EnrichSelectModal prospects={prospects} onClose={() => setEnrichOpen(false)} onLaunch={(types, limit, instruction) => { setEnrichOpen(false); enrichAll(types, limit, instruction); }} />}
     {edit && <Modal title={edit.nom ? edit.nom : "Nouveau prospect"} onClose={() => { setEdit(null); setPfMsg(null); }} wide>
@@ -6747,6 +6816,13 @@ function Prospection({ data, persist, go }) {
       <div className="row2"><div className="fld"><label>Téléphone</label><input value={edit.telephone} onChange={(e) => upE("telephone", e.target.value)} /></div><div className="fld"><label>Site web</label><input value={edit.site} onChange={(e) => upE("site", e.target.value)} placeholder="https://…" />{edit.site && edit.site.trim() && <a className="lnk" href={ensureHttp(edit.site)} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, marginTop: 4, display: "inline-flex", alignItems: "center", gap: 4 }}><ExternalLink size={12} /> Ouvrir {cleanDomain(edit.site) || "le site"}</a>}</div></div>
       <div className="row2"><div className="fld"><label>Statut de prospection</label><select value={edit.statut} onChange={(e) => upE("statut", e.target.value)}>{Object.entries(PROSPECT_STATUT).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div><div className="fld"><label>Potentiel</label><select value={edit.potentiel} onChange={(e) => upE("potentiel", e.target.value)}><option value="">— à évaluer —</option>{Object.entries(POTENTIEL_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div></div>
       <div className="fld"><label>Notes</label><textarea rows={3} value={edit.notes} onChange={(e) => upE("notes", e.target.value)} /></div>
+      <div className="fld"><label>Étiquettes <span style={{ color: "var(--muted)", fontWeight: 400 }}>(catégorisation libre — ex. « Salon 2026 », « Prioritaire Q3 »)</span></label>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+          {(edit.tags || []).map((t) => <span key={t} style={{ fontSize: 11.5, fontWeight: 700, color: "#6d28d9", background: "#f3ecff", border: "1px solid #ddd0fb", borderRadius: 20, padding: "2px 4px 2px 9px", display: "inline-flex", alignItems: "center", gap: 3 }}>#{t}<button type="button" onClick={() => upE("tags", (edit.tags || []).filter((x) => x !== t))} title="Retirer" style={{ border: "none", background: "none", cursor: "pointer", color: "#6d28d9", padding: 0, display: "inline-flex" }}><X size={13} /></button></span>)}
+          <input list="prospect-tags-list" placeholder="Ajouter + Entrée" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); const t = e.target.value.trim(); if (t) { upE("tags", Array.from(new Set([...(edit.tags || []), t]))); e.target.value = ""; } } }} style={{ flex: 1, minWidth: 160, padding: "6px 9px", border: "1px solid var(--line)", borderRadius: 8, fontFamily: "inherit", fontSize: 12.5 }} />
+          <datalist id="prospect-tags-list">{allTags.map((t) => <option key={t} value={t} />)}</datalist>
+        </div>
+      </div>
       <div style={{ borderTop: "1px solid var(--line)", margin: "4px 0 2px", paddingTop: 10, fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".06em" }}>Identité légale (sources officielles, à vérifier)</div>
       <div className="row2"><div className="fld"><label>Raison sociale</label><input value={edit.raisonSociale || ""} onChange={(e) => upE("raisonSociale", e.target.value)} placeholder="Société exploitante" /></div><div className="fld"><label>SIREN</label><input value={edit.siren || ""} onChange={(e) => upE("siren", e.target.value)} placeholder="9 chiffres" /></div></div>
       <div className="row2"><div className="fld"><label>SIRET de l'établissement</label><input value={edit.siret || ""} onChange={(e) => upE("siret", e.target.value)} placeholder="14 chiffres (SIREN + NIC de l'établissement)" /><div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>Identifiant de l'établissement précis. Les 9 premiers chiffres sont le SIREN ci-dessus.</div></div><div className="fld"><label>Forme juridique</label><Combo value={edit.formeJuridique || ""} onChange={(v) => upE("formeJuridique", v)} options={FORMES_JURIDIQUES} placeholder="SAS, SARL, EI…" /></div></div>
@@ -6787,6 +6863,11 @@ function ProspectMailing({ data, persist, onClose }) {
   const [region, setRegion] = useState("tous");
   const [statuts, setStatuts] = useState(() => new Set(["a_contacter"]));
   const [showTreated, setShowTreated] = useState(false);
+  // Ciblage par liste enregistrée (Brevo/HubSpot) et par étiquette (Notion).
+  const mailLists = data.prospectLists || [];
+  const [listFilter, setListFilter] = useState("tous");
+  const [tagFilter, setTagFilter] = useState("tous");
+  const mailTags = useMemo(() => [...new Set(prospects.filter((p) => !p.accountId).flatMap((p) => p.tags || []))].sort((a, b) => a.localeCompare(b, "fr")), [prospects]);
   const [consigne, setConsigne] = useState("proposer un court échange pour présenter la gamme");
   const [tones, setTones] = useState(() => new Set(["professionnel"]));
   const toggleTone = (k) => setTones((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
@@ -6801,14 +6882,16 @@ function ProspectMailing({ data, persist, onClose }) {
   const anglesOf = (p) => computeProspectAngles({ prospect: p, accounts: data.accounts, sites: data.sites, interactions: data.interactions, hq: SIEGE });
   const filtered = useMemo(() => prospects.filter((p) => {
     if (p.accountId) return false;
+    if (listFilter !== "tous") { const L = mailLists.find((l) => l.id === listFilter); if (!L || !(L.ids || []).includes(p.id)) return false; }
+    if (tagFilter !== "tous" && !(p.tags || []).includes(tagFilter)) return false;
     if (!types.has(p.type || "autre")) return false;
     if (region !== "tous" && (p.region || "") !== region) return false;
     const st = p.statut || "a_qualifier";
     if (statuts.size && !statuts.has(st)) return false;
     if (!showTreated && (st === "brouillon_cree" || st === "contacte")) return false;
     return true;
-  }).map((p) => ({ p, a: anglesOf(p) })), [prospects, types, region, statuts, showTreated, data.accounts, data.sites, data.interactions]);
-  const filterSig = [...types].sort().join(",") + "|" + region + "|" + [...statuts].sort().join(",") + "|" + showTreated;
+  }).map((p) => ({ p, a: anglesOf(p) })), [prospects, types, region, statuts, showTreated, listFilter, tagFilter, data.accounts, data.sites, data.interactions]);
+  const filterSig = [...types].sort().join(",") + "|" + region + "|" + [...statuts].sort().join(",") + "|" + showTreated + "|" + listFilter + "|" + tagFilter;
   useEffect(() => { setSel(new Set(filtered.map((x) => x.p.id))); }, [filterSig]);
   const toggleType = (k) => setTypes((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const toggleStatut = (k) => setStatuts((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
@@ -6874,6 +6957,7 @@ function ProspectMailing({ data, persist, onClose }) {
     <div className="fld"><label>Types de commerce ciblés</label><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{Object.entries(PROSPECT_TYPES).map(([k, v]) => { const on = types.has(k); return (<button key={k} type="button" className={cx("btn", "btn-s", on ? "btn-p" : "btn-g")} onClick={() => toggleType(k)} title={k === "chaine" ? "Les mails de cette catégorie ne proposent PAS un référencement : ils cherchent le bon interlocuteur en centrale." : undefined}>{v.label}{k === "chaine" ? " ⓘ" : ""}</button>); })}</div><div style={{ fontSize: 11, color: "var(--muted)", marginTop: 5 }}>« Chaîne / réseau (via centrale) » : ces mails cherchent le bon interlocuteur en centrale, ils ne proposent pas de référencement. GSS et Autre décochés par défaut (circuits via acheteurs nationaux).</div></div>
     <div className="row2">
       <div className="fld"><label>Région</label><select value={region} onChange={(e) => setRegion(e.target.value)}><option value="tous">Toutes</option>{regions.map((r) => <option key={r} value={r}>{r}</option>)}</select></div>
+      {(mailLists.length > 0 || mailTags.length > 0) && <div className="fld"><label>Cibler une liste / étiquette</label><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{mailLists.length > 0 && <select value={listFilter} onChange={(e) => setListFilter(e.target.value)} style={{ flex: 1, minWidth: 130 }} title="Liste enregistrée"><option value="tous">Toutes les listes</option>{mailLists.map((l) => <option key={l.id} value={l.id}>{l.name} ({(l.ids || []).length})</option>)}</select>}{mailTags.length > 0 && <select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} style={{ flex: 1, minWidth: 130 }} title="Étiquette"><option value="tous">Toutes les étiquettes</option>{mailTags.map((t) => <option key={t} value={t}>#{t}</option>)}</select>}</div></div>}
       <div className="fld"><label>Statut</label><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{["a_qualifier", "a_contacter"].map((k) => { const on = statuts.has(k); return (<button key={k} type="button" className={cx("btn", "btn-s", on ? "btn-p" : "btn-g")} onClick={() => toggleStatut(k)}>{PROSPECT_STATUT[k].label}</button>); })}<label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--muted)", cursor: "pointer" }}><input type="checkbox" checked={showTreated} onChange={(e) => setShowTreated(e.target.checked)} style={{ width: "auto" }} /> réafficher déjà traités</label></div></div>
     </div>
     <div className="fld"><label>Consigne de vague (action visée, pour les mails de référencement)</label><input value={consigne} onChange={(e) => setConsigne(e.target.value)} placeholder="Ex : proposer un échange en visio, envoyer le catalogue, un coffret d'essai…" /><span style={{ fontSize: 11, color: "var(--muted)" }}>Ignorée pour les prospects en objectif « identifier le contact » (chaîne, GSS…), où l'action est imposée.</span></div>
