@@ -875,6 +875,20 @@ function normalize(d) {
     d.sites = (d.sites || []).map((s) => { const monaco = /\b98000\b/.test(s.adresse || "") || /monaco/i.test(s.adresse || ""); return (monaco && (s.lat == null || Number(s.lat) > 44)) ? { ...s, lat: 43.7355, lng: 7.4214 } : s; });
     d.settings._fixMonacoGeo = true;
   }
+  // Correction d'import : lors d'un import mal aligné, le NOM du prospect s'est retrouvé dans le champ
+  // « Site web » (fiches « — à préciser — » avec un nom stocké dans site). On remet le nom à sa place
+  // pour toute fiche sans nom dont le champ site ne ressemble pas à une URL / un domaine.
+  if (!d.settings._fixNomInSite) {
+    const looksLikeUrl = (s) => { const v = String(s || "").trim(); if (!v) return false; return /^(https?:\/\/|www\.)/i.test(v) || /[a-z0-9-]+\.(fr|com|net|org|eu|be|io|shop|store|boutique|paris|co|info|biz)(\/|$|\?)/i.test(v.replace(/\s+/g, "")); };
+    let moved = 0;
+    d.prospects = (d.prospects || []).map((p) => {
+      const nom = String(p.nom || "").trim(); const site = String(p.site || "").trim();
+      if (!nom && site && !looksLikeUrl(site)) { moved++; return { ...p, nom: site, site: "" }; }
+      return p;
+    });
+    if (moved) d._imported = ((d._imported || "") + " · " + moved + " nom(s) de prospect remis depuis le champ site").trim();
+    d.settings._fixNomInSite = true;
+  }
   // Réconciliation unique : les contacts des établissements déjà archivés sont archivés à leur tour.
   if (!d.settings._contactArchiveSync) { const arch = new Set((d.accounts || []).filter((a) => a.archived).map((a) => a.id)); d.contacts = (d.contacts || []).map((c) => (arch.has(c.accountId) && !c.archived) ? { ...c, archived: true } : c); d.settings._contactArchiveSync = true; }
   if (!d.settings._kind) { d.accounts = (d.accounts || []).map((a) => a.kind ? a : { ...a, kind: isCentraleOuChaine(a) ? "groupe" : "établissement" }); d.settings._kind = true; }
