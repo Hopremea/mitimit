@@ -251,7 +251,7 @@ function coefColor(coef, cible, plafond) {
   return hx(DG);
 }
 function securedFrom(s) { const spot = (s && s.fxSpot) ? +s.fxSpot : 0.89; const m = (s && s.fxMargin != null) ? +s.fxMargin : 7; return Math.round(spot * (1 + m / 100) * 10000) / 10000; }
-function coutRevientParts(code, designation) { const c = (code || "").toUpperCase(); const d = (designation || "").toLowerCase(); if (c.includes("-PACK-COMPLET")) return { usd: 17.64, eur: 0 }; if (c.includes("-PACK-DECOUVERTE")) return { usd: 10.69, eur: 0 }; if (c.includes("-KIT-")) return { usd: 7.34, eur: 0 }; if (c === "PU3D-STYLO") return { usd: 7.14, eur: 0.43 }; if (/^PU3D-FIL-/.test(c)) { if (/lot de 12/.test(d)) return { usd: 3.84, eur: 0 }; if (/lot de 4/.test(d)) return { usd: 1.28, eur: 0 }; return { usd: 0.96, eur: 0 }; } return null; }
+function coutRevientParts(code, designation) { const c = (code || "").toUpperCase(); const d = (designation || "").toLowerCase(); if (c.includes("-PACK-COMPLET")) return { usd: 17.64, eur: 0 }; if (c.includes("-PACK-DECOUVERTE")) return { usd: 10.69, eur: 0 }; if (c.includes("-KIT-")) return { usd: 7.34, eur: 0 }; if (c === "PU3D-STYLO") return { usd: 7.50, eur: 0 }; if (/^PU3D-FIL-/.test(c)) { if (/lot de 12/.test(d)) return { usd: 3.84, eur: 0 }; if (/lot de 4/.test(d)) return { usd: 1.28, eur: 0 }; return { usd: 0.96, eur: 0 }; } return null; }
 function deriveCout(p, secured) { if (p.coutUsd == null) return (p.cout != null ? p.cout : null); return Math.round((p.coutUsd * secured + (p.coutEurFixe || 0)) * 100) / 100; }
 const NATURE_META = {
   CA: { label: "Centrale d'achat / groupe", color: "#3F60AA" },
@@ -830,6 +830,11 @@ function normalize(d) {
       return c != null ? { ...p, cout: c } : p;
     });
     d.settings._seedCouts = true;
+  }
+  // Coût du stylo Pen'Up 3D fixé à 7,50 $ (converti via le taux sécurisé). Recalcule le coût existant.
+  if (!d.settings._styloCout750) {
+    d.products = (d.products || []).map((p) => { if (p.code !== "PU3D-STYLO") return p; const np = { ...p, coutUsd: 7.50, coutEurFixe: 0 }; np.cout = deriveCout(np, __secured); return np; });
+    d.settings._styloCout750 = true;
   }
   // Réconciliation unique : les contacts des établissements déjà archivés sont archivés à leur tour.
   if (!d.settings._contactArchiveSync) { const arch = new Set((d.accounts || []).filter((a) => a.archived).map((a) => a.id)); d.contacts = (d.contacts || []).map((c) => (arch.has(c.accountId) && !c.archived) ? { ...c, archived: true } : c); d.settings._contactArchiveSync = true; }
