@@ -7689,9 +7689,9 @@ function SalaireRH({ data, persist }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <div className="card" style={{ borderTop: "3px solid var(--blue)" }}><div className="sec-h"><h3 className="pu-display">Détail du bulletin estimé</h3></div>
           <Line l="Salaire de base" sub={"(" + SAL_BASE_HOURS + " h × " + eur2(Number(tauxBase) || 0) + ")"} v={eur2(r.base)} />
-          <Line l="Heures sup. +25 %" sub={"(" + h25 + " h × " + eur2(r.t25) + ")"} v={eur2(r.hs25)} />
-          <Line l="Heures sup. +50 %" sub={"(" + h50 + " h × " + eur2(r.t50) + ")"} v={eur2(r.hs50)} />
-          {(!kmTouched && deplTotalMois > 0) ? (<><Line l="Prime domicile-travail (50 %)" v={eur2(domicilePrime)} /><Line l="Remboursement de frais professionnels – non soumis à cotisations" v={eur2(deplTotalMois)} /></>) : <Line l="Prime (indemnités km)" v={eur2(r.prime)} />}
+          <Line l="Heures sup. +25 %" sub={"(" + h25 + " h × " + eur2(r.t25) + ")"} v={eur2(r.hs25)} color="var(--red)" />
+          <Line l="Heures sup. +50 %" sub={"(" + h50 + " h × " + eur2(r.t50) + ")"} v={eur2(r.hs50)} color="var(--red)" />
+          {(!kmTouched && deplTotalMois > 0) ? (<><Line l="Prime domicile-travail (50 %)" v={eur2(domicilePrime)} color="var(--green)" /><Line l="Remboursement de frais professionnels – non soumis à cotisations" v={eur2(deplTotalMois)} color="var(--orange)" /></>) : <Line l="Prime (indemnités km)" v={eur2(r.prime)} color="var(--green)" />}
           {(Number(comm) || 0) > 0 && <Line l="Commission commerciale" sub="(4 % référencement / 2 % réassort)" v={eur2(r.commission)} color="var(--green)" />}
           <div style={{ borderTop: "1px solid var(--line)", margin: "6px 0" }} />
           <Line l="Salaire brut" v={eur2(r.brut)} strong />
