@@ -7630,7 +7630,7 @@ function SalaireRH({ data, persist }) {
 // (référencement / ouverture, « en cours de livraison ») et 2 % sur chaque facture suivante du
 // même établissement (réassort). Le classement 1re vente / réassort est établi sur tout l'historique
 // des factures ; le sélecteur de période ne filtre que ce qui est affiché et totalisé.
-function CommissionsRH({ data, persist }) {
+function CommissionsRH({ data, persist, go }) {
   const { accounts, sites } = data;
   const s = data.settings || {};
   const accOf = (id) => accounts.find((a) => a.id === id);
@@ -7649,7 +7649,15 @@ function CommissionsRH({ data, persist }) {
   // seraient comptées deux fois en référencement). Un groupe multi-PDV : chaque magasin (site de livraison)
   // est un établissement distinct, avec repli sur le compte si le site n'est pas précisé.
   const estabKey = (d) => isGroupe(accOf(d.accountId)) ? "site:" + (d.livraisonSiteId || d.siteId || d.accountId || "") : "acc:" + (d.accountId || d.livraisonSiteId || d.siteId || "");
-  const estabLabel = (d) => (isGroupe(accOf(d.accountId)) ? (siteName(d.livraisonSiteId) || siteName(d.siteId)) : null) || accName(d.accountId) || siteName(d.livraisonSiteId) || siteName(d.siteId) || "—";
+  // Libellé affiché : pour un groupe multi-PDV, le magasin (site) ; sinon l'enseigne du compte, à défaut
+  // le site (cas d'un indépendant sans compte rattaché). accName renvoie « — » quand le compte manque, on
+  // ne l'utilise donc que si le compte existe vraiment, pour éviter d'écraser un nom de site valable.
+  const estabLabel = (d) => {
+    const site = siteName(d.livraisonSiteId) || siteName(d.siteId);
+    const a = accOf(d.accountId);
+    if (isGroupe(a)) return site || (a && a.enseigne) || "—";
+    return (a && a.enseigne) || site || "—";
+  };
   // Toutes les factures, chronologiques : la 1re de chaque établissement = référencement (4 %), les
   // suivantes = réassort (2 %).
   const rows = useMemo(() => {
@@ -7710,7 +7718,7 @@ function CommissionsRH({ data, persist }) {
             <tbody>{shown.slice().sort((a, b) => (b.d.date || "").localeCompare(a.d.date || "")).map((x) => (
               <tr key={x.d.id}>
                 <td>{x.d.date || "—"}</td>
-                <td>{estabLabel(x.d)}{x.d.ref ? <span style={{ color: "var(--muted)" }}> · {x.d.ref}</span> : null}</td>
+                <td><span className="lnk" style={{ fontWeight: 600 }} onClick={() => go && go("deals", x.d.id)} title="Ouvrir le document">{estabLabel(x.d)}</span>{x.d.ref ? <span className="lnk" style={{ color: "var(--muted)" }} onClick={() => go && go("deals", x.d.id)} title="Ouvrir le document"> · {x.d.ref}</span> : null}</td>
                 <td><span className="badge" style={{ background: (x.first ? "#2bb673" : "#5b8def") + "22", color: x.first ? "#2bb673" : "#5b8def", fontWeight: 700 }}>{x.first ? "Référencement" : "Réassort"}</span></td>
                 <td style={{ textAlign: "right" }} className="tnum">{eur2(x.ca)}</td>
                 <td style={{ textAlign: "right" }} className="tnum">{num(Math.round(x.rate * 1000) / 10)} %</td>
@@ -7724,7 +7732,7 @@ function CommissionsRH({ data, persist }) {
   </div>);
 }
 // Onglet RH : sous-navigation entre le temps de présence (pointage), les frais kilométriques, le salaire et les commissions.
-function RH({ data, persist }) {
+function RH({ data, persist, go }) {
   const [sub, setSub] = useState("presence");
   const subs = [{ id: "presence", label: "Temps de présence", icon: Clock }, { id: "frais", label: "Frais kilométriques", icon: Navigation }, { id: "salaire", label: "Salaire estimé", icon: Calculator }, { id: "commission", label: "Commissions", icon: Percent }];
   return (<div className="fade">
@@ -7732,7 +7740,7 @@ function RH({ data, persist }) {
     <div style={{ display: sub === "presence" ? "block" : "none" }}><Pointage data={data} persist={persist} /></div>
     <div style={{ display: sub === "frais" ? "block" : "none" }}><FraisKm data={data} persist={persist} /></div>
     <div style={{ display: sub === "salaire" ? "block" : "none" }}><SalaireRH data={data} persist={persist} /></div>
-    <div style={{ display: sub === "commission" ? "block" : "none" }}><CommissionsRH data={data} persist={persist} /></div>
+    <div style={{ display: sub === "commission" ? "block" : "none" }}><CommissionsRH data={data} persist={persist} go={go} /></div>
   </div>);
 }
 // Simulateur de frais kilométriques : trajet quotidien domicile-travail (essence + péage, aller-retour)
@@ -9238,7 +9246,7 @@ export default function App() {
       {tab === "stock" && <Stock key={"stock-" + navKey} data={data} persist={persist} />}
       {tab === "reassort" && <Reassort key={"reassort-" + navKey} data={data} persist={persist} />}
       {tab === "sav" && <Sav key={"sav-" + navKey} data={data} persist={persist} />}
-      {tab === "pointage" && <RH key={"pointage-" + navKey} data={data} persist={persist} />}
+      {tab === "pointage" && <RH key={"pointage-" + navKey} data={data} persist={persist} go={go} />}
       {tab === "calc" && <Calculateur data={data} persist={persist} />}
       {tab === "conn" && <Connexions key={"conn-" + navKey} data={data} persist={persist} autoBackup={autoBackup} />}
       </div>
