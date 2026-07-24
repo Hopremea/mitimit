@@ -1188,8 +1188,16 @@ function parseLocality(adresse) {
   const ville = (after.split(/[,\n;]/)[0] || "").trim();
   return { cp, ville, departement: depFromCP(cp) };
 }
+// Vraie adresse web (domaine / URL) vs simple texte. Un site officiel partagé (ex. joueclub.fr renvoyant
+// vers plusieurs établissements) NE doit PAS servir à rapprocher deux fiches ; en revanche un « site »
+// qui n'est en fait qu'un nom (import mal aligné) est traité comme un nom pour le rapprochement.
+function isUrlLike(s) {
+  const v = String(s || "").trim(); if (!v) return false;
+  return /^(https?:\/\/|www\.)/i.test(v) || /[a-z0-9-]+\.(fr|com|net|org|eu|be|io|shop|store|boutique|paris|co|info|biz|pro|us|de|es|it|ch|nl|lu|mc)(\/|$|\?|#)/i.test(v.replace(/\s+/g, ""));
+}
 // Clés d'identité normalisées d'une entité commerciale (prospect, établissement/site, compte) : SIRET,
 // adresse, SIREN+ville+nom, cœur de rue (+localité), nom+localité (tolérant à la ville incluse dans le nom).
+// Le champ « site » n'entre en compte QUE s'il contient un nom (pas une vraie URL, cf. isUrlLike).
 // Deux entités partageant une même clé désignent très probablement le même point de vente.
 function identityKeys(o) {
   const norm = (s) => normStr(s || "");
@@ -1213,7 +1221,8 @@ function identityKeys(o) {
   if (a.length >= 6 && sc) keys.push("A:" + a);
   if (siren.length === 9 && ville) { keys.push("S:" + siren + "|" + ville); if (coreName) keys.push("S:" + siren + "|" + ville + "|" + coreName); }
   if (sc && sc.split(" ").length >= 3) { if (loc) keys.push("R:" + sc + "|" + loc); else keys.push("R:" + sc); }
-  [o.nom, o.enseigne].forEach((v) => { const toks = normSp(v).split(/\s+/).filter((t) => t.length > 1 && !GEN.has(t)); if (toks.length >= 2 && loc) keys.push("N:" + toks.join(" ") + "|" + loc); if (loc && ville) { const strip = toks.filter((t) => !(t.length >= 3 && ville.includes(t))); if (strip.length >= 2 && strip.length < toks.length) keys.push("N:" + strip.join(" ") + "|" + loc); } });
+  // Le « site » n'est pris comme nom que s'il ne ressemble PAS à une vraie URL (site officiel partagé exclu).
+  [o.nom, o.enseigne, isUrlLike(o.site) ? "" : o.site].forEach((v) => { const toks = normSp(v).split(/\s+/).filter((t) => t.length > 1 && !GEN.has(t)); if (toks.length >= 2 && loc) keys.push("N:" + toks.join(" ") + "|" + loc); if (loc && ville) { const strip = toks.filter((t) => !(t.length >= 3 && ville.includes(t))); if (strip.length >= 2 && strip.length < toks.length) keys.push("N:" + strip.join(" ") + "|" + loc); } });
   // Signaux « évidents » : e-mail identique (hors boîtes génériques), téléphone identique, gérant + ville.
   const GEN_MAIL = new Set(["contact", "info", "infos", "standard", "accueil", "service", "serviceclient", "bonjour", "hello", "commande", "commandes", "direction", "secretariat", "magasin", "boutique"]);
   const email = String(o.email || o.contactEmail || "").trim().toLowerCase();
@@ -6485,7 +6494,8 @@ function Prospection({ data, persist, go }) {
       if (a.length >= 6 && sc) keys.push("A:" + a);
       if (siren.length === 9 && ville) { keys.push("S:" + siren + "|" + ville); if (nameCore(p)) keys.push("S:" + siren + "|" + ville + "|" + nameCore(p)); }
       if (sc && sc.split(" ").length >= 3) { if (loc) keys.push("R:" + sc + "|" + loc); else keys.push("R:" + sc); }
-      [p.nom, p.enseigne].forEach((v) => { const toks = normSp(v).split(/\s+/).filter((t) => t.length > 1 && !GENERIC.has(t)); if (toks.length >= 2 && loc) keys.push("N:" + toks.join(" ") + "|" + loc); });
+      // « site » pris comme nom uniquement s'il n'est pas une vraie URL (site officiel partagé exclu).
+      [p.nom, p.enseigne, isUrlLike(p.site) ? "" : p.site].forEach((v) => { const toks = normSp(v).split(/\s+/).filter((t) => t.length > 1 && !GENERIC.has(t)); if (toks.length >= 2 && loc) keys.push("N:" + toks.join(" ") + "|" + loc); });
       // Signaux « évidents » : e-mail identique (hors boîtes génériques), téléphone identique, gérant + ville.
       const email = String(p.email || p.contactEmail || "").trim().toLowerCase();
       const em = email.match(/^([^@\s]+)@[^@\s]+\.[^@\s]+$/);
@@ -6541,12 +6551,17 @@ function Prospection({ data, persist, go }) {
       const sorted = g.slice().sort((a, b) => prosScore(b) - prosScore(a));
       const base = { ...sorted[0] };
       sorted.slice(1).forEach((o) => {
-        PROS_FIELDS.forEach((k) => { if ((base[k] == null || base[k] === "") && (o[k] != null && o[k] !== "")) base[k] = o[k]; });
+        // On complète les champs vides depuis les autres fiches. Exception « site » : on n'y recopie
+        // jamais un simple nom (site non-URL) — seule une vraie adresse web peut remplir ce champ.
+        PROS_FIELDS.forEach((k) => { if ((base[k] == null || base[k] === "") && (o[k] != null && o[k] !== "")) { if (k === "site" && !isUrlLike(o.site)) return; base[k] = o[k]; } });
         if (o.accountId && !base.accountId) base.accountId = o.accountId;
         if (STATUT_ORDER.indexOf(o.statut) > STATUT_ORDER.indexOf(base.statut)) base.statut = o.statut;
         if (o.notes && o.notes.trim() && norm(base.notes || "").indexOf(norm(o.notes)) === -1) base.notes = (base.notes ? base.notes + "\n— " : "") + o.notes.trim();
         removeIds.add(o.id); extra++;
       });
+      // Nettoyage : si le champ « site » de la fiche fusionnée contient en réalité un nom, on le bascule
+      // dans « nom » (s'il manque) puis on vide le champ site — un vrai site web (URL) est conservé.
+      if (base.site && !isUrlLike(base.site)) { if (!String(base.nom || "").trim()) base.nom = base.site; base.site = ""; }
       mergedById[base.id] = base; groups++;
     });
     if (removeIds.size) persist((d) => ({ ...d, prospects: d.prospects.filter((p) => !removeIds.has(p.id)).map((p) => mergedById[p.id] || p) }));
