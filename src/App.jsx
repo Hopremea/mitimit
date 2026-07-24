@@ -5784,6 +5784,7 @@ function Carte({ data, persist, go, focus }) {
   const [useOSRM, setUseOSRM] = useState(false);
   const [osrmCache, setOsrmCache] = useState({});
   const [tourneeOrder, setTourneeOrder] = useState(null);
+  const [mePos, setMePos] = useState(null); const [meMsg, setMeMsg] = useState(null); const [meBusy, setMeBusy] = useState(false);
   const [showLegend, setShowLegend] = useState(false);
   const [showRoads, setShowRoads] = useState(true);
   const [siteQuery, setSiteQuery] = useState("");
@@ -5855,6 +5856,21 @@ function Carte({ data, persist, go, focus }) {
     const way = limited.slice(0, limited.length - 1).map((s) => `${s.lat},${s.lng}`).join("|");
     window.open(`https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}${way ? "&waypoints=" + encodeURIComponent(way) : ""}&travelmode=driving`, "_blank");
   };
+  // « Autour de moi » : géolocalisation de l'appareil + établissements/prospects les plus proches.
+  const aroundMe = () => {
+    if (!navigator.geolocation) { setMeMsg({ ok: false, t: "Géolocalisation non disponible sur cet appareil." }); return; }
+    setMeBusy(true); setMeMsg({ ok: true, t: "Localisation en cours…" }); setTourneeOrder(null);
+    navigator.geolocation.getCurrentPosition((pos) => {
+      const me = { lat: pos.coords.latitude, lng: pos.coords.longitude }; setMePos(me);
+      if (mapInst.current) mapInst.current.flyTo([me.lat, me.lng], 11, { duration: 0.8 });
+      const cand = [
+        ...placed.filter((s) => s.type !== "penup" && s.type !== "entrepot" && s.type !== "usine").map((s) => ({ id: s.id, kind: "site", nom: s.label || "Établissement", lat: s.lat, lng: s.lng })),
+        ...prospPlaced.map((p) => ({ id: p.id, kind: "prospect", nom: p.nom || p.enseigne || "Prospect", lat: p.lat, lng: p.lng })),
+      ];
+      const near = cand.map((c) => ({ ...c, d: distanceKm(me.lat, me.lng, c.lat, c.lng) })).filter((c) => c.d != null).sort((a, b) => a.d - b.d).slice(0, 10);
+      setMeMsg({ ok: true, near }); setMeBusy(false);
+    }, (err) => { setMeBusy(false); setMeMsg({ ok: false, t: "Localisation impossible (" + ((err && err.message) || "refusée") + ")." }); }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
+  };
   const routes = entrepot ? data.deals.filter((d) => d.statut === "expediee" && d.livraisonSiteId).map((d) => { const dest = placed.find((x) => x.id === d.livraisonSiteId); return dest && visibleIds.has(dest.id) ? { d, dest } : null; }).filter(Boolean) : [];
   // OSRM : fetch routes réelles si activé
   useEffect(() => {
@@ -5922,7 +5938,7 @@ function Carte({ data, persist, go, focus }) {
     if (showRoads) roadsLayer.current.addTo(mapInst.current); else mapInst.current.removeLayer(roadsLayer.current);
   }, [mapReady, showRoads]);
   // Marqueurs : un divIcon SVG par site (forme = type, couleur = enseigne), surbrillance + étiquette sur le sélectionné.
-  const markerKey = useMemo(() => shown.map((p) => p.id + ":" + p.lat + ":" + p.lng + ":" + siteColor(p, accOf(p.accountId))).join("|") + "#" + sel + "#P" + prospPlaced.map((p) => p.id + ":" + p.lat + ":" + p.lng).join("|"), [shown, sel, prospPlaced]);
+  const markerKey = useMemo(() => shown.map((p) => p.id + ":" + p.lat + ":" + p.lng + ":" + siteColor(p, accOf(p.accountId))).join("|") + "#" + sel + "#P" + prospPlaced.map((p) => p.id + ":" + p.lat + ":" + p.lng).join("|") + "#M" + (mePos ? mePos.lat.toFixed(4) + "," + mePos.lng.toFixed(4) : ""), [shown, sel, prospPlaced, mePos]);
   useEffect(() => {
     if (!mapReady || !markersLayer.current) return;
     const lg = markersLayer.current; lg.clearLayers();
@@ -5946,6 +5962,11 @@ function Carte({ data, persist, go, focus }) {
       m.bindTooltip(nom + " · Prospect", { direction: "top", offset: [0, -10], className: "site-tip" });
       m.on("click", () => go("prospection", p.id));
     });
+    // Position de l'utilisateur (« Autour de moi ») : point bleu avec halo.
+    if (mePos) {
+      const html = `<svg width="26" height="26" viewBox="-13 -13 26 26" style="overflow:visible"><circle class="halo" cx="0" cy="0" r="9" fill="#2563EB"/><circle cx="0" cy="0" r="6" fill="#2563EB" stroke="#fff" stroke-width="2.5"/></svg>`;
+      LF.marker([mePos.lat, mePos.lng], { icon: LF.divIcon({ html, className: "site-marker", iconSize: [26, 26], iconAnchor: [13, 13] }), zIndexOffset: 2000, title: "Ma position" }).addTo(lg).bindTooltip("Ma position", { direction: "top", offset: [0, -12], className: "site-tip" });
+    }
   }, [mapReady, markerKey]);
   // Routes de livraison : trait pointillé animé entrepôt → destination (ligne droite ou itinéraire OSRM réel).
   const routeKey = useMemo(() => routesByDest.map((g) => g[0].dest.id + ":" + g.length).join("|") + (useOSRM ? "|osrm:" + Object.keys(osrmCache).length : ""), [routesByDest, useOSRM, osrmCache]);
@@ -5967,7 +5988,12 @@ function Carte({ data, persist, go, focus }) {
     if (target) { setSel(target.id); if (target.lat != null && target.lng != null && mapInst.current) mapInst.current.flyTo([target.lat, target.lng], 13, { duration: 0.8 }); }
   }, [mapReady, focus && focus.n]);
   return (<div className="fade">
-    <div className="card" style={{ marginBottom: 12, padding: "10px 14px" }}><div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}><div style={{ fontSize: 12.5, color: "var(--muted)", fontWeight: 600 }}><MapPin size={13} style={{ verticalAlign: -2, marginRight: 4 }} />{shown.length} site{shown.length > 1 ? "s" : ""} affiché{shown.length > 1 ? "s" : ""}{placed.length !== shown.length ? " · " + placed.length + " géolocalisé" + (placed.length > 1 ? "s" : "") : ""}{(liveSites.length - placed.length) > 0 ? " · " + (liveSites.length - placed.length) + " à géolocaliser" : ""}{showProspects && activeProspects.length > 0 ? " · " + prospPlaced.length + "/" + activeProspects.length + " prospect" + (activeProspects.length > 1 ? "s" : "") + " (onglet Prospection)" : ""}</div><div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}><label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, marginRight: 4 }} title="Tracer les itinéraires de livraison réels (routier) plutôt qu'à vol d'oiseau"><input type="checkbox" checked={useOSRM} onChange={(e) => setUseOSRM(e.target.checked)} style={{ width: 14, height: 14 }} />Itinéraires réels</label><button className={cx("btn", "btn-s", showRoads ? "btn-p" : "btn-g")} onClick={() => setShowRoads((v) => !v)} title="Afficher / masquer les grands axes routiers (autoroutes, nationales)"><Navigation size={15} /> Axes routiers</button><button className={cx("btn", "btn-s", showLegend ? "btn-p" : "btn-g")} onClick={() => setShowLegend((v) => !v)} title="Afficher / masquer la légende des couleurs et formes"><Layers size={15} /> Légende</button><button className="btn btn-g btn-s" onClick={runTournee} title="Itinéraire optimisé des établissements affichés (selon les filtres)"><Navigation size={15} /> Tournée</button><button className="btn btn-p btn-s" onClick={() => setEdit({ id: "s_" + Date.now(), accountId: accounts[0]?.id || null, label: "", type: "pdv", adresse: "", lat: null, lng: null, siret: "", typeSurface: "", adresseLivraison: "", livraisonIdentique: true, contactId: "" })}><Plus size={15} /> Ajouter un site</button></div></div>
+    <div className="card" style={{ marginBottom: 12, padding: "10px 14px" }}><div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}><div style={{ fontSize: 12.5, color: "var(--muted)", fontWeight: 600 }}><MapPin size={13} style={{ verticalAlign: -2, marginRight: 4 }} />{shown.length} site{shown.length > 1 ? "s" : ""} affiché{shown.length > 1 ? "s" : ""}{placed.length !== shown.length ? " · " + placed.length + " géolocalisé" + (placed.length > 1 ? "s" : "") : ""}{(liveSites.length - placed.length) > 0 ? " · " + (liveSites.length - placed.length) + " à géolocaliser" : ""}{showProspects && activeProspects.length > 0 ? " · " + prospPlaced.length + "/" + activeProspects.length + " prospect" + (activeProspects.length > 1 ? "s" : "") + " (onglet Prospection)" : ""}</div><div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}><label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, marginRight: 4 }} title="Tracer les itinéraires de livraison réels (routier) plutôt qu'à vol d'oiseau"><input type="checkbox" checked={useOSRM} onChange={(e) => setUseOSRM(e.target.checked)} style={{ width: 14, height: 14 }} />Itinéraires réels</label><button className={cx("btn", "btn-s", showRoads ? "btn-p" : "btn-g")} onClick={() => setShowRoads((v) => !v)} title="Afficher / masquer les grands axes routiers (autoroutes, nationales)"><Navigation size={15} /> Axes routiers</button><button className={cx("btn", "btn-s", showLegend ? "btn-p" : "btn-g")} onClick={() => setShowLegend((v) => !v)} title="Afficher / masquer la légende des couleurs et formes"><Layers size={15} /> Légende</button><button className="btn btn-g btn-s" onClick={aroundMe} disabled={meBusy} title="Se géolocaliser et lister les établissements / prospects les plus proches de moi"><MapPin size={15} className={meBusy ? "spin" : ""} /> Autour de moi</button><button className="btn btn-g btn-s" onClick={runTournee} title="Itinéraire optimisé des établissements affichés (selon les filtres)"><Navigation size={15} /> Tournée</button><button className="btn btn-p btn-s" onClick={() => setEdit({ id: "s_" + Date.now(), accountId: accounts[0]?.id || null, label: "", type: "pdv", adresse: "", lat: null, lng: null, siret: "", typeSurface: "", adresseLivraison: "", livraisonIdentique: true, contactId: "" })}><Plus size={15} /> Ajouter un site</button></div></div>
+      {meMsg && <div style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}><strong style={{ fontSize: 13, color: meMsg.ok === false ? "var(--red)" : "var(--ink)" }}><MapPin size={14} style={{ verticalAlign: -2, color: "#2563EB" }} /> Autour de moi{meMsg.near ? " — les plus proches" : ""}</strong><button className="iconbtn" onClick={() => { setMeMsg(null); setMePos(null); }} title="Fermer"><X size={15} /></button></div>
+        {meMsg.t && <div style={{ fontSize: 12.5, color: meMsg.ok === false ? "var(--red)" : "var(--muted)", marginTop: 6 }}>{meMsg.t}</div>}
+        {meMsg.near && (meMsg.near.length ? <ol style={{ margin: "8px 0 0", paddingLeft: 20, fontSize: 12.5, lineHeight: 1.75 }}>{meMsg.near.map((c) => (<li key={c.kind + c.id}><span className="lnk" onClick={() => c.kind === "site" ? selectSite(sites.find((s) => s.id === c.id) || c) : go("prospection", c.id)}>{c.nom}</span> <span style={{ color: "var(--muted)" }}>· {num(Math.round(c.d))} km{c.kind === "prospect" ? " · prospect" : ""}</span></li>))}</ol> : <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>Aucun établissement géolocalisé à proximité.</div>)}
+      </div>}
       {tourneeOrder && <div style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 10 }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}><strong style={{ fontSize: 13 }}><Navigation size={14} style={{ verticalAlign: -2 }} /> Tournée proposée ({tourneeOrder.length} arrêt{tourneeOrder.length > 1 ? "s" : ""})</strong><button className="iconbtn" onClick={() => setTourneeOrder(null)} title="Fermer"><X size={15} /></button></div><ol style={{ margin: "8px 0 0", paddingLeft: 20, fontSize: 12.5, lineHeight: 1.7 }}>{tourneeOrder.map((s, i) => { const prev = i === 0 ? (entrepot && entrepot.lat ? entrepot : null) : tourneeOrder[i - 1]; const dk = prev ? distanceKm(prev.lat, prev.lng, s.lat, s.lng) : null; return (<li key={s.id}><span className="lnk" onClick={() => selectSite(s)}>{s.label || "Établissement"}</span>{dk != null ? <span style={{ color: "var(--muted)" }}> · {num(Math.round(dk))} km</span> : null}</li>); })}</ol><div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6 }}>Itinéraire au plus proche voisin depuis l'entrepôt, ouvert dans Google Maps (max 9 arrêts).</div></div>}</div>
     <div className="filtbar">
       <div className="grp"><span className="lbl">Type de surface</span><AllChip active={filtSurf.length === 0} onClick={() => setFiltSurf([])}>Toutes</AllChip>{usedSurfaces.map((t) => { const col = SURFACE_COLOR[t] || "#9aa6bd"; return <button key={t} className={cx("chip", filtSurf.includes(t) && "on")} onClick={() => tog(filtSurf, setFiltSurf, t)} style={filtSurf.includes(t) ? { background: col, borderColor: col, color: onColor(col) } : { borderLeft: `4px solid ${col}` }}>{t}</button>; })}</div>
