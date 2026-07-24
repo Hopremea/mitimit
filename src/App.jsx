@@ -6109,8 +6109,24 @@ Renvoie UNIQUEMENT un objet JSON valide (aucun texte ni balise autour) avec EXAC
   throw lastErr;
 }
 // Import de prospects (Excel/CSV ou liste texte). Reconnaissance souple des colonnes par leur intitulé.
-const PROSPECT_FIELD_ALIASES = { nom: ["nom", "magasin", "etablissement", "prospect", "raisonsociale", "societe", "name", "enseigne"], enseigne: ["groupe", "reseau", "chaine"], ville: ["ville", "commune", "city"], cp: ["cp", "codepostal", "postal", "zip"], adresse: ["adresse", "adr", "address", "rue"], departement: ["departement", "dept", "dpt"], region: ["region"], telephone: ["telephone", "tel", "phone", "portable", "mobile"], email: ["email", "mail", "courriel"], site: ["site", "siteweb", "web", "url"], notes: ["notes", "note", "commentaire", "remarque", "info"] };
-function matchProspectField(h) { const n = stripAccentsLow(String(h || "")).replace(/[^a-z0-9]/g, ""); if (!n) return null; for (const [f, al] of Object.entries(PROSPECT_FIELD_ALIASES)) { if (al.some((a) => n === a || n.includes(a))) return f; } return null; }
+// Champs SPÉCIFIQUES en tête (siret, siren, contact…) pour qu'ils l'emportent sur les génériques (site,
+// email, nom) en correspondance approximative — l'ordre compte pour la 2ᵉ passe « contient ».
+const PROSPECT_FIELD_ALIASES = {
+  siret: ["siret"], siren: ["siren", "rna"], raisonSociale: ["raisonsociale"], formeJuridique: ["formejuridique", "formejur", "statutjuridique"],
+  contactPrenom: ["prenomcontact", "contactprenom"], contactNom: ["nomcontact", "contactnom", "interlocuteur", "gerant", "dirigeant", "responsable"], contactFonction: ["fonctioncontact", "contactfonction", "fonction", "poste"], contactEmail: ["emailcontact", "contactemail", "mailcontact", "courrielcontact"], contactTel: ["telcontact", "contacttel", "telephonecontact", "mobilecontact", "portablecontact"],
+  facebook: ["facebook"], instagram: ["instagram"],
+  cp: ["codepostal", "cp", "postal", "zip"], ville: ["ville", "commune", "city"], adresse: ["adresse", "adr", "address", "rue"], departement: ["departement", "dept", "dpt"], region: ["region"],
+  site: ["siteweb", "site", "web", "url"], email: ["email", "mail", "courriel"], telephone: ["telephone", "tel", "phone", "portable", "mobile"],
+  type: ["typeprospect", "categorie"], statut: ["statutprospect"], potentiel: ["potentiel"], format: ["format"],
+  enseigne: ["groupe", "reseau", "chaine", "enseigne"], nom: ["nom", "magasin", "etablissement", "prospect", "name", "societe"], notes: ["notes", "note", "commentaire", "remarque", "info"],
+};
+// Deux passes : d'abord une égalité EXACTE (fiable), puis un « contient » tolérant (ordre = priorité).
+function matchProspectField(h) {
+  const n = stripAccentsLow(String(h || "")).replace(/[^a-z0-9]/g, ""); if (!n) return null;
+  for (const [f, al] of Object.entries(PROSPECT_FIELD_ALIASES)) { if (al.some((a) => n === a)) return f; }
+  for (const [f, al] of Object.entries(PROSPECT_FIELD_ALIASES)) { if (al.some((a) => n.includes(a))) return f; }
+  return null;
+}
 const cpNum = (v) => String(v == null ? "" : v).replace(/[^0-9]/g, "");
 // Liste texte : un prospect par ligne. Colonnes séparées par tabulation ou « ; » (sinon nom seul, avec
 // détection « Nom, Ville » / « Nom - Ville »). En-tête reconnu si la 1re ligne nomme ≥ 2 champs connus.
@@ -6140,12 +6156,37 @@ function mapProspectRows(json) {
   if (!json || !json.length) return [];
   const keys = Object.keys(json[0]); const colMap = {};
   keys.forEach((k) => { const f = matchProspectField(k); if (f && !colMap[f]) colMap[f] = k; });
-  if (!colMap.nom && keys.length) colMap.nom = keys[0];
+  if (!colMap.nom && !colMap.siret && !colMap.siren && keys.length) colMap.nom = keys[0];
   const get = (row, f) => colMap[f] ? String(row[colMap[f]] == null ? "" : row[colMap[f]]).trim() : "";
-  return json.map((row) => ({ nom: get(row, "nom"), enseigne: get(row, "enseigne"), ville: get(row, "ville"), cp: cpNum(get(row, "cp")), adresse: get(row, "adresse"), departement: get(row, "departement"), region: get(row, "region"), telephone: get(row, "telephone"), email: get(row, "email"), site: get(row, "site"), notes: get(row, "notes") })).filter((p) => p.nom);
+  const FIELDS = Object.keys(PROSPECT_FIELD_ALIASES);
+  // On garde une ligne dès qu'elle porte un signal d'identité (utile pour la mise à jour : une ligne
+  // « SIRET + e-mail » sans nom peut compléter une fiche existante).
+  return json.map((row) => { const o = {}; FIELDS.forEach((f) => { const v = get(row, f); if (v) o[f] = f === "cp" ? cpNum(v) : v; }); return o; }).filter((p) => p.nom || p.siret || p.siren || p.adresse || p.telephone || p.email);
+}
+// Construit des fiches prospect à partir de brouillons importés, en écartant les doublons (prospect,
+// compte / groupe ou site déjà enregistré) via les clés d'identité. Renvoie { created, skipped }.
+function createDraftsWithDedup(drafts, data) {
+  const norm = (s) => stripAccentsLow(String(s || "")).replace(/[^a-z0-9]/g, "");
+  const existingKeys = new Set();
+  const addKeys = (o) => identityKeys(o).forEach((k) => existingKeys.add(k));
+  (data.prospects || []).forEach(addKeys);
+  (data.accounts || []).forEach((a) => addKeys({ nom: a.enseigne, enseigne: a.enseigne, ville: a.ville, cp: a.cp, adresse: a.adressePostale || a.adresse, siren: a.siren, siret: a.siret, telephone: a.telephone }));
+  (data.sites || []).forEach((s) => addKeys({ nom: s.label, enseigne: s.label, ville: s.ville, adresse: s.adresse, siret: s.siret }));
+  const seen = new Set((data.prospects || []).map((p) => norm(p.nom || p.enseigne) + "|" + norm(p.ville)));
+  const created = []; let skipped = 0;
+  (drafts || []).forEach((d) => {
+    const nameKey = norm(d.nom || d.enseigne) + "|" + norm(d.ville);
+    if ((d.nom || d.enseigne) && seen.has(nameKey)) { skipped++; return; }
+    const dKeys = identityKeys({ nom: d.nom, enseigne: d.enseigne, ville: d.ville, cp: d.cp, adresse: d.adresse, telephone: d.telephone, email: d.email, siret: d.siret, siren: d.siren });
+    if (dKeys.length && dKeys.some((k) => existingKeys.has(k))) { skipped++; seen.add(nameKey); return; }
+    seen.add(nameKey); dKeys.forEach((k) => existingKeys.add(k)); // évite aussi les doublons internes au lot
+    created.push({ id: uid("p_"), nom: d.nom || "", enseigne: d.enseigne || "", type: PROSPECT_TYPES[d.type] ? d.type : "autre", format: d.format || "", adresse: d.adresse || "", ville: d.ville || "", cp: d.cp || "", departement: d.departement || "", region: d.region || "", telephone: d.telephone || "", site: d.site || "", email: d.email || "", statut: PROSPECT_STATUT[d.statut] ? d.statut : "a_qualifier", potentiel: POTENTIEL_META[d.potentiel] ? d.potentiel : "", notes: d.notes || "", source: "Import", accountId: null, createdAt: TODAY(), siren: d.siren || "", siret: d.siret || "", raisonSociale: d.raisonSociale || "", formeJuridique: d.formeJuridique || "", contactPrenom: d.contactPrenom || "", contactNom: d.contactNom || "", contactFonction: d.contactFonction || "", contactEmail: d.contactEmail || "", contactTel: d.contactTel || "", contactSource: "", facebook: d.facebook || "", instagram: d.instagram || "", archived: false, archiveReason: "", archiveDate: "", archiveNote: "" });
+  });
+  return { created, skipped };
 }
 function ProspectImportModal({ onClose, onImport }) {
   const [text, setText] = useState(""); const [drafts, setDrafts] = useState([]); const [enrich, setEnrich] = useState(true); const [msg, setMsg] = useState(null);
+  const [mode, setMode] = useState("add"); const [overwrite, setOverwrite] = useState(false); const [addUnmatched, setAddUnmatched] = useState(false);
   const fileRef = useRef(null);
   const applyText = (t) => { setText(t); setDrafts(parseProspectText(t)); setMsg(null); };
   const onFile = async (file) => {
@@ -6158,17 +6199,25 @@ function ProspectImportModal({ onClose, onImport }) {
       setDrafts(d); setText(""); setMsg({ ok: d.length > 0, t: d.length ? (file.name + " : " + d.length + " prospect(s) détecté(s).") : "Aucun prospect détecté dans ce fichier." });
     } catch (e) { setMsg({ ok: false, t: "Lecture du fichier impossible (" + ((e && e.message) || e) + ")." }); }
   };
+  const isUpd = mode === "update";
+  const seg = (id, label) => <button type="button" className={cx("btn", "btn-s", mode === id ? "btn-p" : "btn-g")} onClick={() => setMode(id)} style={{ flex: 1 }}>{label}</button>;
   return (<Modal title="Importer des prospects" onClose={onClose} wide>
-    <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5, marginBottom: 10 }}>Importez un fichier <strong>Excel / CSV</strong> ou collez une <strong>liste texte</strong> (un prospect par ligne). Colonnes reconnues : nom, groupe/réseau, ville, code postal, adresse, téléphone, e-mail… Une simple liste de noms suffit — MITMIT complète le reste par recherche web.</div>
+    <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>{seg("add", "Ajouter de nouveaux prospects")}{seg("update", "Mettre à jour les fiches existantes")}</div>
+    <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5, marginBottom: 10 }}>{isUpd
+      ? <>Importez un fichier <strong>Excel / CSV</strong> (ou une liste avec en-tête) pour <strong>compléter des fiches déjà enregistrées</strong>. Chaque ligne est reliée à une fiche existante par <strong>SIRET</strong>, à défaut <strong>SIREN + ville</strong>, <strong>adresse</strong> ou <strong>nom + ville</strong> : <strong>aucun doublon n'est créé</strong>. Colonnes reconnues : nom, SIREN, SIRET, raison sociale, adresse, ville, CP, téléphone, e-mail, site, réseaux sociaux, contact (prénom / nom / fonction / e-mail / tél)…</>
+      : <>Importez un fichier <strong>Excel / CSV</strong> ou collez une <strong>liste texte</strong> (un prospect par ligne). Colonnes reconnues : nom, groupe/réseau, ville, code postal, adresse, téléphone, e-mail, SIRET… Une simple liste de noms suffit — MITMIT complète le reste par recherche web. Les doublons (fiche ou établissement déjà enregistré) sont écartés.</>}</div>
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
       <button className="btn btn-g btn-s" onClick={() => fileRef.current && fileRef.current.click()}><Upload size={14} /> Choisir un fichier Excel / CSV</button>
       <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.tsv,.txt" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) onFile(f); e.target.value = ""; }} />
     </div>
-    <div className="fld"><label>Ou collez votre liste (un prospect par ligne)</label><textarea rows={8} value={text} onChange={(e) => applyText(e.target.value)} placeholder={"La Grande Récré, Toulouse\nJouéClub Auch\nKing Jouet; Albi; 81000"} style={{ width: "100%", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12.5 }} /></div>
+    <div className="fld"><label>Ou collez votre liste{isUpd ? " (avec une ligne d'en-tête : nom;ville;siret;email…)" : " (un prospect par ligne)"}</label><textarea rows={8} value={text} onChange={(e) => applyText(e.target.value)} placeholder={isUpd ? "nom;ville;siret;email\nKing Jouet Albi;Albi;81886163900015;contact@…" : "La Grande Récré, Toulouse\nJouéClub Auch\nKing Jouet; Albi; 81000"} style={{ width: "100%", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12.5 }} /></div>
     {msg && <div style={{ fontSize: 12, color: msg.ok ? "var(--green)" : "var(--red)", marginTop: 6 }}>{msg.t}</div>}
-    {drafts.length > 0 && <div style={{ marginTop: 10, fontSize: 12.5 }}><strong>{drafts.length} prospect(s) prêt(s) à importer</strong> : <span style={{ color: "var(--muted)" }}>{drafts.slice(0, 8).map((d) => d.nom).join(", ")}{drafts.length > 8 ? "…" : ""}</span></div>}
-    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 600, marginTop: 12 }}><input type="checkbox" checked={enrich} onChange={(e) => setEnrich(e.target.checked)} style={{ width: 15, height: 15 }} /> Lancer la recherche web IA sur les prospects importés (adresse, SIRET, contact…)</label>
-    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}><button className="btn btn-g" onClick={onClose}>Annuler</button><button className="btn btn-p" disabled={!drafts.length} onClick={() => onImport(drafts, enrich)}><Upload size={15} /> Importer {drafts.length || ""}</button></div>
+    {drafts.length > 0 && <div style={{ marginTop: 10, fontSize: 12.5 }}><strong>{drafts.length} ligne(s) prête(s)</strong> : <span style={{ color: "var(--muted)" }}>{drafts.slice(0, 8).map((d) => d.nom || d.siret || d.siren || d.adresse || "?").join(", ")}{drafts.length > 8 ? "…" : ""}</span></div>}
+    {isUpd ? <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 600 }}><input type="checkbox" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} style={{ width: 15, height: 15 }} /> Écraser les valeurs déjà présentes <span style={{ color: "var(--muted)", fontWeight: 500 }}>(par défaut : on ne remplit que les champs vides)</span></label>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 600 }}><input type="checkbox" checked={addUnmatched} onChange={(e) => setAddUnmatched(e.target.checked)} style={{ width: 15, height: 15 }} /> Ajouter les lignes sans correspondance comme nouveaux prospects</label>
+    </div> : <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 600, marginTop: 12 }}><input type="checkbox" checked={enrich} onChange={(e) => setEnrich(e.target.checked)} style={{ width: 15, height: 15 }} /> Lancer la recherche web IA sur les prospects importés (adresse, SIRET, contact…)</label>}
+    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}><button className="btn btn-g" onClick={onClose}>Annuler</button><button className="btn btn-p" disabled={!drafts.length} onClick={() => onImport(drafts, enrich, mode, { overwrite, addUnmatched })}><Upload size={15} /> {isUpd ? "Mettre à jour" : "Importer"} {drafts.length || ""}</button></div>
   </Modal>);
 }
 // Applique le résultat d'un enrichissement IA à une fiche prospect, sans écraser les champs déjà remplis.
@@ -6291,30 +6340,58 @@ function Prospection({ data, persist, go }) {
   // vente existant (clés d'identité : SIRET, adresse, SIREN+ville, cœur de rue, nom+localité…). Le libellé
   // d'un site (« King Jouet Cahors ») est traité comme le nom de sa fiche établissement.
   const doImport = (drafts, enrich) => {
-    const norm = (s) => stripAccentsLow(String(s || "")).replace(/[^a-z0-9]/g, "");
-    // Clés d'identité de tout ce qui existe déjà : prospects, comptes/groupes/établissements et sites.
-    const existingKeys = new Set();
-    const addKeys = (o) => identityKeys(o).forEach((k) => existingKeys.add(k));
-    (prospects || []).forEach(addKeys);
-    (data.accounts || []).forEach((a) => addKeys({ nom: a.enseigne, enseigne: a.enseigne, ville: a.ville, cp: a.cp, adresse: a.adressePostale || a.adresse, siren: a.siren, siret: a.siret, telephone: a.telephone }));
-    (data.sites || []).forEach((s) => addKeys({ nom: s.label, enseigne: s.label, ville: s.ville, adresse: s.adresse, siret: s.siret }));
-    const seen = new Set((prospects || []).map((p) => norm(p.nom || p.enseigne) + "|" + norm(p.ville)));
-    const created = []; let skipped = 0;
-    drafts.forEach((d) => {
-      const nameKey = norm(d.nom || d.enseigne) + "|" + norm(d.ville);
-      if (seen.has(nameKey)) { skipped++; return; }
-      const dKeys = identityKeys({ nom: d.nom, enseigne: d.enseigne, ville: d.ville, cp: d.cp, adresse: d.adresse, telephone: d.telephone, email: d.email });
-      if (dKeys.some((k) => existingKeys.has(k))) { skipped++; seen.add(nameKey); return; }
-      seen.add(nameKey); dKeys.forEach((k) => existingKeys.add(k)); // évite aussi les doublons internes au lot
-      created.push({ id: uid("p_"), nom: d.nom || "", enseigne: d.enseigne || "", type: d.type || "autre", format: "", adresse: d.adresse || "", ville: d.ville || "", cp: d.cp || "", departement: d.departement || "", region: d.region || "", telephone: d.telephone || "", site: d.site || "", email: d.email || "", statut: "a_qualifier", potentiel: "", notes: d.notes || "", source: "Import", accountId: null, createdAt: TODAY(), siren: "", siret: "", raisonSociale: "", formeJuridique: "", contactPrenom: "", contactNom: "", contactFonction: "", contactEmail: "", contactTel: "", contactSource: "", archived: false, archiveReason: "", archiveDate: "", archiveNote: "" });
-    });
+    const { created, skipped } = createDraftsWithDedup(drafts, data);
     setImportOpen(false);
     const dup = skipped ? " " + skipped + " doublon(s) écarté(s) (prospect ou établissement déjà enregistré)." : "";
     if (!created.length) { setEnrichMsg({ ok: false, t: "Aucun nouveau prospect importé (tous déjà présents)." + dup }); return; }
     persist((d) => ({ ...d, prospects: [...created, ...(d.prospects || [])] }));
-    setFlashIds(created.map((c) => c.id));
+    setFlashIds(new Set(created.map((c) => c.id)));
     setEnrichMsg({ ok: true, t: created.length + " prospect(s) importé(s)." + dup + (enrich ? " Recherche web IA lancée en tâche de fond…" : "") });
     if (enrich) enrichCreated(created);
+  };
+  // Mise à jour de fiches existantes depuis un fichier : chaque ligne est reliée à UNE fiche prospect
+  // existante via les clés d'identité (SIRET > SIREN+ville > adresse/rue > nom+localité, etc.). On complète
+  // les champs vides (ou on écrase si demandé). Aucune fiche en double n'est créée ; on peut ajouter les
+  // lignes sans correspondance comme nouveaux prospects. Aucun crédit API n'est consommé.
+  const doUpdateImport = (rows, opts) => {
+    const overwrite = !!(opts && opts.overwrite);
+    const addUnmatched = !!(opts && opts.addUnmatched);
+    const actives = (prospects || []).filter((p) => !p.accountId);
+    const keyIndex = new Map();
+    actives.forEach((p) => { identityKeys(p).forEach((k) => { if (!keyIndex.has(k)) keyIndex.set(k, new Set()); keyIndex.get(k).add(p.id); }); });
+    const weight = (k) => k[0] === "T" ? 100 : k[0] === "S" ? 12 : (k[0] === "A" || k[0] === "R") ? 6 : (k[0] === "E" || k[0] === "P") ? 4 : 1;
+    const UPD = ["nom", "enseigne", "type", "format", "adresse", "ville", "cp", "departement", "region", "telephone", "site", "facebook", "instagram", "email", "siren", "siret", "raisonSociale", "formeJuridique", "contactPrenom", "contactNom", "contactFonction", "contactEmail", "contactTel", "notes", "potentiel", "statut"];
+    const curById = {}; actives.forEach((p) => { curById[p.id] = p; });
+    const patches = new Map(); const unmatched = []; let filled = 0;
+    (rows || []).forEach((r) => {
+      const rk = identityKeys(r);
+      const score = new Map();
+      rk.forEach((k) => { const ids = keyIndex.get(k); if (ids) ids.forEach((id) => score.set(id, (score.get(id) || 0) + weight(k))); });
+      let bestId = null, best = 0; score.forEach((v, id) => { if (v > best) { best = v; bestId = id; } });
+      if (!bestId) { unmatched.push(r); return; }
+      const cur = curById[bestId]; const patch = patches.get(bestId) || {};
+      UPD.forEach((f) => {
+        const v = (r[f] == null ? "" : String(r[f])).trim(); if (!v) return;
+        if (f === "type" && !PROSPECT_TYPES[v]) return; if (f === "statut" && !PROSPECT_STATUT[v]) return; if (f === "potentiel" && !POTENTIEL_META[v]) return;
+        const existing = (patch[f] != null ? patch[f] : cur[f]) || "";
+        if ((overwrite || !String(existing).trim()) && String(existing).trim() !== v) patch[f] = v;
+      });
+      patches.set(bestId, patch);
+    });
+    let updated = 0; const touched = [];
+    patches.forEach((patch, id) => { const n = Object.keys(patch).length; if (n) { updated++; filled += n; touched.push(id); } });
+    let created = [];
+    if (addUnmatched && unmatched.length) created = createDraftsWithDedup(unmatched, data).created;
+    if (updated || created.length) persist((d) => ({ ...d, prospects: [...created, ...d.prospects.map((p) => { const patch = patches.get(p.id); return (patch && Object.keys(patch).length) ? { ...p, ...patch } : p; })] }));
+    setImportOpen(false);
+    const parts = [];
+    if (updated) parts.push(updated + " fiche(s) complétée(s) (" + filled + " champ(s))");
+    if (created.length) parts.push(created.length + " nouvelle(s) fiche(s)");
+    const noMatch = unmatched.length - created.length;
+    if (noMatch > 0) parts.push(noMatch + " ligne(s) sans correspondance" + (addUnmatched ? "" : " (ignorée(s))"));
+    const flash = new Set([...touched, ...created.map((c) => c.id)]);
+    if (flash.size) setFlashIds(flash);
+    setEnrichMsg({ ok: (updated || created.length) > 0, t: parts.length ? ("Mise à jour depuis fichier : " + parts.join(" · ") + ".") : "Aucune correspondance trouvée : rien à mettre à jour." });
   };
   const enrichProspect = async () => {
     // Produit en croix : il suffit d'UN signal d'identité (nom, enseigne, SIRET, SIREN, adresse, ville,
@@ -6635,7 +6712,7 @@ function Prospection({ data, persist, go }) {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(330px, 1fr))", gap: 12 }}>{g.items.map(card)}</div>
       </div>); })}
     </>)}
-    {importOpen && <ProspectImportModal onClose={() => setImportOpen(false)} onImport={doImport} />}
+    {importOpen && <ProspectImportModal onClose={() => setImportOpen(false)} onImport={(drafts, enrich, mode, opts) => mode === "update" ? doUpdateImport(drafts, opts) : doImport(drafts, enrich)} />}
     {enrichOpen && <EnrichSelectModal prospects={prospects} onClose={() => setEnrichOpen(false)} onLaunch={(types, limit, instruction) => { setEnrichOpen(false); enrichAll(types, limit, instruction); }} />}
     {edit && <Modal title={edit.nom ? edit.nom : "Nouveau prospect"} onClose={() => { setEdit(null); setPfMsg(null); }} wide>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
