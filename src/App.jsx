@@ -1244,6 +1244,9 @@ function hasProspectIdentity(p) {
   if (!p) return false;
   return ["nom", "enseigne", "siret", "siren", "adresse", "ville", "telephone", "email", "site", "contactTel", "contactEmail", "raisonSociale"].some((k) => String(p[k] || "").trim());
 }
+// Score de complétude d'une fiche prospect (0-100) : proportion des champs clés renseignés.
+const COMPLETENESS_FIELDS = ["nom", "enseigne", "type", "adresse", "cp", "ville", "telephone", "email", "site", "siren", "contactNom", "contactEmail"];
+function prospectCompleteness(p) { if (!p) return 0; const n = COMPLETENESS_FIELDS.filter((k) => String(p[k] || "").trim() && !(k === "type" && p[k] === "autre")).length; return Math.round((n / COMPLETENESS_FIELDS.length) * 100); }
 // ===== Mailing de prospection : angles factuels vrais + prompt + génération =====
 // Départements d'Occitanie (deux premiers chiffres du code postal). Liste extensible.
 const OCCITANIE_DEPTS = new Set(["09", "11", "12", "30", "31", "32", "34", "46", "48", "65", "66", "81", "82"]);
@@ -3026,7 +3029,11 @@ function Dashboard({ data, go }) {
   const caSigne = sumMontant(deals.filter(isCaSigne));
   const devisEnAttente = deals.filter(isDevisEnAttente).length;
   const alertes = products.filter((p) => statusOf(p) !== "ok").length;
-  const cPipe = useCountUp(caAttente), cCa = useCountUp(caSigne), cAl = useCountUp(alertes), cDev = useCountUp(devisEnAttente), cCt = useCountUp(contacts.length);
+  // Prévision de CA (pondérée) : chaque devis en attente est pondéré par la probabilité liée à l'étape
+  // d'entonnoir de son compte — une estimation prudente du CA à venir (façon forecast HubSpot/Salesforce).
+  const STAGE_PROBA = { prospect: 0.1, contact: 0.2, rdv: 0.45, referencement: 0.75, actif: 0.9 };
+  const forecast = accounts.filter((a) => !a.archived).reduce((s, a) => { const att = sumMontant(deals.filter((d) => d.accountId === a.id && isDevisEnAttente(d))); return s + att * (STAGE_PROBA[a.stage] != null ? STAGE_PROBA[a.stage] : 0.1); }, 0);
+  const cPipe = useCountUp(caAttente), cCa = useCountUp(caSigne), cAl = useCountUp(alertes), cDev = useCountUp(devisEnAttente), cCt = useCountUp(contacts.length), cFc = useCountUp(forecast);
   const byEnseigne = accounts.map((a) => ({ name: a.enseigne, value: sumMontant(deals.filter((d) => d.accountId === a.id && isDevisEnAttente(d))), color: stageMeta(a.stage).color })).filter((e) => e.value > 0).sort((x, y) => y.value - x.value);
   const famPalette = { Pack: "#3F60AA", Filament: "#FFD212", Livret: "#7c5cf0", Accessoire: "#2bb673", Kit: "#FF5A45", Stylo: "#5b8def", Autre: "#9aa6bd" };
   const byFamille = Object.values(products.reduce((acc, p) => { acc[p.famille] = acc[p.famille] || { name: p.famille, value: 0, color: famPalette[p.famille] || "#9aa6bd" }; acc[p.famille].value += (p.dispo || 0) * (p.pvc || 0); return acc; }, {})).sort((a, b) => b.value - a.value);
@@ -3034,6 +3041,7 @@ function Dashboard({ data, go }) {
   const pdvAlerts = pdvForecast(data).filter((f) => f.daysLeft != null && f.daysLeft <= 21).sort((a, b) => a.daysLeft - b.daysLeft).slice(0, 6);
   const kpis = [
     { lab: "CA HT en attente", val: eur(cPipe), ic: <TrendingUp size={18} />, bg: "var(--blue-l)", fg: "var(--blue)", sub: "Devis" },
+    { lab: "Prévision de CA", val: eur(cFc), ic: <BarChart3 size={18} />, bg: "#eef2fb", fg: "#3F60AA", sub: "Pipeline pondéré" },
     { lab: "CA HT signé", val: eur(cCa), ic: <PackageCheck size={18} />, bg: "#e7f7ef", fg: "var(--green)", sub: "Factures" },
     { lab: "Contacts", val: num(Math.round(cCt)), ic: <Users size={18} />, bg: "#f1edfd", fg: "#7c5cf0", sub: "Au répertoire" },
     { lab: "Devis en attente", val: num(Math.round(cDev)), ic: <FileText size={18} />, bg: "#FFF1C6", fg: "var(--yellow-d)", sub: "À relancer" },
@@ -6148,6 +6156,50 @@ function parseJsonObject(text) {
 // Enrichissement IA d'UNE fiche prospect : une seule requête web (site, réseaux, identité légale,
 // adresse, téléphone, contact), analyse JSON robuste et une 2ᵉ tentative en cas d'échec — meilleures
 // performance et fiabilité. N'invente rien (champ laissé vide en cas de doute).
+// Forme juridique depuis le code « catégorie juridique » INSEE (préfixes stables).
+function natureJuridiqueLabel(code) {
+  const c = String(code || "");
+  if (!c) return "";
+  if (c === "1000" || c.startsWith("10")) return "Entrepreneur individuel";
+  if (c.startsWith("51")) return "Société coopérative";
+  if (c.startsWith("52")) return "SNC";
+  if (c.startsWith("53")) return "Société en commandite";
+  if (c.startsWith("54")) return "SARL";
+  if (c.startsWith("55")) return "SA";
+  if (c.startsWith("57")) return "SAS";
+  if (c.startsWith("65")) return "Société civile";
+  if (c.startsWith("92") || c.startsWith("93")) return "Association";
+  return "";
+}
+// Recherche officielle (annuaire-entreprises / base SIRENE) — GRATUITE, sans clé ni crédit IA. À partir
+// d'un SIREN/SIRET ou d'un nom (+ ville), renvoie l'identité légale vérifiée d'une entreprise française.
+async function lookupSirene(query) {
+  const q = String(query || "").trim(); if (!q) return null;
+  const res = await fetch("https://recherche-entreprises.api.gouv.fr/search?q=" + encodeURIComponent(q) + "&per_page=1");
+  if (!res.ok) throw new Error("API " + res.status);
+  const j = await res.json();
+  const r = (j.results || [])[0]; if (!r) return null;
+  const siege = r.siege || {};
+  const dir = (r.dirigeants || []).find((d) => d.type_dirigeant === "personne physique") || null;
+  const nb = r.nombre_etablissements || 0;
+  const mono = nb === 1; // société mono-établissement → le siège EST l'établissement (adresse/SIRET fiables)
+  return {
+    siren: r.siren || "",
+    raisonSociale: r.nom_raison_sociale || r.nom_complet || "",
+    formeJuridique: natureJuridiqueLabel(r.nature_juridique),
+    // Adresse / SIRET renseignés seulement si mono-établissement (sinon = siège, faux pour un magasin de chaîne).
+    siret: mono ? (siege.siret || "") : "",
+    adresse: mono ? (siege.adresse || "") : "",
+    cp: mono ? (siege.code_postal || "") : "",
+    ville: mono ? (siege.libelle_commune || "") : "",
+    dirigeantNom: dir ? (dir.nom || "") : "",
+    dirigeantPrenom: dir ? ((dir.prenoms || "").split(/\s+/)[0] || "") : "",
+    dirigeantFonction: dir ? (dir.qualite && dir.qualite !== "Autre" ? dir.qualite : "Dirigeant") : "",
+    siegeAdresse: siege.adresse || "",
+    nbEtab: nb,
+    mono,
+  };
+}
 async function aiEnrichProspect(p, persistUsage, instruction) {
   // Recherche « en produit en croix » : on identifie l'établissement à partir de N'IMPORTE quel signal
   // disponible sur la fiche (nom, mais aussi SIRET/SIREN, adresse, téléphone, e-mail, site…) et on
@@ -6357,8 +6409,9 @@ function Prospection({ data, persist, go }) {
   const { prospects } = data;
   const [importOpen, setImportOpen] = useState(false);
   const [q, setQ] = useState(""); const [fType, setFType] = useState("tous"); const [fRegion, setFRegion] = useState("tous"); const [sort, setSort] = useState("type"); const [dir, setDir] = useState("asc"); const [view, setView] = useState("actifs"); const [archiveEdit, setArchiveEdit] = useState(null); const [dupOpen, setDupOpen] = useState(null); const [mailingOpen, setMailingOpen] = useState(false);
-  const [fTag, setFTag] = useState("tous"); const [fList, setFList] = useState("tous");
+  const [fTag, setFTag] = useState("tous"); const [fList, setFList] = useState("tous"); const [fIncomplete, setFIncomplete] = useState(false);
   const [selMode, setSelMode] = useState(false); const [selIds, setSelIds] = useState(() => new Set());
+  const [sirBusy, setSirBusy] = useState(false); const [sirMsg, setSirMsg] = useState(null);
   const [edit, setEdit] = useState(null);
   const [zone, setZone] = useState("Occitanie"); const [kind, setKind] = useState("toutes"); const [busy, setBusy] = useState(false); const [aiMsg, setAiMsg] = useState(null); const [aiErr, setAiErr] = useState(null);
   const aiElapsed = useElapsed(busy);
@@ -6524,7 +6577,7 @@ function Prospection({ data, persist, go }) {
   const lists = data.prospectLists || [];
   const savedViews = (data.settings && data.settings.prospectionViews) || [];
   const listById = (id) => lists.find((l) => l.id === id) || null;
-  const list = prospects.filter((p) => !p.archived && !p.accountId && p.statut !== "converti" && (fType === "tous" || p.type === fType) && (fRegion === "tous" || p.region === fRegion) && (fTag === "tous" || (p.tags || []).includes(fTag)) && (fList === "tous" || !listById(fList) || (listById(fList).ids || []).includes(p.id)) && (q === "" || [p.nom, p.enseigne, p.ville, p.adresse, p.notes, (p.tags || []).join(" ")].join(" ").toLowerCase().includes(q.toLowerCase())));
+  const list = prospects.filter((p) => !p.archived && !p.accountId && p.statut !== "converti" && (fType === "tous" || p.type === fType) && (fRegion === "tous" || p.region === fRegion) && (fTag === "tous" || (p.tags || []).includes(fTag)) && (fList === "tous" || !listById(fList) || (listById(fList).ids || []).includes(p.id)) && (!fIncomplete || prospectCompleteness(p) < 70) && (q === "" || [p.nom, p.enseigne, p.ville, p.adresse, p.notes, (p.tags || []).join(" ")].join(" ").toLowerCase().includes(q.toLowerCase())));
   // ===== Sélection multiple & actions groupées (façon HubSpot / Salesforce / Monday) =====
   const toggleSel = (id) => setSelIds((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const selectAllVisible = () => setSelIds(new Set(list.map((p) => p.id)));
@@ -6756,8 +6809,29 @@ function Prospection({ data, persist, go }) {
       finally { setBusy(false); }
     });
   };
-  const hasFilter = q || fType !== "tous" || fRegion !== "tous" || fTag !== "tous" || fList !== "tous";
-  const clearFilters = () => { setQ(""); setFType("tous"); setFRegion("tous"); setFTag("tous"); setFList("tous"); };
+  const hasFilter = q || fType !== "tous" || fRegion !== "tous" || fTag !== "tous" || fList !== "tous" || fIncomplete;
+  const clearFilters = () => { setQ(""); setFType("tous"); setFRegion("tous"); setFTag("tous"); setFList("tous"); setFIncomplete(false); };
+  // Identité légale officielle (SIRENE / annuaire-entreprises) — gratuit, sans crédit IA.
+  const sireneProspect = async () => {
+    if (!edit) return;
+    const q2 = (edit.siret || edit.siren || [edit.raisonSociale || edit.nom || edit.enseigne, edit.ville].filter(Boolean).join(" ")).trim();
+    if (!q2) { setSirMsg({ ok: false, t: "Renseignez un SIRET / SIREN, ou un nom + ville." }); return; }
+    setSirBusy(true); setSirMsg(null);
+    try {
+      const r = await lookupSirene(q2);
+      if (!r) { setSirMsg({ ok: false, t: "Aucune entreprise trouvée dans le registre officiel." }); return; }
+      const patch = {}; const filled = [];
+      const fill = (k, v, label) => { if (v && !String(edit[k] || "").trim()) { patch[k] = v; filled.push(label); } };
+      fill("siren", r.siren, "SIREN"); fill("raisonSociale", r.raisonSociale, "raison sociale"); fill("formeJuridique", r.formeJuridique, "forme juridique");
+      fill("siret", r.siret, "SIRET"); fill("adresse", r.adresse, "adresse"); fill("cp", r.cp, "code postal"); fill("ville", r.ville, "ville");
+      fill("contactNom", r.dirigeantNom, "dirigeant"); fill("contactPrenom", r.dirigeantPrenom, "prénom dirigeant"); fill("contactFonction", r.dirigeantFonction, "fonction");
+      if (r.dirigeantNom && !String(edit.contactSource || "").trim()) patch.contactSource = "RNE/INSEE (annuaire-entreprises)";
+      if (Object.keys(patch).length) setEdit((e) => ({ ...e, ...patch }));
+      const chain = r.nbEtab > 1 ? " · société à " + r.nbEtab + " établissements — SIRET/adresse du magasin non renseignés automatiquement (siège : " + (r.siegeAdresse || "?") + ")" : "";
+      setSirMsg({ ok: true, t: filled.length ? ("Complété depuis le registre officiel : " + filled.join(", ") + chain + ". Pensez à enregistrer.") : ("Identité déjà complète." + chain) });
+    } catch (e) { setSirMsg({ ok: false, t: "Registre officiel indisponible (" + ((e && e.message) || e) + "). Réessaie." }); }
+    finally { setSirBusy(false); }
+  };
   const card = (p) => { const tm = PROSPECT_TYPES[p.type] || PROSPECT_TYPES.autre; const sm = PROSPECT_STATUT[p.statut] || PROSPECT_STATUT.a_qualifier; const pm = POTENTIEL_META[p.potentiel]; const picked = selIds.has(p.id); return (
     <div key={p.id} ref={(el) => { if (el) cardRefs.current[p.id] = el; }} className={cx("card", "tile", flashIds && flashIds.has(p.id) && "prospect-flash")} style={{ display: "flex", flexDirection: "column", gap: 8, outline: picked ? "2px solid var(--blue)" : "none", outlineOffset: -1 }} onClick={() => selMode ? toggleSel(p.id) : setEdit(p)}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
@@ -6773,6 +6847,7 @@ function Prospection({ data, persist, go }) {
         {p.site && <a className="iconbtn" href={ensureHttp(p.site)} target="_blank" rel="noreferrer" title={"Site web : " + cleanDomain(p.site)}><ExternalLink size={15} /></a>}
         {p.telephone && <a className="iconbtn" href={"tel:" + p.telephone.replace(/\s/g, "")} title={p.telephone}><Phone size={15} /></a>}
         <span style={{ flex: 1 }} />
+        {(() => { const c = prospectCompleteness(p); const col = c >= 70 ? "#2bb673" : c >= 40 ? "#F8B133" : "#FF5A45"; return <span title={"Complétude de la fiche : " + c + "% des champs clés renseignés"} style={{ fontSize: 10.5, fontWeight: 800, color: col, background: col + "1c", border: "1px solid " + col + "55", borderRadius: 20, padding: "1px 7px" }} className="tnum">{c}%</span>; })()}
         <span style={{ fontSize: 11, color: "var(--muted)" }}>{p.source}</span>
       </div>
     </div>); };
@@ -6824,6 +6899,7 @@ function Prospection({ data, persist, go }) {
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button className={cx("btn", selMode ? "btn-p" : "btn-g")} onClick={() => { setSelMode((v) => !v); if (selMode) clearSel(); }} title="Sélection multiple : cocher des fiches pour leur appliquer une action groupée (statut, type, étiquette, liste, enrichissement…)"><CheckSquare size={16} /> {selMode ? "Terminer la sélection" : "Sélectionner"}</button>
+        <button className={cx("btn", fIncomplete ? "btn-p" : "btn-g")} onClick={() => setFIncomplete((v) => !v)} title="N'afficher que les fiches incomplètes (moins de 70 % des champs clés renseignés) pour cibler l'effort de complétion"><AlertTriangle size={16} /> À compléter</button>
         <button className="btn btn-ai" onClick={() => setEnrichOpen(true)} disabled={enriching} title="Compléter automatiquement les fiches prospect via recherche web (choix des catégories et du nombre), en priorité les e-mails et téléphones manquants (tâche de fond)"><Sparkles size={16} className={enriching ? "spin" : ""} /> {enriching ? ("Enrichissement… " + (enrichJob && enrichJob.total ? enrichJob.done + "/" + enrichJob.total : "")) : "Enrichir les fiches"}</button>
         <button className="btn btn-ai" onClick={() => setMailingOpen(true)} title="Générer une vague de mails de premier contact personnalisés (angles vrais) et créer des brouillons Gmail"><Mail size={16} /> Mailing</button>
         <button className="btn btn-ghost" onClick={openMergeDoublons} title="Détecter les prospects en double (même SIRET, même adresse, ou même SIREN + ville), les passer en revue et choisir ceux à fusionner"><Copy size={16} /> Fusionner les doublons</button>
@@ -6862,7 +6938,7 @@ function Prospection({ data, persist, go }) {
     )}
     {importOpen && <ProspectImportModal onClose={() => setImportOpen(false)} onImport={(drafts, enrich, mode, opts) => mode === "update" ? doUpdateImport(drafts, opts) : doImport(drafts, enrich)} />}
     {enrichOpen && <EnrichSelectModal prospects={prospects} onClose={() => setEnrichOpen(false)} onLaunch={(types, limit, instruction) => { setEnrichOpen(false); enrichAll(types, limit, instruction); }} />}
-    {edit && <Modal title={edit.nom ? edit.nom : "Nouveau prospect"} onClose={() => { setEdit(null); setPfMsg(null); }} wide>
+    {edit && <Modal title={edit.nom ? edit.nom : "Nouveau prospect"} onClose={() => { setEdit(null); setPfMsg(null); setSirMsg(null); }} wide>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
         <button type="button" className="btn btn-ai btn-s" onClick={enrichProspect} disabled={pfBusy || !hasProspectIdentity(edit)} title="Recherche « produit en croix » : à partir de n'importe quelle info connue (nom, SIRET, adresse, téléphone…), retrouver et compléter les champs vides, y compris le nom"><Sparkles size={14} className={pfBusy ? "spin" : ""} /> {pfBusy ? ("Recherche… " + fmtElapsed(pfElapsed)) : "Approfondir la recherche IA"}</button>
         {pfMsg && <span style={{ fontSize: 11.5, color: pfMsg.ok ? "var(--green)" : "var(--red)", fontWeight: 600, display: "inline-flex", alignItems: "flex-start", gap: 5, flex: 1, minWidth: 200, lineHeight: 1.4 }}>{pfMsg.ok ? <CheckCircle2 size={13} style={{ flexShrink: 0, marginTop: 1 }} /> : null}<span>{pfMsg.t}</span></span>}
@@ -6882,7 +6958,11 @@ function Prospection({ data, persist, go }) {
           <datalist id="prospect-tags-list">{allTags.map((t) => <option key={t} value={t} />)}</datalist>
         </div>
       </div>
-      <div style={{ borderTop: "1px solid var(--line)", margin: "4px 0 2px", paddingTop: 10, fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".06em" }}>Identité légale (sources officielles, à vérifier)</div>
+      <div style={{ borderTop: "1px solid var(--line)", margin: "4px 0 2px", paddingTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".06em" }}>Identité légale (sources officielles, à vérifier)</span>
+        <button type="button" className="btn btn-g btn-s" onClick={sireneProspect} disabled={sirBusy} title="Vérifier et compléter l'identité légale (raison sociale, SIREN, forme juridique, dirigeant) via le registre officiel annuaire-entreprises / INSEE — gratuit, sans crédit IA"><Building2 size={13} className={sirBusy ? "spin" : ""} /> {sirBusy ? "Registre officiel…" : "Vérifier via SIRENE (gratuit)"}</button>
+        {sirMsg && <span style={{ fontSize: 11.5, color: sirMsg.ok ? "var(--green)" : "var(--red)", fontWeight: 600, flex: 1, minWidth: 200, lineHeight: 1.4 }}>{sirMsg.t}</span>}
+      </div>
       <div className="row2"><div className="fld"><label>Raison sociale</label><input value={edit.raisonSociale || ""} onChange={(e) => upE("raisonSociale", e.target.value)} placeholder="Société exploitante" /></div><div className="fld"><label>SIREN</label><input value={edit.siren || ""} onChange={(e) => upE("siren", e.target.value)} placeholder="9 chiffres" /></div></div>
       <div className="row2"><div className="fld"><label>SIRET de l'établissement</label><input value={edit.siret || ""} onChange={(e) => upE("siret", e.target.value)} placeholder="14 chiffres (SIREN + NIC de l'établissement)" /><div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>Identifiant de l'établissement précis. Les 9 premiers chiffres sont le SIREN ci-dessus.</div></div><div className="fld"><label>Forme juridique</label><Combo value={edit.formeJuridique || ""} onChange={(v) => upE("formeJuridique", v)} options={FORMES_JURIDIQUES} placeholder="SAS, SARL, EI…" /></div></div>
       <div style={{ borderTop: "1px solid var(--line)", margin: "4px 0 2px", paddingTop: 10, fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".06em" }}>Contact identifié (créé automatiquement à la conversion)</div>
