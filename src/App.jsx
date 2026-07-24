@@ -5563,7 +5563,11 @@ function Carte({ data, persist, go, focus }) {
   // Catégorie de rattachement : « groupe » si le compte parent est un groupe (sièges + magasins rattachés), sinon « indépendant ».
   const siteCat = (st) => isGroupe(accOf(st.accountId)) ? "groupe" : "independant";
   const stageOf = (st) => { const a = accOf(st.accountId); return a && a.stage ? a.stage : "prospect"; };
-  const visible = (st) => st.type === "penup" || st.type === "entrepot" || st.type === "usine" ? true : (filtSurf.length === 0 || filtSurf.includes(st.typeSurface || "")) && (filtCat.length === 0 || filtCat.includes(siteCat(st))) && (filtStage.length === 0 || filtStage.includes(stageOf(st)));
+  // Un « client » (référencé) / « client fidèle » sur la carte = un compte pour lequel une FACTURE a été
+  // générée. Un compte classé client par l'entonnoir mais sans facture n'apparaît pas sous ces filtres.
+  const hasFacture = (accId) => !!accId && (data.deals || []).some((d) => d.accountId === accId && d.type === "Facture");
+  const stageMatch = (st) => { if (filtStage.length === 0) return true; const stg = stageOf(st); return filtStage.some((fs) => fs === stg && ((fs !== "referencement" && fs !== "actif") || hasFacture(st.accountId))); };
+  const visible = (st) => st.type === "penup" || st.type === "entrepot" || st.type === "usine" ? true : (filtSurf.length === 0 || filtSurf.includes(st.typeSurface || "")) && (filtCat.length === 0 || filtCat.includes(siteCat(st))) && stageMatch(st);
   // Types de surface réellement présents parmi les sites placés (hors sites internes PEN'UP), dans l'ordre canonique.
   const usedSurfaces = TYPE_SURFACE.filter((t) => placed.some((st) => st.typeSurface === t && !(st.type === "penup" || st.type === "entrepot" || st.type === "usine")));
   const shown = placed.filter(visible); const visibleIds = new Set(shown.map((x) => x.id));
@@ -5610,6 +5614,8 @@ function Carte({ data, persist, go, focus }) {
     const map = LF.map(mapEl.current, { zoomControl: false, attributionControl: true, worldCopyJump: true, scrollWheelZoom: false, preferCanvas: true, zoomSnap: 0.5, zoomDelta: 0.5, wheelDebounceTime: 40 }).setView([46.6, 2.4], 6);
     LF.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, maxNativeZoom: 19, attribution: "Imagerie © Esri, Maxar, Earthstar Geographics" }).addTo(map);
     LF.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, maxNativeZoom: 19 }).addTo(map);
+    // Couche routière (autoroutes & grands axes) superposée à l'imagerie : rendu hybride type Google Maps.
+    LF.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, maxNativeZoom: 19 }).addTo(map);
     LF.control.zoom({ position: "topright" }).addTo(map);
     LF.control.scale({ imperial: false, metric: true, position: "bottomleft" }).addTo(map);
     routesLayer.current = LF.layerGroup().addTo(map);
