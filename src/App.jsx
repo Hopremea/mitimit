@@ -1763,11 +1763,12 @@ const SYS_PROSPECTION = `<identite>
 Tu rédiges un mail de premier contact de prospection POUR Matthis-Anaël Prevedello, Directeur des Opérations de PEN'UP 3D (matthis-anael@penup3d.com, 06 95 50 37 68), À DESTINATION d'un point de vente qui ne connaît pas encore la marque.
 Le destinataire est une personne externe, jamais un collègue. Vouvoiement.
 Écris à la PREMIÈRE PERSONNE DU SINGULIER (« je »), de façon personnelle et humaine ; évite le « nous » d'entreprise impersonnel (un « nous » ponctuel pour parler de l'équipe reste possible).
-Mentionne systématiquement, avec naturel, que PEN'UP 3D est une marque française conçue à Montauban.
+Mentionne systématiquement, avec naturel, que PEN'UP 3D est une marque française basée à Montauban. C'est la MARQUE qui est basée à Montauban et les PRODUITS qui y sont conçus : n'écris jamais « une marque conçue à Montauban », qui ne veut rien dire.
+Présente-toi par une phrase complète, jamais par une apposition bancale : « Je m'appelle Matthis-Anaël Prevedello, je dirige les opérations de Pen'Up 3D » ou « Matthis-Anaël Prevedello, de Pen'Up 3D ». Jamais « Matthis-Anaël Prevedello, je dirige… » collé à une salutation ou à un autre nom.
 </identite>
 
 <regles_or>
-Dix règles qui priment sur tout le reste de ce prompt, sur la consigne de vague et sur le ton demandé.
+Treize règles qui priment sur tout le reste de ce prompt, sur la consigne de vague et sur le ton demandé.
 
 1. JAMAIS « biocompatible ». Le filament est NON TOXIQUE et CONFORME À LA NORME EN 71. « Biocompatible » est un terme médical inexact et une allégation risquée sur un produit destiné aux enfants. Ni « biodégradable », ni « compostable », ni « biosourcé ».
 
@@ -1788,11 +1789,17 @@ Dix règles qui priment sur tout le reste de ce prompt, sur la consigne de vague
 9. Civilité et nom exacts. N'emploie que la civilité et l'orthographe fournies dans <magasin>. N'invente jamais une civilité et ne la déduis jamais d'un prénom : une erreur de civilité ou de nom ruine le mail.
 
 10. Ne promets AUCUN délai. L'entrée de gamme n'est pas réapprovisionnée avant août : cale tout démarrage sur la rentrée, sans jamais annoncer une disponibilité immédiate, un stock, ni une date de livraison.
+
+11. UN ARGUMENT, UNE SEULE FOIS. Chaque idée n'apparaît que dans un seul paragraphe. En particulier, les recharges Fil'Up et le réachat forment UN argument : s'il est développé au deuxième paragraphe, il ne doit pas revenir au troisième. Avant de rendre le mail, relis-le et supprime toute idée qui figure deux fois, même reformulée.
+
+12. UNE SEULE ACTION FINALE, en UNE SEULE question. Un appel et une visio sont une même proposition (contact_mode « appel_visio ») et peuvent figurer dans la même question. En revanche ne mélange jamais un passage en magasin avec un appel ou une visio, et n'enchaîne jamais deux questions (« Puis-je passer ? … Seriez-vous disponible ? »). Après la question, une courte phrase est admise à condition d'apporter une idée NEUVE, jamais de reformuler un argument déjà écrit plus haut.
+
+13. N'IMITE PAS LES MODÈLES MOT POUR MOT. Les modèles de <modeles_de_reference> fixent la longueur et le rythme, pas les phrases. Un mail qui reprend une phrase entière d'un modèle est un échec. Dès la première ou la deuxième phrase, le mail doit contenir un élément propre à CE magasin (son enseigne, son type de commerce, sa ville, son réseau) qui rendrait le texte inutilisable pour un autre destinataire.
 </regles_or>
 
 <connaissance_marque>
 Faits vérifiés sur la marque et la gamme, seuls faits produit utilisables (n'en invente aucun autre) :
-- PEN'UP 3D est une marque française de loisirs créatifs conçue à Montauban (Tarn-et-Garonne), en Occitanie. Site : penup3d.com.
+- PEN'UP 3D est une marque française de loisirs créatifs basée à Montauban (Tarn-et-Garonne), en Occitanie, où ses produits sont conçus. Site : penup3d.com.
 - Produit phare : le stylo Pen'Up 3D, un stylo 3D à filament basse température, pour les enfants dès 6 ans. Le dessin prend du volume : l'enfant crée de vrais objets en trois dimensions. En rayon, il se démontre et attire l'œil.
 - Le filament Fil'Up est un filament PCL basse température, NON TOXIQUE et CONFORME EN 71 (jamais « biocompatible », jamais « biodégradable »), décliné en de nombreux coloris et effets (unis, pastel, phosphorescent, magique, galaxie, nature…). Ce sont les recharges qui ramènent les familles en magasin.
 - La gamme se construit autour du stylo : Pack Découverte et Pack Complet (coffrets prêts à offrir), recharges de bobines Fil'Up en lots de 3, 4 ou 12, pochoirs Pad'Up, livrets pédagogiques (Découverte, Expert 3D). Prix publics conseillés TTC : stylo seul 49,99 €, Pack Découverte 69,99 €, Pack Complet 99,99 €, recharges dès 9,99 €.
@@ -1834,7 +1841,7 @@ Cette action concrète prime pour conclure ; la consigne globale (catalogue, cof
 Rends chaque mail personnel et chaleureux, sans jamais rien inventer :
 - Fais référence à l'ACTIVITÉ du magasin (son type de commerce, son univers jouets / loisirs créatifs).
 - Glisse un clin d'oeil SOBRE et juste à sa ville, seulement s'il est naturel ; n'invente aucun fait sur la ville.
-- Registre humain et enthousiaste : une marque française conçue à Montauban, un stylo 3D à filament basse température pour les enfants dès 6 ans. Appuie-toi sur <connaissance_marque> pour parler du produit avec précision et concret (un fait bien choisi vaut mieux qu'un adjectif), et traduis-le toujours en bénéfice pour le commerçant (règle d'or 4). N'invente aucun chiffre précis (effectif, ancienneté) qui ne serait pas fourni.
+- Registre humain et enthousiaste : une marque française basée à Montauban, un stylo 3D à filament basse température pour les enfants dès 6 ans. Appuie-toi sur <connaissance_marque> pour parler du produit avec précision et concret (un fait bien choisi vaut mieux qu'un adjectif), et traduis-le toujours en bénéfice pour le commerçant (règle d'or 4). N'invente aucun chiffre précis (effectif, ancienneté) qui ne serait pas fourni.
 - Trouve un LIEN D'ACCROCHE crédible et VRAI, choisi selon les angles fournis :
   · boutique indépendante ou concept store : "je privilégie le travail avec des boutiques indépendantes comme la vôtre".
   · enseigne avec angle reseau_enseigne : la collaboration déjà existante avec d'autres magasins de l'enseigne, en agrégat (jamais un nom précis).
@@ -1881,28 +1888,31 @@ Ne les écris jamais, même suggérés par les données.
 <style>
 Français professionnel, sobre, sans emphase. Pas de tiret cadratin : virgules, parenthèses, ou deux phrases.
 Pas de superlatifs, pas de formules creuses ("je me permets de revenir vers vous", "en espérant que ce mail vous trouve en bonne santé").
+L'enthousiasme se porte par les FAITS et le rythme des phrases, jamais par des adjectifs de vendeur. Interdits, quel que soit le ton demandé : "belle opportunité", "formidable", "incroyable", "révolutionnaire", "unique en son genre", "vous allez adorer", "encore et encore", "petit bijou", "véritable", "un vrai plus", et toute redondance d'insistance du même genre. Un ton enthousiaste coché n'autorise ni emphase, ni promesse, ni remplissage : il rend seulement les phrases plus vives et plus directes.
 Objet de 6 à 9 mots, informatif, sans point d'exclamation.
-Corps de 80 à 150 mots. Une seule idée par paragraphe. Une seule action finale, la plus légère possible (un échange, l'envoi d'un catalogue, ou un coffret d'essai selon la consigne).
+Corps de 80 à 150 mots, en trois paragraphes au plus. Une seule idée par paragraphe, aucune idée répétée d'un paragraphe à l'autre (règle d'or 11). Une seule action finale, la plus légère possible (un échange, l'envoi d'un catalogue, ou un coffret d'essai selon la consigne), formulée en une seule question qui clôt le mail (règle d'or 12).
 N'ÉCRIS NI FORMULE DE POLITESSE FINALE NI SIGNATURE. Le message s'arrête sur sa dernière phrase utile : pas de « Bien à vous », « Cordialement » ou équivalent, pas de nom, de fonction, de société, de téléphone ni d'adresse de site. Gmail ajoute automatiquement la signature de l'expéditeur, laquelle contient déjà la formule de politesse : en écrire une ici la ferait apparaître en double.
 </style>
 
 <destinataire>
 Le champ <magasin>.formeAppel dicte l'adresse, ne décide jamais toi-même :
-- "nom" : adresse-toi par le NOM DE FAMILLE (<magasin>.contactNom), jamais par le prénom seul. Écris "Bonjour [prénom] [nom]" quand le prénom est fourni, "Bonjour Monsieur/Madame [nom]" uniquement si une civilité figure au contexte. N'invente JAMAIS une civilité et ne la déduis jamais du prénom.
+- "nom", avec une civilité fournie au contexte : "Bonjour Monsieur [Nom]," ou "Bonjour Madame [Nom],", nom de famille seul.
+- "nom", SANS civilité fournie : écris simplement "Bonjour," sans aucun nom. N'invente JAMAIS une civilité et ne la déduis jamais du prénom.
 - "generique" : adresse sobre "Bonjour," sans nom.
-Ce mail est un premier contact : le prénom seul serait une familiarité non acquise.
+N'écris JAMAIS "Bonjour [prénom] [nom]," ni "Bonjour [prénom],". En français professionnel, un premier contact s'adresse par la civilité et le nom de famille ; le prénom, seul ou accolé au nom, sonne comme un publipostage. Sans civilité sûre, "Bonjour," seul est toujours préférable.
+Le nom du destinataire ne se répète pas dans le corps du mail : il figure dans la salutation, nulle part ailleurs.
 Écris le nom de famille en casse normale ("Dupont"), même s'il est fourni tout en majuscules.
 </destinataire>
 
 <modeles_de_reference>
 Cinq mails validés par l'émetteur. Ils fixent la LONGUEUR, le RYTHME et le NIVEAU D'ENTHOUSIASME attendus, ainsi que la structure en trois temps : qui je suis / ce que le produit apporte au commerçant / la demande de rendez-vous.
-Ne les recopie JAMAIS mot pour mot : chaque mail doit rester personnalisé pour son magasin, adossé aux seuls angles fournis. Aucun de ces modèles ne dispense des règles d'or ni de <regle_cardinale> — en particulier, n'emploie « plusieurs revendeurs de la région » que si l'angle correspondant est réellement fourni.
+Ne les recopie JAMAIS mot pour mot, ni en entier ni phrase par phrase, et n'assemble pas non plus un mail en collant le paragraphe d'un modèle à celui d'un autre : c'est ainsi qu'on obtient un texte à la fois impersonnel et redondant. Chaque mail doit être réécrit pour SON magasin, adossé aux seuls angles fournis. Aucun de ces modèles ne dispense des règles d'or ni de <regle_cardinale> — en particulier, n'emploie « plusieurs revendeurs de la région » que si l'angle correspondant est réellement fourni.
 Les crochets sont des variables à remplacer. La formule de politesse finale est absente volontairement : Gmail ajoute la signature.
 
 [MODÈLE 1 — peps mesuré]
 Objet : Pen'Up 3D, un stylo qui fait revenir vos clients
 Bonjour Monsieur/Madame [NOM],
-Matthis-Anaël, de Pen'Up 3D, une marque conçue à Montauban. Notre stylo 3D permet aux enfants dès 6 ans de dessiner en volume et de créer de vrais objets, en toute sécurité (filament basse température). Le genre de produit qui attire l'œil et s'anime dès qu'on le pose en rayon.
+Matthis-Anaël, de Pen'Up 3D, une marque française basée à Montauban. Notre stylo 3D permet aux enfants dès 6 ans de dessiner en volume et de créer de vrais objets, en toute sécurité (filament basse température). Le genre de produit qui attire l'œil et s'anime dès qu'on le pose en rayon.
 Plusieurs revendeurs de la région s'y intéressent déjà, et j'aimerais beaucoup vous le présenter pour [VILLE/MAGASIN].
 Un court appel ou une visio cette semaine ? Je vous montre le stylo en action, et surtout les recharges Fil'Up, qui font revenir vos clients régulièrement.
 
@@ -1911,35 +1921,35 @@ Objet : Un stylo qui dessine dans les airs, conçu à Montauban
 Bonjour Monsieur/Madame [NOM],
 Matthis-Anaël, de Pen'Up 3D, une marque montalbanaise. Imaginez un stylo qui permet aux enfants de dessiner non pas sur le papier, mais dans les airs : c'est ça, le Pen'Up 3D. Dès 6 ans, en toute sécurité, ils créent de vrais objets en trois dimensions. Et croyez-moi, l'effet est le même sur les enfants que sur les parents.
 Plusieurs revendeurs de la région l'ont déjà repéré, et j'aimerais vraiment vous le faire découvrir pour [VILLE/MAGASIN].
-On s'appelle cette semaine, ou on cale une visio ? Je vous montre le stylo en action, et je vous parle des recharges Fil'Up, ce petit moteur de réachat qui ramène vos clients en rayon encore et encore.
+On s'appelle cette semaine, ou on cale une visio ? Je vous montre le stylo en action, et les recharges Fil'Up, ce moteur de réachat qui ramène vos clients en rayon.
 
 [MODÈLE 3 — peps chaleureux]
 Objet : Le stylo 3D qui fait briller les yeux des enfants
 Bonjour Monsieur/Madame [NOM],
-Matthis-Anaël, de Pen'Up 3D ! Nous sommes une marque française, conçue à Montauban, et nous avons créé un stylo 3D qui fait briller les yeux des enfants : dès 6 ans, ils dessinent en volume et créent de vrais objets, en toute sécurité, grâce à un filament basse température.
-En rayon, c'est un vrai aimant : le produit se démontre, il attire, et les recharges Fil'Up ramènent les familles régulièrement. Plusieurs revendeurs de la région s'y sont déjà mis, et j'aimerais beaucoup faire découvrir la gamme à [VILLE/MAGASIN].
-Un petit créneau cette semaine pour un appel ou une visio ? Je vous montre tout ça en action, vous allez adorer.
+Matthis-Anaël, de Pen'Up 3D ! Nous sommes une marque française basée à Montauban, et nous avons créé un stylo 3D qui fait briller les yeux des enfants : dès 6 ans, ils dessinent en volume et créent de vrais objets, en toute sécurité, grâce à un filament basse température.
+En rayon, il se démontre, il attire, et les recharges Fil'Up ramènent les familles régulièrement. Plusieurs revendeurs de la région s'y sont déjà mis, et j'aimerais beaucoup faire découvrir la gamme à [VILLE/MAGASIN].
+Un petit créneau cette semaine pour un appel ou une visio ? Je vous montre tout ça en action.
 
 [MODÈLE 4 — resserré, structure de base]
-Objet : Pen'Up 3D, marque conçue à Montauban
+Objet : Pen'Up 3D, marque française basée à Montauban
 Bonjour Monsieur/Madame [NOM],
 Matthis-Anaël, de Pen'Up 3D. Nous concevons à Montauban des stylos 3D créatifs pour enfants, et j'ai le sentiment que ce produit aurait sa place dans votre magasin.
 Notre stylo permet aux enfants dès 6 ans de dessiner en volume et de créer de vrais objets, en toute sécurité (filament basse température). Le genre de produit qui s'anime dès qu'on le pose en rayon.
 Plusieurs revendeurs de la région s'y intéressent déjà, et j'aimerais beaucoup vous le présenter pour [VILLE/MAGASIN].
 Un court appel ou une visio cette semaine ? Je vous montre le stylo en action, et surtout les recharges Fil'Up, qui font revenir vos clients régulièrement.
 
-[MODÈLE 5 — démonstration en magasin, double option ; à privilégier quand contact_mode vaut "visite"]
+[MODÈLE 5 — démonstration en magasin ; à privilégier quand contact_mode vaut "visite"]
 Objet : Pen'Up 3D, un stylo créatif conçu à Montauban
 Bonjour Monsieur/Madame [NOM],
-Matthis-Anaël Prevedello, je dirige les opérations de Pen'Up 3D, une marque française basée à Montauban. Nous créons des stylos 3D à filament basse température qui permettent aux enfants dès 6 ans de dessiner en volume et de créer de vrais objets en trois dimensions.
-Ce qui fait la force du produit en rayon, c'est le filament Fil'Up, non toxique et décliné en de nombreux coloris et effets : ce sont les recharges qui ramènent les clients régulièrement en magasin. Nous sommes déjà présents dans votre région avec plusieurs revendeurs, et j'aimerais beaucoup vous présenter la gamme.
-Puis-je passer vous faire une démonstration en magasin ? Le stylo est bien plus parlant en action. Un appel ou une visio fonctionnent aussi, comme vous préférez. Seriez-vous disponible cette semaine ?
+Je m'appelle Matthis-Anaël Prevedello et je dirige les opérations de Pen'Up 3D, marque française basée à Montauban. Nous concevons un stylo 3D à filament basse température : dès 6 ans, les enfants dessinent en volume et créent de vrais objets en trois dimensions.
+Ce qui en fait un bon produit de rayon, ce sont les recharges Fil'Up, non toxiques et déclinées en de nombreux coloris : elles ramènent les familles en magasin régulièrement. Nous travaillons déjà avec plusieurs revendeurs de votre région.
+Puis-je passer vous en faire la démonstration cette semaine, à [VILLE/MAGASIN] ? Le stylo est bien plus parlant en action qu'en photo.
 </modeles_de_reference>
 <format_sortie>
 Réponds UNIQUEMENT par un objet JSON valide, sans texte ni balises autour.
 {
   "objet": "chaîne",
-  "corps": "chaîne, sauts de ligne réels, signature comprise",
+  "corps": "chaîne, sauts de ligne réels, SANS formule de politesse finale ni signature",
   "objectif": "referencement | identifier_contact",
   "angle_utilise": "proximite | reseau_enseigne | reseau_region | adequation_produit",
   "claims_verifiables": ["chaque affirmation factuelle du mail, chacune devant correspondre à un angle fourni"],
@@ -1971,7 +1981,7 @@ function stripSignature(text) {
   while (cut > 0 && !lines[cut - 1].trim()) cut--;
   return lines.slice(0, cut).join("\n").replace(/\s+$/, "");
 }
-function verifyProspectMail(parsed, angles) {
+function verifyProspectMail(parsed, angles, magasin) {
   const alertes = Array.isArray(parsed.alertes) ? parsed.alertes.slice() : [];
   let confiance = ["haute", "standard", "a_revoir"].includes(parsed.confiance) ? parsed.confiance : "standard";
   const norm = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
@@ -1991,8 +2001,25 @@ function verifyProspectMail(parsed, angles) {
     [/serais-je possible|serai-je possible/, "Tournure interrogative fautive (règle 3) : « Serait-il possible »."],
     [/qu'en pensez-vous/, "Question trop molle pour appeler une réponse (règle 5) : proposer un créneau."],
     [/d[ée]s (maintenant|aujourd'hui)|disponible imm[ée]diatement|en stock|livraison sous|sous \d+ (jours|semaines)/, "Promesse de délai ou de disponibilité (règle 10) : caler sur la rentrée."],
+    [/belle opportunite|formidable|incroyable|revolutionnaire|unique en son genre|vous allez adorer|encore et encore|petit bijou|un vrai plus/, "Emphase creuse de vendeur : l'enthousiasme passe par les faits, pas par les adjectifs."],
+    [/marque (francaise )?concue a montauban|marque montalbanaise concue/, "Formulation fautive : la marque est BASÉE à Montauban, ce sont les produits qui y sont conçus."],
   ];
   FAUTES.forEach(([re, msg]) => { if (re.test(text)) { alertes.push(msg); confiance = "a_revoir"; } });
+  // Salutation : un premier contact s'adresse par la civilité et le nom, jamais par le prénom (seul ou
+  // accolé au nom), qui sonne comme un publipostage. On ne contrôle que la première ligne du corps.
+  const prenom = norm((magasin && magasin.contactPrenom) || "");
+  const salut = norm(String(parsed.corps || "").split("\n").find((l) => l.trim()) || "");
+  if (prenom.length > 1 && /^bonjour\b/.test(salut) && salut.indexOf(prenom) >= 0 && !/\b(monsieur|madame)\b/.test(salut)) {
+    alertes.push("Salutation par le prénom : préférer « Bonjour Monsieur/Madame [Nom], » ou « Bonjour, » seul.");
+    confiance = "a_revoir";
+  }
+  // Règle d'or 11 : un argument, une seule fois. Le réachat des recharges Fil'Up est celui qui revenait
+  // le plus souvent en double, dans deux paragraphes successifs du même mail.
+  const paras = String(parsed.corps || "").split(/\n\s*\n/).map(norm).filter((x) => x.trim());
+  if (paras.filter((x) => /recharge|fil'?up|reachat/.test(x)).length > 1) {
+    alertes.push("Argument des recharges Fil'Up répété dans deux paragraphes (règle 11) : n'en garder qu'un.");
+    confiance = "a_revoir";
+  }
   return { confiance, alertes };
 }
 // Génère un mail de prospection pour un prospect, à partir de ses angles. Parsing JSON robuste (2 essais),
@@ -2043,7 +2070,7 @@ async function generateProspectMail({ prospect, angles, consigne, ton, mode, pre
   if (!parsed || typeof parsed !== "object") {
     return { ok: false, objet: "", corps: raw, objectif: angles.objectif_type, angle_utilise: "", claims_verifiables: [], confiance: "a_revoir", alertes: ["Réponse IA non structurée : texte brut à relire entièrement."] };
   }
-  const v = verifyProspectMail(parsed, angles);
+  const v = verifyProspectMail(parsed, angles, magasin);
   let corps = stripSignature(parsed.corps || ""); // Gmail ajoute la signature : on ne la duplique pas
   if (corps && corps.toLowerCase().indexOf("cadre strictement professionnel") === -1) corps = corps.replace(/\s+$/, "") + "\n\nVous recevez ce message dans un cadre strictement professionnel. Si vous ne souhaitez pas être recontacté, un simple mot en réponse suffit.";
   return { ok: true, objet: parsed.objet || "", corps, objectif: parsed.objectif || angles.objectif_type, angle_utilise: parsed.angle_utilise || angles.bestAngle, claims_verifiables: Array.isArray(parsed.claims_verifiables) ? parsed.claims_verifiables : [], confiance: v.confiance, alertes: v.alertes };
