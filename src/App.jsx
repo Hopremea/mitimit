@@ -7702,6 +7702,47 @@ function estPageMagasin(url) {
     return chemin.length > 1 && !/^\/(index|accueil|home)\.\w+$/i.test(chemin);
   } catch (e) { return false; }
 }
+// Domaine officiel des enseignes nationales, quand la fiche ne porte pas d'adresse de site.
+const DOMAINES_ENSEIGNES = { "joueclub": "joueclub.fr", "king jouet": "king-jouet.com", "la grande recre": "lagranderecre.fr", "grande recre": "lagranderecre.fr", "cultura": "cultura.com", "picwictoys": "picwictoys.com", "picwic": "picwictoys.com", "maxi toys": "maxitoys.fr", "maxitoys": "maxitoys.fr", "oxybul": "oxybul.com", "nature et decouvertes": "natureetdecouvertes.com", "toys r us": "toysrus.fr", "la grande recreation": "lagranderecre.fr" };
+function domaineEnseigne(p) {
+  const u = String((p && p.site) || "").trim();
+  if (u) { try { return new URL(/^https?:\/\//i.test(u) ? u : "https://" + u).hostname.replace(/^www\./, ""); } catch (e) {} }
+  const n = stripAccentsLow([p && p.enseigne, p && p.nom].filter(Boolean).join(" ")).replace(/['’-]/g, " ");
+  const k = Object.keys(DOMAINES_ENSEIGNES).find((e) => n.includes(e));
+  return k ? DOMAINES_ENSEIGNES[k] : "";
+}
+// Pages magasin d'une enseigne, lues UNE fois par domaine puis mémorisées : une vague de 176 JouéClub
+// ne déclenche qu'une seule lecture de sitemap, au lieu de 176 recherches web facturées.
+const _locatorCache = new Map();
+async function pagesMagasinEnseigne(domaine) {
+  if (!domaine) return [];
+  if (_locatorCache.has(domaine)) return _locatorCache.get(domaine);
+  let urls = [];
+  try {
+    const r = await fetch("/api/outils", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "locator", domaine }) });
+    const j = await r.json().catch(() => ({}));
+    if (Array.isArray(j.urls)) urls = j.urls;
+  } catch (e) {}
+  _locatorCache.set(domaine, urls); // même vide : une enseigne qui bloque ne sera pas resollicitée
+  return urls;
+}
+const slugNorm = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+// Dernier segment de l'URL, sans extension : c'est lui qui porte le nom du magasin.
+const slugUrl = (u) => { try { const c = new URL(u).pathname.replace(/\/+$/, ""); return slugNorm(c.split("/").pop().replace(/\.\w+$/, "")); } catch (e) { return ""; } };
+// Rapprochement par la VILLE, jamais approximatif : en cas d'ambiguïté non tranchée par le nom de la
+// fiche, on ne renvoie rien plutôt que d'attribuer à un magasin les coordonnées d'un autre.
+function trouverPageMagasin(urls, ville, nom) {
+  const v = slugNorm(ville); if (!v || !Array.isArray(urls) || !urls.length) return "";
+  const cands = urls.map((u) => ({ u, s: slugUrl(u) })).filter((x) => x.s);
+  let hit = cands.filter((x) => x.s === v || x.s.endsWith("-" + v));
+  if (!hit.length) hit = cands.filter((x) => ("-" + x.s + "-").includes("-" + v + "-"));
+  if (hit.length > 1 && nom) {
+    const n = slugNorm(nom);
+    const mieux = hit.filter((x) => n.includes(x.s) || x.s.includes(n));
+    if (mieux.length === 1) return mieux[0].u;
+  }
+  return hit.length === 1 ? hit[0].u : "";
+}
 // Département déduit du code postal (approximation Corse 2A/2B, outre-mer sur 3 chiffres) — gratuit, sans IA.
 function cpToDepartement(cp) {
   const c = String(cp || "").replace(/\D/g, ""); if (c.length !== 5) return "";
@@ -7800,6 +7841,15 @@ async function enrichProspectPreparer(p, instruction) {
       }
     }
   } catch (e) {}
+  // 2quater) Grande enseigne sans page magasin connue : on la cherche dans le sitemap de la marque.
+  //    Gratuit, et surtout mutualisé — une seule lecture sert toute une vague.
+  if (grande && !estPageMagasin(p.site) && !estPageMagasin(out.site)) {
+    try {
+      const pages = await pagesMagasinEnseigne(domaineEnseigne(p));
+      const page = trouverPageMagasin(pages, p.ville || out.ville, p.nom || p.enseigne);
+      if (page) { out.site = page; out.source = out.source ? out.source + " + page magasin de l'enseigne" : "page magasin de l'enseigne"; }
+    } catch (e) {}
+  }
   // 2ter) Site du magasin lu par le relais serveur (GRATUIT) : e-mail et téléphone publiés sur la
   //    page d'accueil / contact / mentions légales. Inutile pour une grande enseigne (site de la
   //    marque, coordonnées du siège) — on ne le fait que pour les indépendants.

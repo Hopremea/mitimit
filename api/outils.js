@@ -10,6 +10,7 @@ import { BUCKET, storageAdmin, cheminValide, creerDepot, supprimerDepot } from "
 //   suivi     : suivi d'un colis Colissimo / La Poste (cle LAPOSTE_API_KEY)
 //   batch:*   : lots de requetes Claude, factures 50 % moins cher (cle ANTHROPIC_API_KEY)
 //   piece     : depot d'une piece jointe volumineuse, hors du corps de requete (stockage Supabase)
+//   locator   : liste des pages magasin d'une enseigne, depuis son sitemap (gratuit, aucune IA)
 //
 // Le regroupement n'est pas cosmetique : Vercel compte chaque fichier de api/ comme une fonction
 // serverless, et le plan Hobby en autorise 12 par deploiement. Quatre fichiers separes faisaient
@@ -102,7 +103,11 @@ async function fetchPage(url, signal) {
 
 // ===== Extraction =====
 // Adresses de service, plateformes et fichiers : jamais des contacts de magasin.
-const EMAIL_BLOCK = /(^|@)(no-?reply|ne-?pas-?repondre|postmaster|abuse|mailer-daemon|privacy|dpo|webmaster@wix|sentry|wixpress|example|domain|votresite|votre-site|email|adresse|nom)\b/i;
+// Adresses de SERVICE d'une enseigne (juridique, siege, presse, recrutement) : elles figurent sur la
+// page magasin d'une chaine nationale, mais ne sont pas le contact du point de vente. Constate sur
+// lagranderecre.fr, dont les pages magasin n'exposent que « rgpd@ » : sans ce filtre, chaque fiche
+// aurait herite de l'adresse du service juridique du siege.
+const EMAIL_BLOCK = /(^|@)(no-?reply|ne-?pas-?repondre|postmaster|abuse|mailer-daemon|privacy|dpo|rgpd|donnees-?perso|protection-?donnees|service-?client|serviceclient|relation-?client|presse|media|recrutement|candidature|emploi|rh@|franchise|partenariat|investisseur|juridique|webmaster@wix|sentry|wixpress|example|domain|votresite|votre-site|email|adresse|nom)\b/i;
 const EMAIL_BLOCK_HOST = /(sentry\.io|wixpress\.com|example\.(com|org|fr)|schema\.org|w3\.org|googlemail|\.png|\.jpg|\.jpeg|\.gif|\.webp|\.svg|\.css|\.js)$/i;
 function extractEmails(html) {
   const out = new Map(); // e-mail -> score (mailto: = source la plus fiable)
@@ -193,10 +198,67 @@ export default async function handler(req, res) {
     if (action.startsWith("batch:")) return await actionBatch(action.slice(6), body, res);
     // ---------- Depot d'une piece jointe volumineuse ----------
     if (action === "piece") return await actionPiece(body, res);
+    // ---------- Pages magasin d'une enseigne (sitemap) ----------
+    if (action === "locator") return await actionLocator(body, res);
     res.status(400).json({ error: "Action inconnue : " + action });
   } catch (e) {
     res.status(502).json({ error: "Service indisponible : " + (e && e.message ? e.message : String(e)) });
   }
+}
+
+// ===== Pages magasin d'une enseigne =====
+// Une chaine nationale publie une page par point de vente, avec son telephone et souvent son
+// courriel. Ces pages sont listees dans un sitemap declare par robots.txt : une seule lecture donne
+// donc les centaines d'adresses d'un reseau entier, la ou une recherche IA par magasin couterait
+// autant de requetes facturees. Le resultat est mis en cache cote client pour toute une vague.
+const LOC_MAX_OCTETS = 4 * 1024 * 1024;   // un sitemap de magasins reste petit ; au-dela c'est autre chose
+const LOC_MAX_URLS = 4000;
+const LOC_MAGASIN = /(store|magasin|shop|boutique|point[-_]?de[-_]?vente)/i;
+
+// Lecture bornee d'un document texte ou XML, avec les memes garde-fous SSRF que le reste.
+async function fetchTexte(url, signal) {
+  const safe = await safeUrl(url); if (!safe) return "";
+  let res;
+  try {
+    res = await fetch(safe.href, { redirect: "follow", signal, headers: { "User-Agent": "MITMIT/1.0 (+store locator)", Accept: "application/xml,text/xml,text/plain,*/*" } });
+  } catch (e) { return ""; }
+  if (!res.ok) return "";
+  const buf = await res.arrayBuffer();
+  return Buffer.from(buf.byteLength > LOC_MAX_OCTETS ? buf.slice(0, LOC_MAX_OCTETS) : buf).toString("utf8");
+}
+const locs = (xml) => (String(xml || "").match(/<loc>\s*([^<]+?)\s*<\/loc>/gi) || []).map((m) => m.replace(/<\/?loc>/gi, "").trim()).filter(Boolean);
+
+async function actionLocator(body, res) {
+  const dom = String(body.domaine || "").trim().replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(dom)) { res.status(400).json({ error: "Domaine invalide." }); return; }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25000);
+  try {
+    const base = "https://" + dom;
+    // 1) robots.txt declare les sitemaps. A defaut, on tente l'emplacement conventionnel.
+    const robots = await fetchTexte(base + "/robots.txt", controller.signal);
+    let index = (robots.match(/^\s*sitemap:\s*(\S+)/gim) || []).map((l) => l.replace(/^\s*sitemap:\s*/i, "").trim());
+    if (!index.length) index = [base + "/sitemap.xml"];
+    // 2) Parmi les sitemaps declares, ceux qui parlent de magasins. Un index peut en referencer
+    //    d'autres : on descend d'un niveau, pas plus, pour borner le nombre de lectures.
+    const vus = new Set(); const cibles = [];
+    for (const u of index.slice(0, 3)) {
+      if (vus.has(u)) continue; vus.add(u);
+      const xml = await fetchTexte(u, controller.signal);
+      if (!xml) continue;
+      const enfants = locs(xml);
+      if (LOC_MAGASIN.test(u) && !enfants.some((e) => /\.xml(\.gz)?$/i.test(e))) { cibles.push({ u, xml }); continue; }
+      enfants.filter((e) => LOC_MAGASIN.test(e)).slice(0, 4).forEach((e) => { if (!vus.has(e)) { vus.add(e); cibles.push({ u: e, xml: null }); } });
+    }
+    const urls = [];
+    for (const c of cibles.slice(0, 4)) {
+      const xml = c.xml != null ? c.xml : await fetchTexte(c.u, controller.signal);
+      for (const l of locs(xml)) { if (urls.length >= LOC_MAX_URLS) break; if (!/\.xml(\.gz)?$/i.test(l)) urls.push(l); }
+    }
+    res.status(200).json({ domaine: dom, urls: [...new Set(urls)] });
+  } catch (e) {
+    res.status(200).json({ domaine: dom, urls: [], error: (e && e.name === "AbortError") ? "Delai depasse." : ((e && e.message) || String(e)) });
+  } finally { clearTimeout(timer); }
 }
 
 async function actionPiece(body, res) {
