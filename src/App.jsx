@@ -431,7 +431,25 @@ function seedSites() {
     { id: "s_eeny_mc", accountId: "acc_eenymeeny", label: "Eeny Meeny Monaco", type: "pdv", typeSurface: "Petite surface", adresse: "13 rue Princesse Caroline, 98000 Monaco", lat: 43.7355, lng: 7.4214 },
   ];
 }
-const PROSPECT_TYPES = { cooperative: { label: "Coopérative", color: "#3F60AA" }, chaine: { label: "Chaîne / réseau (via centrale)", color: "#7c5cf0" }, franchise: { label: "Franchisé (commande seul)", color: "#5b54c9" }, independant: { label: "Indépendant", color: "#2bb673" }, specialiste: { label: "Spécialiste / Concept store", color: "#F8B133" }, gss: { label: "GSS / Grande surface", color: "#FF5A45" }, autre: { label: "Autre", color: "#9aa6bd" } };
+const PROSPECT_TYPES = { cooperative: { label: "Coopérative", color: "#3F60AA" }, chaine: { label: "Chaîne / réseau (via centrale)", color: "#7c5cf0" }, franchise: { label: "Franchisé (commande seul)", color: "#5b54c9" }, independant: { label: "Indépendant", color: "#2bb673" }, specialiste: { label: "Spécialiste / Concept store", color: "#F8B133" }, gss: { label: "GSS / Grande surface", color: "#FF5A45" },
+  // Cibles hors retail : elles n'ont ni SIRET commercial ni enseigne, mais leurs propres
+  // identifiants (UAI pour un établissement scolaire, RNA pour une association).
+  scolaire: { label: "Scolaire (école, collège, lycée)", color: "#0EA5A4" }, periscolaire: { label: "Périscolaire / Centre de loisirs", color: "#14b8a6" }, petite_enfance: { label: "Crèche / Petite enfance", color: "#22c55e" }, association: { label: "Association / Ludothèque", color: "#d97706" }, mediatheque: { label: "Médiathèque / Bibliothèque", color: "#8b5cf6" },
+  autre: { label: "Autre", color: "#9aa6bd" } };
+// Types dont l'identité ne repose PAS sur le registre du commerce : l'écran, l'import et
+// l'enrichissement doivent leur présenter les bons champs.
+const TYPES_HORS_RETAIL = new Set(["scolaire", "periscolaire", "petite_enfance", "association", "mediatheque"]);
+const estHorsRetail = (p) => TYPES_HORS_RETAIL.has(String((p && p.type) || ""));
+// Identifiant officiel pertinent selon le type : UAI pour une école (identifiant national de
+// l'Éducation nationale), RNA pour une association (W + 9 chiffres), SIRET/SIREN pour le reste.
+function identifiantProspect(p) {
+  if (!p) return null;
+  const t = String(p.type || "");
+  if (t === "scolaire") return p.uai ? { label: "UAI", value: p.uai, titre: "Identifiant national de l'établissement scolaire" } : null;
+  if (t === "association") { const rna = /^W\d{9}$/i.test(String(p.siren || "")) ? p.siren : ""; return rna ? { label: "RNA", value: rna, titre: "Numéro d'association au répertoire national" } : (p.siren ? { label: "SIREN", value: p.siren, titre: "Association immatriculée au registre des entreprises" } : null); }
+  if (p.siret) return { label: "SIRET", value: p.siret, titre: "SIRET de l'établissement" };
+  return p.siren ? { label: "SIREN", value: p.siren, titre: "SIREN de la société" } : null;
+}
 const PROSPECT_STATUT = { a_qualifier: { label: "À qualifier", color: "#9aa6bd" }, a_contacter: { label: "À contacter", color: "#F8B133" }, brouillon_cree: { label: "Brouillon créé", color: "#0EA5A4" }, contacte: { label: "Contacté", color: "#3F60AA" }, rdv: { label: "RDV planifié", color: "#7c5cf0" }, converti: { label: "Converti en compte client", color: "#2bb673" }, ecarte: { label: "Écarté", color: "#FF5A45" } };
 const POTENTIEL_META = { fort: { label: "Fort", color: "#2bb673" }, moyen: { label: "Moyen", color: "#F8B133" }, faible: { label: "Faible", color: "#9aa6bd" } };
 function seedProspects() {
@@ -1463,7 +1481,7 @@ function identityKeys(o) {
 // recherche IA (produit en croix) : nom, enseigne, SIRET, SIREN, adresse, ville, téléphone, e-mail ou site.
 function hasProspectIdentity(p) {
   if (!p) return false;
-  return ["nom", "enseigne", "siret", "siren", "adresse", "ville", "telephone", "email", "site", "contactTel", "contactEmail", "raisonSociale"].some((k) => String(p[k] || "").trim());
+  return ["nom", "enseigne", "siret", "siren", "uai", "adresse", "ville", "telephone", "email", "site", "contactTel", "contactEmail", "raisonSociale"].some((k) => String(p[k] || "").trim());
 }
 // Score de complétude d'une fiche prospect (0-100) : proportion des champs clés renseignés.
 const COMPLETENESS_FIELDS = ["nom", "enseigne", "type", "adresse", "cp", "ville", "telephone", "email", "site", "siren", "contactNom", "contactEmail"];
@@ -4161,9 +4179,27 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
     const log = (resume) => { addInteraction({ id: "i_" + Date.now(), accountId: s.accountId, siteId: s.id, contactId: "", type: "rdv", direction: "sortant", date: TODAY(), heure, sujet: "Visite sur place", resume }); setCheckinMsg("Visite enregistrée à " + heure + "."); setTimeout(() => setCheckinMsg(null), 4000); };
     if (!navigator.geolocation) { log("Check-in visite (localisation indisponible sur cet appareil)."); return; }
     setCheckinMsg("Localisation en cours…");
-    navigator.geolocation.getCurrentPosition((pos) => {
+    navigator.geolocation.getCurrentPosition(async (pos) => {
       let resume = "Check-in visite.";
-      if (s.lat && s.lng) { const d = distanceKm(pos.coords.latitude, pos.coords.longitude, s.lat, s.lng); if (d != null) resume = d <= 0.3 ? `Check-in sur place (~${Math.round(d * 1000)} m de l'établissement).` : `Check-in à ~${d.toFixed(1)} km de l'établissement (vérifier le bon point de vente).`; }
+      if (s.lat && s.lng) {
+        const d = distanceKm(pos.coords.latitude, pos.coords.longitude, s.lat, s.lng);
+        if (d != null) {
+          if (d <= 0.3) resume = `Check-in sur place (~${Math.round(d * 1000)} m de l'établissement).`;
+          else {
+            // Au-delà de quelques centaines de mètres, la distance à vol d'oiseau ne veut plus rien
+            // dire pour un déplacement : on demande la distance ROUTIÈRE réelle (OSRM, gratuit),
+            // qui est aussi la seule valable pour un remboursement kilométrique.
+            const rt = await routeOSRM(pos.coords.latitude, pos.coords.longitude, s.lat, s.lng);
+            if (rt) {
+              // Prix moyen du gazole du département (relevé officiel du jour) : le trajet est ainsi
+              // chiffré au réel plutôt qu'au barème.
+              let cout = "";
+              try { const pl = await prixGazole(cpToDepartement(s.cp || (acc && acc.cp))); if (pl) cout = ` · carburant ~${((rt.km * 2 * 6.5 / 100) * pl).toFixed(2)} € aller-retour (gazole ${pl} €/L)`; } catch (e) {}
+              resume = `Check-in à ${rt.km} km par la route (~${rt.minutes} min) de l'établissement${cout}.`;
+            } else resume = `Check-in à ~${d.toFixed(1)} km à vol d'oiseau de l'établissement (vérifier le bon point de vente).`;
+          }
+        }
+      }
       log(resume);
     }, () => log("Check-in visite (localisation refusée)."), { enableHighAccuracy: true, timeout: 8000 });
   };
@@ -5590,7 +5626,7 @@ function Fiche({ c, account, data, myEmail, settings, deals, interactions, onBac
     <UnifiedTimeline c={c} data={data} go={go} />
     <div className="grid" style={{ gridTemplateColumns: "1fr 1.25fr", alignItems: "start" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <div className="card"><div className="sec-h"><h3 className="pu-display">Coordonnées</h3><button className="btn btn-g btn-s" onClick={onEdit} title="Modifier les coordonnées de ce contact"><Pencil size={14} /> Modifier</button></div><KV icon={<Mail size={13} />} k="Courriel" v={<IdLink value={c.email} kind="mail" />} /><KV icon={<Phone size={13} />} k="Mobile" v={c.mobile ? <a href={telHref(c.mobile)} style={{ color: "inherit" }} title="Appeler ce mobile">{c.mobile}</a> : ""} /><KV icon={<Phone size={13} />} k="Fixe" v={c.fixe ? <a href={telHref(c.fixe)} style={{ color: "inherit" }} title="Appeler ce fixe">{c.fixe}</a> : ""} />{(() => { const loc = contactLocality(c, data); const hasLoc = !!(loc.site || loc.ville || loc.adresse); return (<><KV icon={<Linkedin size={13} />} k="LinkedIn" v={c.linkedin} last={!hasLoc} />{hasLoc && <><KV icon={<Store size={13} />} k="Site rattaché" v={loc.site ? <span className="lnk" onClick={() => onGoSite && onGoSite(loc.site.id)} title="Ouvrir cet établissement dans l'onglet Groupes & établissements">{loc.site.label || loc.site.adresse}</span> : "Localité du compte"} /><KV icon={<MapPin size={13} />} k="Ville" v={loc.ville} /><KV icon={<MapPin size={13} />} k="Département" v={loc.departement} /><KV icon={<Building2 size={13} />} k="Adresse" v={loc.adresse} last /></>}</>); })()}</div>
+        <div className="card"><div className="sec-h"><h3 className="pu-display">Coordonnées</h3><button className="btn btn-g btn-s" onClick={onEdit} title="Modifier les coordonnées de ce contact"><Pencil size={14} /> Modifier</button></div><KV icon={<Mail size={13} />} k="Courriel" v={c.email ? <a href={"mailto:" + c.email} style={{ color: "inherit" }}>{c.email}</a> : ""} /><KV icon={<Phone size={13} />} k="Mobile" v={c.mobile ? <a href={telHref(c.mobile)} style={{ color: "inherit" }} title="Appeler ce mobile">{c.mobile}</a> : ""} /><KV icon={<Phone size={13} />} k="Fixe" v={c.fixe ? <a href={telHref(c.fixe)} style={{ color: "inherit" }} title="Appeler ce fixe">{c.fixe}</a> : ""} />{(() => { const loc = contactLocality(c, data); const hasLoc = !!(loc.site || loc.ville || loc.adresse); return (<><KV icon={<Linkedin size={13} />} k="LinkedIn" v={c.linkedin} last={!hasLoc} />{hasLoc && <><KV icon={<Store size={13} />} k="Site rattaché" v={loc.site ? <span className="lnk" onClick={() => onGoSite && onGoSite(loc.site.id)} title="Ouvrir cet établissement dans l'onglet Groupes & établissements">{loc.site.label || loc.site.adresse}</span> : "Localité du compte"} /><KV icon={<MapPin size={13} />} k="Ville" v={loc.ville} /><KV icon={<MapPin size={13} />} k="Département" v={loc.departement} /><KV icon={<Building2 size={13} />} k="Adresse" v={loc.adresse} last /></>}</>); })()}</div>
         {c.notes && <div className="card"><div className="sec-h"><h3 className="pu-display">Notes</h3></div><div style={{ fontSize: 13, lineHeight: 1.55 }}>{c.notes}</div></div>}
         <div className="card"><div className="sec-h"><h3 className="pu-display">Devis & commandes</h3><span className="lnk" onClick={onGoEnseigne}>{ens}</span></div>{deals.length === 0 ? <div className="empty">Aucun document.</div> : [...deals].sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((d) => { const st = DEAL_STATUS[d.statut] || DEAL_STATUS.brouillon; return (<div key={d.id} className="hrow" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: "1px solid #f0f3f9", cursor: "pointer" }} onClick={() => setPreview(d)}><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 700, fontSize: 13 }}>{docRef(d, { code: dealDocCode(data, d) })} <span style={{ fontWeight: 500, color: "var(--muted)" }}>· {d.type}</span></div><div style={{ color: "var(--muted)", fontSize: 11.5 }}>{d.date}</div></div><Badge color={st.color}>{st.label}</Badge><span style={{ fontWeight: 700, fontSize: 13 }} className="tnum">{eur(d.montant)}</span><Eye size={14} style={{ color: "var(--muted)" }} /></div>); })}</div>
       </div>
@@ -7082,6 +7118,181 @@ async function osmSearchStores(zone) {
   const els = await overpassQuery(`[out:json][timeout:25];${sel}out tags center 80;`);
   return els.map(osmTagsToStore).filter((x) => x.nom);
 }
+// ===== Calendriers officiels, terrain et finances — API publiques GRATUITES, sans clé =====
+// Toutes ces fonctions sont mémoïsées pour la session : les mêmes données sont demandées en boucle
+// (une journée, une zone, un taux) et ces API sont des services publics à ménager.
+const _cacheApi = new Map();
+async function cacheApi(cle, fn) {
+  if (_cacheApi.has(cle)) return _cacheApi.get(cle);
+  const v = await fn(); _cacheApi.set(cle, v); return v;
+}
+// (Les jours fériés sont déjà calculés hors ligne par joursFeries() plus haut : aucune API requise.)
+// Vacances scolaires officielles (data.education.gouv.fr). Remplace la saisie manuelle des périodes
+// dans les réglages : les pics d'achat de jouets suivent précisément ce calendrier.
+// Le champ du jeu de données s'appelle « zones » (au pluriel).
+async function vacancesScolaires(zoneScolaire, anneeScolaire) {
+  return cacheApi("vac" + zoneScolaire + anneeScolaire, async () => {
+    try {
+      const where = `zones="${zoneScolaire}" and annee_scolaire="${anneeScolaire}"`;
+      const r = await fetch("https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/fr-en-calendrier-scolaire/records?limit=40&where=" + encodeURIComponent(where));
+      if (!r.ok) return [];
+      const j = await r.json();
+      return (j.results || []).map((v) => ({ libelle: v.description || "", debut: String(v.start_date || "").slice(0, 10), fin: String(v.end_date || "").slice(0, 10), zone: v.zones || "" })).filter((v) => v.debut && v.fin);
+    } catch (e) { return []; }
+  });
+}
+// Année scolaire au format « 2025-2026 » à partir d'une date (bascule au 1er août).
+function anneeScolaireDe(d) { const dt = d ? new Date(d) : new Date(); const y = dt.getFullYear(); return (dt.getMonth() >= 7 ? y : y - 1) + "-" + (dt.getMonth() >= 7 ? y + 1 : y); }
+// Distance et durée RÉELLES par la route (OSRM, serveur public). Le calcul actuel est à vol
+// d'oiseau : pour un remboursement kilométrique ou un ordre de tournée, c'est la route qui compte.
+async function routeOSRM(lat1, lng1, lat2, lng2) {
+  if ([lat1, lng1, lat2, lng2].some((v) => v == null || isNaN(v))) return null;
+  try {
+    const u = `https://router.project-osrm.org/route/v1/driving/${lng1},${lat1};${lng2},${lat2}?overview=false`;
+    const r = await fetch(u); if (!r.ok) return null;
+    const j = await r.json(); const rt = (j.routes || [])[0]; if (!rt) return null;
+    return { km: Math.round((rt.distance / 1000) * 10) / 10, minutes: Math.round(rt.duration / 60) };
+  } catch (e) { return null; }
+}
+// Prix moyen du gazole d'un département (flux quotidien officiel) — pour chiffrer une tournée.
+async function prixGazole(departement) {
+  const dep = String(departement || "").trim(); if (!dep) return null;
+  return cacheApi("carb" + dep, async () => {
+    try {
+      const u = "https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/prix-carburants-quotidien/records?limit=80&where=" + encodeURIComponent(`dep_code="${dep}" and prix_nom="Gazole"`);
+      const r = await fetch(u); if (!r.ok) return null;
+      const j = await r.json();
+      const prix = (j.results || []).map((x) => Number(x.prix_valeur)).filter((v) => !isNaN(v) && v > 0.5 && v < 4);
+      if (!prix.length) return null;
+      return Math.round((prix.reduce((a, b) => a + b, 0) / prix.length) * 1000) / 1000;
+    } catch (e) { return null; }
+  });
+}
+// Taux de change USD -> EUR du jour (BCE via Frankfurter). Les coûts de revient sont saisis en
+// dollars : ce taux live permet de mesurer l'écart avec le taux de couverture retenu.
+async function tauxUsdEur() {
+  return cacheApi("fx", async () => {
+    try {
+      const r = await fetch("https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR");
+      if (!r.ok) return null;
+      const j = await r.json();
+      const t = j && j.rates && j.rates.EUR;
+      return t ? { taux: t, date: j.date || "" } : null;
+    } catch (e) { return null; }
+  });
+}
+// ===== Cibles de prospection hors magasins de jouets — toutes GRATUITES, sans clé =====
+// Résout une zone saisie librement (« Toulouse », « 31 », « Haute-Garonne ») en code de département
+// et code postal, pour filtrer les recherches nationales. Gratuit (geo.api.gouv.fr).
+async function geoResolveZone(zone) {
+  const z = String(zone || "").trim(); if (!z) return null;
+  if (/^\d{2}$|^\d{3}$/.test(z)) return { departement: z, cp: "", nom: z };
+  if (/^\d{5}$/.test(z)) return { departement: cpToDepartement(z), cp: z, nom: z };
+  try {
+    const r = await fetch("https://geo.api.gouv.fr/communes?nom=" + encodeURIComponent(z) + "&fields=nom,code,codeDepartement,codesPostaux,population&limit=1&boost=population");
+    if (r.ok) { const j = await r.json(); const c = j && j[0]; if (c) return { departement: c.codeDepartement || "", cp: (c.codesPostaux || [])[0] || "", nom: c.nom, commune: c.nom, population: c.population || 0 }; }
+  } catch (e) {}
+  try {
+    const r = await fetch("https://geo.api.gouv.fr/departements?nom=" + encodeURIComponent(z) + "&fields=nom,code&limit=1");
+    if (r.ok) { const j = await r.json(); const d = j && j[0]; if (d) return { departement: d.code, cp: "", nom: d.nom }; }
+  } catch (e) {}
+  return null;
+}
+// Écoles, collèges et lycées — annuaire officiel de l'Éducation nationale. Fournit l'adresse, le
+// téléphone ET l'e-mail institutionnel, ce qu'aucune autre source publique ne donne aussi largement.
+async function educationSearch(zone, limit = 60) {
+  const g = await geoResolveZone(zone); if (!g) return [];
+  const where = g.commune ? `nom_commune like "${String(g.commune).replace(/"/g, "")}"` : (g.cp ? `code_postal="${g.cp}"` : `code_departement="${g.departement}"`);
+  const url = "https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/fr-en-annuaire-education/records?limit=" + Math.min(limit, 100) + "&where=" + encodeURIComponent(where + ' and etat="OUVERT"');
+  const r = await fetch(url); if (!r.ok) throw new Error("API éducation " + r.status);
+  const j = await r.json();
+  return (j.results || []).map((e) => ({
+    nom: e.nom_etablissement || "", type: "scolaire",
+    uai: e.identifiant_de_l_etablissement || "",
+    siret: /^\d{14}$/.test(String(e.siren_siret || "")) ? e.siren_siret : "",
+    adresse: e.adresse_1 || "", cp: e.code_postal || "", ville: e.nom_commune || "",
+    departement: e.code_departement || "", region: e.libelle_region || "",
+    telephone: e.telephone || "", email: e.mail || "", site: e.web || "",
+    notes: [e.type_etablissement, e.statut_public_prive, e.appartenance_education_prioritaire && e.appartenance_education_prioritaire !== "N" ? "Éducation prioritaire" : ""].filter(Boolean).join(" · "),
+    lat: e.latitude || null, lng: e.longitude || null,
+  })).filter((x) => x.nom);
+}
+// Associations et ludothèques — registre national des entreprises (les associations y sont
+// immatriculées). Le dirigeant déclaré sert de premier interlocuteur.
+async function associationSearch(zone, motCle = "", limit = 40) {
+  const g = await geoResolveZone(zone); if (!g) return [];
+  const params = new URLSearchParams({ per_page: String(Math.min(limit, 25)), est_association: "true", etat_administratif: "A" });
+  if (g.departement) params.set("departement", g.departement);
+  params.set("q", motCle || "ludothèque");
+  const r = await fetch("https://recherche-entreprises.api.gouv.fr/search?" + params.toString());
+  if (!r.ok) throw new Error("API entreprises " + r.status);
+  const j = await r.json();
+  return (j.results || []).map((e) => {
+    const s = e.siege || {}; const d = (e.dirigeants || []).find((x) => x.type_dirigeant === "personne physique") || null;
+    return {
+      nom: e.nom_complet || e.nom_raison_sociale || "", type: "association",
+      siren: e.siren || "", raisonSociale: e.nom_raison_sociale || "", formeJuridique: natureJuridiqueLabel(e.nature_juridique),
+      adresse: s.adresse || "", cp: s.code_postal || "", ville: s.libelle_commune || "",
+      departement: cpToDepartement(s.code_postal), region: "",
+      contactPrenom: d ? ((d.prenoms || "").split(/\s+/)[0] || "") : "", contactNom: d ? (d.nom || "") : "",
+      contactFonction: d ? (d.qualite && d.qualite !== "Autre" ? d.qualite : "Dirigeant") : "",
+      contactSource: d ? "RNE/INSEE (annuaire-entreprises)" : "",
+      notes: "Association", telephone: "", email: "", site: "",
+    };
+  }).filter((x) => x.nom);
+}
+// Entreprises par code d'activité (NAF) sur un département : recensement EXHAUSTIF, là où
+// OpenStreetMap et l'IA ne donnent qu'un échantillon.
+const NAF_CIBLES = [
+  { code: "47.65Z", label: "Jeux et jouets (magasin spécialisé)", type: "" },
+  { code: "47.62Z", label: "Journaux et papeterie", type: "" },
+  { code: "47.61Z", label: "Livres (librairies)", type: "" },
+  { code: "47.19B", label: "Autres commerces de détail en magasin non spécialisé", type: "" },
+  { code: "47.59B", label: "Meubles, décoration et divers", type: "" },
+  { code: "85.10Z", label: "Enseignement pré-primaire (maternelles privées)", type: "petite_enfance" },
+  { code: "88.91A", label: "Accueil de jeunes enfants (crèches, halte-garderies)", type: "petite_enfance" },
+  { code: "88.99B", label: "Action sociale sans hébergement (centres de loisirs)", type: "periscolaire" },
+  { code: "93.29Z", label: "Activités récréatives et de loisirs", type: "periscolaire" },
+  { code: "91.01Z", label: "Bibliothèques et médiathèques", type: "mediatheque" },
+];
+// Catégorie de prospect induite par le code d'activité : une crèche n'est pas un magasin.
+const typeDepuisNaf = (naf) => (NAF_CIBLES.find((n) => n.code === naf) || {}).type || "";
+async function nafSearch(zone, naf, limit = 50) {
+  const g = await geoResolveZone(zone); if (!g || !g.departement) return [];
+  const typeNaf = typeDepuisNaf(naf);
+  const params = new URLSearchParams({ activite_principale: naf, departement: g.departement, per_page: String(Math.min(limit, 25)), etat_administratif: "A" });
+  const r = await fetch("https://recherche-entreprises.api.gouv.fr/search?" + params.toString());
+  if (!r.ok) throw new Error("API entreprises " + r.status);
+  const j = await r.json();
+  return (j.results || []).map((e) => {
+    // On privilégie l'établissement situé dans le département demandé plutôt que le siège social,
+    // qui peut être à l'autre bout de la France pour une chaîne.
+    const etabs = (e.matching_etablissements || []).filter((x) => String(x.etat_administratif || "A") === "A");
+    const loc = etabs.find((x) => cpToDepartement(x.code_postal) === g.departement) || etabs[0] || e.siege || {};
+    const d = (e.dirigeants || []).find((x) => x.type_dirigeant === "personne physique") || null;
+    return {
+      nom: e.nom_complet || e.nom_raison_sociale || "", type: typeNaf || (e.nombre_etablissements > 3 ? "chaine" : "independant"),
+      siren: e.siren || "", siret: loc.siret || "", raisonSociale: e.nom_raison_sociale || "", formeJuridique: natureJuridiqueLabel(e.nature_juridique),
+      adresse: loc.adresse || "", cp: loc.code_postal || "", ville: loc.libelle_commune || "",
+      departement: cpToDepartement(loc.code_postal), region: "",
+      contactPrenom: d ? ((d.prenoms || "").split(/\s+/)[0] || "") : "", contactNom: d ? (d.nom || "") : "",
+      contactFonction: d ? (d.qualite && d.qualite !== "Autre" ? d.qualite : "Dirigeant") : "",
+      contactSource: d ? "RNE/INSEE (annuaire-entreprises)" : "",
+      notes: "", telephone: "", email: "", site: "",
+    };
+  }).filter((x) => x.nom);
+}
+// Médiathèques et bibliothèques via OpenStreetMap (amenity=library) : elles animent souvent des
+// ateliers créatifs et achètent du matériel.
+async function osmSearchLieux(zone, filtre, type) {
+  const a = await nominatimArea(/france/i.test(zone) ? zone : zone + ", France"); if (!a) return [];
+  let sel;
+  if (a.areaId) sel = `area(${a.areaId})->.z;nwr${filtre}["name"](area.z);`;
+  else if (a.bbox && a.bbox.length === 4) sel = `nwr${filtre}["name"](${a.bbox[0]},${a.bbox[2]},${a.bbox[1]},${a.bbox[3]});`;
+  else return [];
+  const els = await overpassQuery(`[out:json][timeout:25];${sel}out tags center 60;`);
+  return els.map(osmTagsToStore).filter((x) => x.nom).map((x) => ({ ...x, type }));
+}
 // UN établissement précis (nom + ville) sur OpenStreetMap : téléphone, site, horaires… — GRATUIT.
 async function osmFindPlace(name, ville) {
   const n = String(name || "").trim(); const v = String(ville || "").trim(); if (!n || !v) return null;
@@ -7503,7 +7714,10 @@ function Prospection({ data, persist, go }) {
   const [selMode, setSelMode] = useState(false); const [selIds, setSelIds] = useState(() => new Set());
   const [sirBusy, setSirBusy] = useState(false); const [sirMsg, setSirMsg] = useState(null);
   const [edit, setEdit] = useState(null);
-  const [zone, setZone] = useState("Occitanie"); const [kind, setKind] = useState("toutes"); const [busy, setBusy] = useState(false); const [aiMsg, setAiMsg] = useState(null); const [aiErr, setAiErr] = useState(null);
+  const [zone, setZone] = useState("Occitanie"); const [kind, setKind] = useState("toutes");
+  // Source de la recherche : magasins (OSM + IA) ou registres officiels gratuits (NAF, écoles,
+  // associations, médiathèques). Seule « magasins » peut engager une dépense.
+  const [source, setSource] = useState("magasins"); const [naf, setNaf] = useState(NAF_CIBLES[0].code); const [assoMot, setAssoMot] = useState("ludothèque"); const [busy, setBusy] = useState(false); const [aiMsg, setAiMsg] = useState(null); const [aiErr, setAiErr] = useState(null);
   const aiElapsed = useElapsed(busy);
   // Approfondir la recherche IA sur la fiche prospect ouverte : complète les champs encore vides.
   const [pfBusy, setPfBusy] = useState(false); const [pfMsg, setPfMsg] = useState(null);
@@ -7883,10 +8097,37 @@ function Prospection({ data, persist, go }) {
     // Registre global : la recherche continue même si l'on quitte l'onglet, et reste visible partout.
     aiJobs.run("prospects:search", "Recherche de prospects", async () => {
       try {
+        const z = zone.trim() || "France";
+        // ===== Sources 100 % GRATUITES : registres officiels, aucune IA, aucune dépense =====
+        if (source !== "magasins") {
+          // La zone doit d'abord être résolue en département / commune. Si elle ne l'est pas, c'est
+          // soit une saisie non reconnue, soit un registre momentanément indisponible : on le dit,
+          // au lieu d'afficher « aucun résultat » qui ferait croire à une zone vide.
+          const gz = await geoResolveZone(z);
+          if (!gz) { setAiErr("Zone « " + z + " » non reconnue, ou service d'annuaire momentanément indisponible. Saisissez une ville, un numéro de département (ex. 31) ou un nom de département, puis réessayez."); return; }
+          let lignes = [], libelle = "";
+          if (source === "ecoles") { lignes = await educationSearch(z); libelle = "établissement(s) scolaire(s)"; }
+          else if (source === "associations") { lignes = await associationSearch(z, assoMot); libelle = "association(s)"; }
+          else if (source === "naf") { lignes = await nafSearch(z, naf); libelle = "entreprise(s)"; }
+          else if (source === "mediatheques") { lignes = await osmSearchLieux(z, '["amenity"="library"]', "mediatheque"); libelle = "médiathèque(s)"; }
+          // Dédoublonnage sur les mêmes clés que le reste de l'application : on ne recrée jamais une
+          // fiche déjà présente (prospect, établissement ou groupe).
+          const drafts = lignes.map((l) => ({ ...l, statut: "a_qualifier", potentiel: "", source: "Registre officiel · " + TODAY(), accountId: null, createdAt: TODAY() }));
+          const { created, skipped } = createDraftsWithDedup(drafts, data);
+          if (created.length) {
+            persist((d) => ({ ...d, prospects: [...created, ...(d.prospects || [])] }));
+            setQ(""); setFType("tous"); setFRegion("tous"); setFlashIds(new Set(created.map((c) => c.id)));
+          }
+          const dup = skipped ? " " + skipped + " doublon(s) écarté(s)." : "";
+          setAiMsg(created.length
+            ? created.length + " " + libelle + " ajouté(s) au listing, sans aucune dépense." + dup + " À vérifier avant action."
+            : ("Aucun nouveau résultat pour cette zone." + dup));
+          return;
+        }
+        // ===== Magasins : OpenStreetMap d'abord (gratuit), l'IA seulement si nécessaire =====
         // Étage 1 GRATUIT : OpenStreetMap liste les magasins jouets / jeux / loisirs créatifs de la
         // zone avec adresse, téléphone, site et horaires. L'IA (payante) n'est appelée qu'ensuite,
         // et seulement si OSM n'a pas suffi (zone peu cartographiée ou recherche d'un nom précis).
-        const z = zone.trim() || "France";
         let osm = [];
         try { osm = await osmSearchStores(z); } catch (e) {}
         const seenOsm = new Set(data.prospects.map((p) => ((p.nom || "") + "|" + (p.ville || "")).toLowerCase()));
@@ -7942,7 +8183,11 @@ function Prospection({ data, persist, go }) {
       <div style={{ fontSize: 12.5, color: "var(--muted)", display: "flex", alignItems: "flex-start", gap: 6 }}><MapPin size={14} style={{ flexShrink: 0, marginTop: 1 }} /><span>{[p.adresse, ((p.cp || "") + " " + (p.ville || "")).trim()].filter(Boolean).join(", ")}</span></div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 2 }}><Badge color={tm.color}>{tm.label}</Badge>{p.region && <Badge color="#9aa6bd">{p.region}</Badge>}<Badge color={sm.color}>{sm.label}</Badge></div>
       {(p.tags || []).length > 0 && <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{(p.tags || []).map((t) => <span key={t} onClick={(e) => { e.stopPropagation(); setFTag(t); }} title={"Filtrer sur l'étiquette « " + t + " »"} style={{ fontSize: 10.5, fontWeight: 700, color: "#6d28d9", background: "#f3ecff", border: "1px solid #ddd0fb", borderRadius: 20, padding: "1px 8px", cursor: "pointer" }}>#{t}</span>)}</div>}
-      {(p.contactNom || p.siren || p.siret) && <div style={{ fontSize: 12, color: "var(--muted)", display: "flex", flexWrap: "wrap", gap: 10, marginTop: 2 }}>{p.contactNom && <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><User size={13} />{[p.contactPrenom, p.contactNom].filter(Boolean).join(" ")}{p.contactFonction ? (" · " + p.contactFonction) : ""}</span>}{p.siren && <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Building2 size={12} />SIREN <IdLink value={p.siren} /></span>}{p.siret && <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }} title="SIRET de l'établissement"><MapPin size={12} />SIRET <IdLink value={p.siret} /></span>}</div>}
+      {(() => { const ident = identifiantProspect(p); return (p.contactNom || ident) ? (
+        <div style={{ fontSize: 12, color: "var(--muted)", display: "flex", flexWrap: "wrap", gap: 10, marginTop: 2 }}>
+          {p.contactNom && <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><User size={13} />{[p.contactPrenom, p.contactNom].filter(Boolean).join(" ")}{p.contactFonction ? (" · " + p.contactFonction) : ""}</span>}
+          {ident && <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }} title={ident.titre}><Building2 size={12} />{ident.label} <IdLink value={ident.value} /></span>}
+        </div>) : null; })()}
       <div style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center", flexWrap: "wrap" }} onClick={(e) => e.stopPropagation()}>
         <a className="iconbtn" href={mapsUrl(p)} target="_blank" rel="noreferrer" title="Voir sur Google Maps"><MapPin size={15} /></a>
         {p.site && <a className="iconbtn" href={ensureHttp(p.site)} target="_blank" rel="noreferrer" title={"Site web : " + cleanDomain(p.site)}><ExternalLink size={15} /></a>}
@@ -7967,11 +8212,29 @@ function Prospection({ data, persist, go }) {
       ))}</div>}
     </div>) : (<>
     <div className="card" style={{ marginBottom: 14 }}>
-      <div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><Sparkles size={17} style={{ color: "var(--orange)" }} /> Recherche IA de prospects</h3></div>
+      <div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><Sparkles size={17} style={{ color: "var(--orange)" }} /> Recherche de prospects</h3></div>
       <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-        <div className="fld" style={{ flex: 1, minWidth: 200, marginBottom: 0 }}><label>Zone ou établissement précis</label><input value={zone} onChange={(e) => setZone(e.target.value)} placeholder="Ex. Occitanie, Bordeaux… ou « L'Atelier chez soi »" onKeyDown={(e) => { if (e.key === "Enter" && !busy) runAI(); }} /></div>
-        <div className="fld" style={{ minWidth: 170, marginBottom: 0 }}><label>Cible</label><select value={kind} onChange={(e) => setKind(e.target.value)}><option value="toutes">Tous</option><option value="chaine">Chaînes & franchises</option><option value="independant">Indépendants & concept stores</option></select></div>
-        <button className="btn-save" disabled={busy} onClick={runAI} style={busy ? { opacity: .7, cursor: "wait" } : {}}>{busy ? (<><Sparkles size={15} className="spin" /> Recherche en cours… {fmtElapsed(aiElapsed)}</>) : (<><Sparkles size={15} /> Lancer la recherche IA</>)}</button>
+        <div className="fld" style={{ flex: 1, minWidth: 200, marginBottom: 0 }}><label>Zone ou établissement précis</label><input value={zone} onChange={(e) => setZone(e.target.value)} placeholder={source === "magasins" ? "Ex. Occitanie, Bordeaux… ou « L'Atelier chez soi »" : "Ville, département (31) ou nom de département"} onKeyDown={(e) => { if (e.key === "Enter" && !busy) runAI(); }} /></div>
+        {/* Chaque source interroge un registre officiel différent : le choix change complètement
+            la nature des fiches créées (et, pour toutes sauf « magasins », le coût est nul). */}
+        <div className="fld" style={{ minWidth: 210, marginBottom: 0 }}><label>Chercher quoi ?</label><select value={source} onChange={(e) => setSource(e.target.value)}>
+          <option value="magasins">Magasins de jouets / loisirs</option>
+          <option value="naf">Commerces par code d'activité (NAF)</option>
+          <option value="ecoles">Scolaire (écoles, collèges, lycées)</option>
+          <option value="associations">Associations & ludothèques</option>
+          <option value="mediatheques">Médiathèques & bibliothèques</option>
+        </select></div>
+        {source === "magasins" && <div className="fld" style={{ minWidth: 170, marginBottom: 0 }}><label>Cible</label><select value={kind} onChange={(e) => setKind(e.target.value)}><option value="toutes">Tous</option><option value="chaine">Chaînes & franchises</option><option value="independant">Indépendants & concept stores</option></select></div>}
+        {source === "naf" && <div className="fld" style={{ minWidth: 230, marginBottom: 0 }}><label>Code d'activité</label><select value={naf} onChange={(e) => setNaf(e.target.value)}>{NAF_CIBLES.map((n) => <option key={n.code} value={n.code}>{n.code} — {n.label}</option>)}</select></div>}
+        {source === "associations" && <div className="fld" style={{ minWidth: 170, marginBottom: 0 }}><label>Mot-clé</label><input value={assoMot} onChange={(e) => setAssoMot(e.target.value)} placeholder="ludothèque" /></div>}
+        <button className="btn-save" disabled={busy} onClick={runAI} style={busy ? { opacity: .7, cursor: "wait" } : {}}>{busy ? (<><Sparkles size={15} className="spin" /> Recherche en cours… {fmtElapsed(aiElapsed)}</>) : (<><Sparkles size={15} /> {source === "magasins" ? "Lancer la recherche" : "Lancer (gratuit)"}</>)}</button>
+      </div>
+      <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 8, lineHeight: 1.5 }}>
+        {source === "magasins" && "OpenStreetMap d'abord (gratuit) ; l'IA ne complète que si la zone est peu cartographiée."}
+        {source === "naf" && "Registre national des entreprises : recensement exhaustif d'un code d'activité sur un département. Gratuit, sans IA."}
+        {source === "ecoles" && "Annuaire officiel de l'Éducation nationale : adresse, téléphone et e-mail institutionnel de chaque établissement. Gratuit, sans IA."}
+        {source === "associations" && "Registre national des entreprises (les associations y sont immatriculées), avec le dirigeant déclaré. Gratuit, sans IA."}
+        {source === "mediatheques" && "OpenStreetMap : bibliothèques et médiathèques de la zone. Gratuit, sans IA."}
       </div>
       {aiMsg && <div style={{ fontSize: 12.5, color: "var(--green)", marginTop: 10, display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}><CheckCircle2 size={14} /> {aiMsg}</div>}
       {aiErr && <div style={{ fontSize: 12.5, color: "var(--red)", marginTop: 10, lineHeight: 1.5 }}>{aiErr}</div>}
@@ -8074,8 +8337,16 @@ function Prospection({ data, persist, go }) {
         <button type="button" className="btn btn-g btn-s" onClick={sireneProspect} disabled={sirBusy} title="Vérifier et compléter l'identité légale (raison sociale, SIREN, forme juridique, dirigeant) via le registre officiel annuaire-entreprises / INSEE — gratuit, sans crédit IA"><Building2 size={13} className={sirBusy ? "spin" : ""} /> {sirBusy ? "Registre officiel…" : "Vérifier via SIRENE (gratuit)"}</button>
         {sirMsg && <span style={{ fontSize: 11.5, color: sirMsg.ok ? "var(--green)" : "var(--red)", fontWeight: 600, flex: 1, minWidth: 200, lineHeight: 1.4 }}>{sirMsg.t}</span>}
       </div>
-      <div className="row2"><div className="fld"><SearchLabel value={edit.raisonSociale}>Raison sociale</SearchLabel><input value={edit.raisonSociale || ""} onChange={(e) => upE("raisonSociale", e.target.value)} placeholder="Société exploitante" /></div><div className="fld"><SearchLabel value={edit.siren}>SIREN</SearchLabel><input value={edit.siren || ""} onChange={(e) => upE("siren", e.target.value)} placeholder="9 chiffres" /></div></div>
-      <div className="row2"><div className="fld"><SearchLabel value={edit.siret}>SIRET de l'établissement</SearchLabel><input value={edit.siret || ""} onChange={(e) => upE("siret", e.target.value)} placeholder="14 chiffres (SIREN + NIC de l'établissement)" /><div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>Identifiant de l'établissement précis. Les 9 premiers chiffres sont le SIREN ci-dessus.</div></div><div className="fld"><label>Forme juridique</label><Combo value={edit.formeJuridique || ""} onChange={(v) => upE("formeJuridique", v)} options={FORMES_JURIDIQUES} placeholder="SAS, SARL, EI…" /></div></div>
+      {/* Une école n'a pas de SIRET commercial mais un UAI ; une association a un RNA. On présente
+          donc les champs d'identité correspondant réellement au type de la fiche. */}
+      {edit.type === "scolaire" ? (
+        <div className="row2"><div className="fld"><SearchLabel value={edit.uai}>UAI (identifiant Éducation nationale)</SearchLabel><input value={edit.uai || ""} onChange={(e) => upE("uai", e.target.value)} placeholder="Ex. 0810435H" /><div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>Identifiant national unique de l'établissement scolaire, équivalent du SIRET pour une école.</div></div><div className="fld"><label>SIRET (si connu)</label><input value={edit.siret || ""} onChange={(e) => upE("siret", e.target.value)} placeholder="Facultatif pour un établissement public" /></div></div>
+      ) : estHorsRetail(edit) ? (
+        <div className="row2"><div className="fld"><SearchLabel value={edit.raisonSociale}>Raison sociale</SearchLabel><input value={edit.raisonSociale || ""} onChange={(e) => upE("raisonSociale", e.target.value)} placeholder="Nom officiel de la structure" /></div><div className="fld"><SearchLabel value={edit.siren}>{/^W\d{9}$/i.test(String(edit.siren || "")) ? "RNA (numéro d'association)" : "SIREN / RNA"}</SearchLabel><input value={edit.siren || ""} onChange={(e) => upE("siren", e.target.value)} placeholder="9 chiffres, ou W + 9 chiffres pour une association" /></div></div>
+      ) : (<>
+        <div className="row2"><div className="fld"><SearchLabel value={edit.raisonSociale}>Raison sociale</SearchLabel><input value={edit.raisonSociale || ""} onChange={(e) => upE("raisonSociale", e.target.value)} placeholder="Société exploitante" /></div><div className="fld"><SearchLabel value={edit.siren}>SIREN</SearchLabel><input value={edit.siren || ""} onChange={(e) => upE("siren", e.target.value)} placeholder="9 chiffres" /></div></div>
+        <div className="row2"><div className="fld"><SearchLabel value={edit.siret}>SIRET de l'établissement</SearchLabel><input value={edit.siret || ""} onChange={(e) => upE("siret", e.target.value)} placeholder="14 chiffres (SIREN + NIC de l'établissement)" /><div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>Identifiant de l'établissement précis. Les 9 premiers chiffres sont le SIREN ci-dessus.</div></div><div className="fld"><label>Forme juridique</label><Combo value={edit.formeJuridique || ""} onChange={(v) => upE("formeJuridique", v)} options={FORMES_JURIDIQUES} placeholder="SAS, SARL, EI…" /></div></div>
+      </>)}
       <div style={{ borderTop: "1px solid var(--line)", margin: "4px 0 2px", paddingTop: 10, fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".06em" }}>Contact identifié (créé automatiquement à la conversion)</div>
       <div className="row2"><div className="fld"><label>Prénom</label><input value={edit.contactPrenom || ""} onChange={(e) => upE("contactPrenom", e.target.value)} /></div><div className="fld"><label>Nom</label><input value={edit.contactNom || ""} onChange={(e) => upE("contactNom", e.target.value)} /></div></div>
       <div className="fld"><label>Fonction</label><input value={edit.contactFonction || ""} onChange={(e) => upE("contactFonction", e.target.value)} placeholder="Gérant(e), acheteur(se), responsable…" /></div>
@@ -8616,7 +8887,22 @@ function FxCalc({ data, persist, loadReq }) {
   const securedNow = Math.round(spotIn * (1 + marginIn / 100) * 10000) / 10000;
   const nbCouts = (data.products || []).filter((p) => p.coutUsd != null).length;
   const apply = (spot, marg, source) => { const s = Math.round(spot * 10000) / 10000; persist((d) => { const ns = { ...d.settings, fxSpot: s, fxMargin: marg, fxDate: new Date().toISOString().slice(0, 10), fxSource: source }; const sec = securedFrom(ns); return { ...d, settings: ns, products: d.products.map((p) => p.coutUsd != null ? { ...p, cout: deriveCout(p, sec) } : p) }; }); setSpotIn(s); setMarginIn(marg); };
-  const refresh = async () => { setBusy(true); setErr(""); try { const r = await fetch("https://open.er-api.com/v6/latest/USD"); if (!r.ok) throw new Error("HTTP " + r.status); const j = await r.json(); const eur = j && j.rates && j.rates.EUR; if (!eur) throw new Error("réponse inattendue"); apply(+eur, marginIn, "auto"); } catch (e) { setErr("Récupération automatique indisponible ici (" + (e.message || e) + "). Saisissez le cours du jour à la main, puis Appliquer. L'automatique fonctionne dans l'aperçu connecté, ou dans l'application une fois le serveur relais en place."); } finally { setBusy(false); } };
+  // Taux de référence de la BCE (Frankfurter) en premier — c'est la source qui fait foi en
+  // comptabilité ; l'ancien fournisseur reste en secours si la BCE ne répond pas.
+  const refresh = async () => {
+    setBusy(true); setErr("");
+    try {
+      const t = await tauxUsdEur();
+      if (t && t.taux) { setSpotIn(Math.round(t.taux * 10000) / 10000); apply(t.taux, marginIn, "BCE " + (t.date || "")); return; }
+      const r = await fetch("https://open.er-api.com/v6/latest/USD");
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const j = await r.json();
+      const eur = j && j.rates && j.rates.EUR;
+      if (!eur) throw new Error("taux absent");
+      setSpotIn(Math.round(eur * 10000) / 10000); apply(eur, marginIn, "open.er-api");
+    } catch (e) { setErr("Cours indisponible (" + ((e && e.message) || e) + ")."); }
+    finally { setBusy(false); }
+  };
   const [amount, setAmount] = useState(5000); const [rate, setRate] = useState(Math.round((1 / spot0) * 1000) / 1000); const [dir, setDir] = useState("USD_EUR"); const margin = marginIn;
   useEffect(() => { if (loadReq && loadReq.type === "fx") { const d = loadReq.payload || {}; if (d.amount != null) setAmount(d.amount); if (d.rate != null) setRate(d.rate); if (d.dir) setDir(d.dir); } }, [loadReq && loadReq.n]);
   const eurComptant = dir === "USD_EUR" ? amount / rate : amount * rate;
@@ -9031,6 +9317,7 @@ function Connexions({ data, persist, autoBackup }) {
           <div style={{ marginTop: 8 }}><button className="btn btn-g btn-s" onClick={reset}><RefreshCw size={13} /> Réinitialiser le compteur</button></div>
         </div>
         <ClaudeCostChart usage={data.claudeUsage} />
+        <VeilleRegistre data={data} persist={persist} />
       </>
       ); })()}
     </div>
@@ -9058,7 +9345,8 @@ function Connexions({ data, persist, autoBackup }) {
         </div>
         <div className="fld" style={{ marginTop: 14 }}><label>Périodes / vacances scolaires (saisie annuelle)</label>
           <textarea rows={4} value={settings.vacancesScolaires || ""} onChange={(e) => persist((p) => ({ ...p, settings: { ...p.settings, vacancesScolaires: e.target.value } }))} placeholder={"Une période par ligne : Libellé ; AAAA-MM-JJ ; AAAA-MM-JJ\nEx : Rentrée ; 2026-09-01 ; 2026-09-07\nNoël ; 2026-12-20 ; 2027-01-05"} />
-          <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 6 }}>Vide par défaut. Une période par ligne (un libellé et deux dates AAAA-MM-JJ). Si la date du jour tombe dans une période, elle est transmise à l'IA ; sinon aucune saisonnalité n'est évoquée. Aucune date n'est codée en dur dans l'application.</div>
+          <CalendrierOfficiel settings={settings} persist={persist} />
+          <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 6 }}>Une période par ligne (un libellé et deux dates AAAA-MM-JJ). Si la date du jour tombe dans une période, elle est transmise à l'IA ; sinon aucune saisonnalité n'est évoquée. Vous pouvez tout saisir à la main, ou importer le calendrier officiel ci-dessus puis l'ajuster.</div>
         </div>
       </div>
     </div>
@@ -10866,6 +11154,86 @@ function ClaudeBatchWatcher({ batch, persist }) {
     return () => { stop = true; clearInterval(iv); };
   }, [id]);
   return null;
+}
+// Veille sur l'état administratif des comptes et prospects : le registre national indique si une
+// société a cessé son activité. Détecter une fermeture évite de démarcher — ou de livrer — une
+// entreprise qui n'existe plus. Gratuit, sans IA.
+function VeilleRegistre({ data, persist }) {
+  const [busy, setBusy] = useState(false); const [prog, setProg] = useState(null); const [res, setRes] = useState(null);
+  // Toutes les entités porteuses d'un SIREN, tous écrans confondus.
+  const cibles = [
+    ...(data.accounts || []).filter((a) => !a.archived && a.siren).map((a) => ({ id: a.id, nom: a.enseigne || "Groupe", siren: a.siren, ou: "compte" })),
+    ...(data.prospects || []).filter((p) => !p.archived && p.siren && !/^W/i.test(p.siren)).map((p) => ({ id: p.id, nom: p.nom || p.enseigne || "Prospect", siren: p.siren, ou: "prospect" })),
+  ];
+  const lancer = async () => {
+    setBusy(true); setRes(null); setProg({ fait: 0, total: cibles.length });
+    const fermes = []; let vus = 0;
+    for (const c of cibles) {
+      try {
+        const r = await fetch("https://recherche-entreprises.api.gouv.fr/search?q=" + encodeURIComponent(c.siren) + "&per_page=1");
+        if (r.ok) {
+          const j = await r.json(); const e = (j.results || [])[0];
+          // « C » = cessée. On ne touche à aucune donnée : on signale, l'utilisateur décide.
+          if (e && String(e.etat_administratif || "A").toUpperCase() === "C") fermes.push({ ...c, raisonSociale: e.nom_complet || "" });
+        }
+      } catch (e) {}
+      vus++; setProg({ fait: vus, total: cibles.length });
+      await new Promise((r2) => setTimeout(r2, 120)); // service public : on ne le martèle pas
+    }
+    setRes({ total: cibles.length, fermes });
+    setBusy(false); setProg(null);
+  };
+  return (<div className="card" style={{ marginTop: 14, borderLeft: "4px solid var(--orange)" }}>
+    <div className="sec-h"><h3 className="pu-display">Veille au registre des entreprises</h3><span>gratuit · sans IA</span></div>
+    <p style={{ fontSize: 12.5, color: "var(--muted)", marginTop: -4, lineHeight: 1.5 }}>Vérifie au registre national si l'un de vos comptes ou prospects a <strong>cessé son activité</strong>. Rien n'est modifié automatiquement : les fiches concernées vous sont simplement signalées. {cibles.length} fiche(s) portent un SIREN vérifiable.</p>
+    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
+      <button className="btn btn-g btn-s" disabled={busy || !cibles.length} onClick={lancer}><RefreshCw size={13} className={busy ? "spin" : ""} /> {busy ? "Vérification…" : "Vérifier maintenant"}</button>
+      {prog && <span style={{ fontSize: 12, color: "var(--muted)" }} className="tnum">{prog.fait} / {prog.total}</span>}
+    </div>
+    {res && (res.fermes.length ? (
+      <div style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--red)", marginBottom: 6 }}>{res.fermes.length} fiche(s) correspondant à une entreprise cessée :</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{res.fermes.map((f) => (
+          <div key={f.ou + f.id} style={{ fontSize: 12.5, padding: "7px 10px", background: "var(--bg)", borderRadius: 9 }}>
+            <strong>{f.nom}</strong> <span style={{ color: "var(--muted)" }}>· {f.ou} · SIREN {f.siren}{f.raisonSociale ? " · " + f.raisonSociale : ""}</span>
+          </div>))}</div>
+        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 8, lineHeight: 1.5 }}>Une cessation au registre peut aussi refléter une restructuration (changement de société exploitante) : vérifiez avant d'archiver.</div>
+      </div>
+    ) : <div style={{ fontSize: 12.5, color: "var(--green)", marginTop: 10, fontWeight: 600 }}>Aucune cessation détectée sur {res.total} fiche(s).</div>)}
+  </div>);
+}
+// Import du calendrier OFFICIEL (vacances scolaires de l'Éducation nationale + jours fériés) dans le
+// champ de saisie des périodes. La saisie manuelle reste possible : on remplit, l'utilisateur ajuste.
+function CalendrierOfficiel({ settings, persist }) {
+  const [busy, setBusy] = useState(false); const [msg, setMsg] = useState(null);
+  const zone = settings.zoneScolaire || "Zone C"; // Occitanie / académie de Toulouse
+  const importer = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const an = anneeScolaireDe();
+      const annee = new Date().getFullYear();
+      const vac = await vacancesScolaires(zone, an);
+      // Jours fériés : calcul local (aucune API), sur l'année en cours et la suivante.
+      const fer = [...joursFeries(annee), ...joursFeries(annee + 1)];
+      // Une même période est publiée par académie : on dédoublonne sur libellé + dates.
+      const vus = new Set(); const lignes = [];
+      vac.forEach((v) => { const k = v.libelle + v.debut + v.fin; if (vus.has(k)) return; vus.add(k); lignes.push(`${v.libelle} ; ${v.debut} ; ${v.fin}`); });
+      (fer || []).forEach((d) => lignes.push(`Jour férié ; ${d} ; ${d}`));
+      if (!lignes.length) { setMsg({ ok: false, t: "Calendrier officiel indisponible pour le moment. Réessayez, ou saisissez les périodes à la main." }); return; }
+      lignes.sort((a, b) => (a.match(/\d{4}-\d{2}-\d{2}/) || [""])[0].localeCompare((b.match(/\d{4}-\d{2}-\d{2}/) || [""])[0]));
+      persist((p) => ({ ...p, settings: { ...p.settings, vacancesScolaires: lignes.join("\n"), zoneScolaire: zone } }));
+      setMsg({ ok: true, t: lignes.length + " période(s) importée(s) pour " + an + " (" + zone + ") : vacances scolaires officielles et jours fériés. Ajustez librement." });
+    } catch (e) { setMsg({ ok: false, t: "Import impossible : " + ((e && e.message) || e) }); }
+    finally { setBusy(false); }
+  };
+  return (<div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+    <select value={zone} onChange={(e) => persist((p) => ({ ...p, settings: { ...p.settings, zoneScolaire: e.target.value } }))} style={{ maxWidth: 130 }}>
+      <option value="Zone A">Zone A</option><option value="Zone B">Zone B</option><option value="Zone C">Zone C</option>
+    </select>
+    <button type="button" className="btn btn-g btn-s" disabled={busy} onClick={importer}><Calendar size={14} className={busy ? "spin" : ""} /> {busy ? "Import…" : "Importer le calendrier officiel"}</button>
+    <span style={{ fontSize: 11, color: "var(--muted)" }}>Vacances scolaires (Éducation nationale) + jours fériés — gratuit, sans IA.</span>
+    {msg && <div style={{ fontSize: 11.5, width: "100%", color: msg.ok ? "var(--green)" : "var(--red)", lineHeight: 1.5 }}>{msg.t}</div>}
+  </div>);
 }
 // Code météo WMO (Open-Meteo) → emoji + libellé court FR.
 function wmoMeta(code) {
