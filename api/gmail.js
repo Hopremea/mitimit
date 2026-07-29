@@ -68,8 +68,10 @@ export default async function handler(req, res) {
 
   const gAuth = { Authorization: "Bearer " + googleToken };
   try {
-    // 1) Liste des messages echanges avec l'adresse (envoyes ou recus).
-    const q = encodeURIComponent(`(from:${email} OR to:${email})`);
+    // 1) Liste des messages echanges avec l'adresse : envoyes ou recus UNIQUEMENT.
+    // « -in:drafts » ecarte les brouillons : un message jamais envoye n'est pas un echange, et le
+    // faire figurer au fil d'activite laisserait croire que le contact a ete relance.
+    const q = encodeURIComponent(`-in:drafts (from:${email} OR to:${email})`);
     const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=8&q=${q}`;
     const listRes = await fetch(listUrl, { headers: gAuth });
     if (listRes.status === 401 || listRes.status === 403) {
@@ -91,6 +93,7 @@ export default async function handler(req, res) {
       const mRes = await fetch(mUrl, { headers: gAuth });
       if (!mRes.ok) continue;
       const m = await mRes.json();
+      if ((m.labelIds || []).includes("DRAFT")) continue; // double garde : jamais de brouillon
       const headers = (m.payload && m.payload.headers) || [];
       const h = (name) => { const x = headers.find((y) => (y.name || "").toLowerCase() === name); return x ? x.value : ""; };
       const subject = h("subject") || "(sans objet)";
