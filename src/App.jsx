@@ -769,8 +769,9 @@ function ClaudeCostChart({ usage }) {
           <li><strong>Base Adresse Nationale</strong> et <strong>geo.api.gouv.fr</strong> — normalisation d'adresse, ville depuis le code postal, département et région.</li>
           <li><strong>BODACC</strong> — alerte si une procédure collective, liquidation ou radiation est publiée sur le SIREN.</li>
           <li><strong>Wikidata</strong> — site officiel et réseaux sociaux des enseignes nationales.</li>
+          <li><strong>Site officiel du magasin</strong> — lecture de la page d'accueil, « contact » et mentions légales pour en extraire l'e-mail et le téléphone publiés (indépendants uniquement ; un numéro dont l'indicatif ne correspond pas au département de la fiche est écarté).</li>
         </ul>
-        <div style={{ marginTop: 6 }}>Les e-mails et téléphones nominatifs restent le seul domaine sans source publique fiable : ils passent encore par l'IA, désormais plafonnée en nombre de recherches web.</div>
+        <div style={{ marginTop: 6 }}>Les e-mails et téléphones <strong>nominatifs</strong> restent le seul domaine sans source publique fiable : ils passent encore par l'IA, désormais plafonnée en nombre de recherches web — et guidée par les faits ci-dessus, ce qui réduit d'autant ses recherches.</div>
       </div>
     </div>
   </div>);
@@ -6728,6 +6729,35 @@ function osmHoursToFr(h) {
 }
 // Regex ANCRÉE (^…$) : sans les ancres, Overpass fait une correspondance par sous-chaîne et
 // « car_parts » ou « party » ressortiraient à cause de « art ».
+// Zone téléphonique française par département (01 IDF, 02 Nord-Ouest, 03 Nord-Est, 04 Sud-Est,
+// 05 Sud-Ouest). Sert à écarter un numéro manifestement étranger à la ville de la fiche : une page
+// web contient souvent des numéros sans rapport (siège, partenaire, gabarit du site).
+const TEL_ZONES = {
+  1: ["75", "77", "78", "91", "92", "93", "94", "95"],
+  2: ["14", "18", "22", "27", "28", "29", "35", "36", "37", "41", "44", "45", "49", "50", "53", "56", "61", "72", "76", "85"],
+  3: ["02", "08", "10", "21", "25", "39", "51", "52", "54", "55", "57", "58", "59", "60", "62", "67", "68", "70", "71", "80", "88", "89", "90"],
+  4: ["01", "03", "04", "05", "06", "07", "11", "13", "15", "26", "30", "34", "38", "42", "43", "48", "63", "66", "69", "73", "74", "83", "84", "2A", "2B"],
+  5: ["09", "12", "16", "17", "19", "23", "24", "31", "32", "33", "40", "46", "47", "64", "65", "79", "81", "82", "86", "87"],
+};
+const DEPT_TEL_ZONE = {}; Object.entries(TEL_ZONES).forEach(([z, ds]) => ds.forEach((d) => { DEPT_TEL_ZONE[d] = +z; }));
+// true si le numéro est plausible pour ce code postal. Ne juge QUE les fixes 01–05 : les mobiles
+// (06/07), les numéros non géographiques (09) et les services (08) sont acceptés sans contrôle,
+// de même que tout cas non tranchable (département inconnu, outre-mer).
+function telCoherent(tel, cp) {
+  const d = String(tel || "").replace(/\D/g, ""); if (!/^0[1-5]/.test(d)) return true;
+  const dep = cpToDepartement(cp); if (!dep || dep.length > 2) return true;
+  const z = DEPT_TEL_ZONE[dep]; if (!z) return true;
+  return +d[1] === z;
+}
+// Lecture GRATUITE des coordonnées publiques sur le site du magasin (relais serveur : le navigateur
+// ne peut pas lire un site tiers). Zéro token, zéro recherche web facturée.
+async function scrapeContact(url) {
+  const u = String(url || "").trim(); if (!u) return null;
+  const res = await fetch("/api/scrape-contact", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ url: u }) });
+  if (!res.ok) return null;
+  const j = await res.json();
+  return { email: (j && j.email) || "", telephone: (j && j.telephone) || "", telephones: (j && j.telephones) || [] };
+}
 const OSM_SHOP_TAGS = "^(toys|games|craft|hobby|model|art|stationery)$";
 const osmTagsToStore = (e) => { const t = e.tags || {}; return {
   nom: t.name || "", enseigne: t.brand || "",
@@ -6865,6 +6895,26 @@ async function aiEnrichProspect(p, persistUsage, instruction) {
       }
     }
   } catch (e) {}
+  // 2ter) Site du magasin lu par le relais serveur (GRATUIT) : e-mail et téléphone publiés sur la
+  //    page d'accueil / contact / mentions légales. Inutile pour une grande enseigne (site de la
+  //    marque, coordonnées du siège) — on ne le fait que pour les indépendants.
+  const siteConnu = p.site || out.site;
+  if (!grande && has(siteConnu) && (!has(p.email) && !has(out.email) || !has(p.telephone) && !has(out.telephone))) {
+    try {
+      const sc = await scrapeContact(siteConnu);
+      if (sc) {
+        if (sc.email && !has(out.email) && !has(p.email)) out.email = sc.email;
+        if (!has(out.telephone) && !has(p.telephone)) {
+          // Une page web contient souvent des numéros sans rapport : on ne retient que le premier
+          // qui soit géographiquement plausible pour la ville de la fiche.
+          const cpRef = p.cp || out.cp;
+          const tel = [sc.telephone, ...(sc.telephones || [])].filter(Boolean).find((t) => telCoherent(t, cpRef));
+          if (tel) out.telephone = tel;
+        }
+        if (sc.email || out.telephone) out.source = out.source ? out.source + " + site officiel" : "site officiel";
+      }
+    } catch (e) {}
+  }
   // 3) Champs restants → IA. Grandes enseignes : ni site web ni réseaux sociaux (ceux de la marque).
   const misses = [];
   const need = (cond, key, desc) => { if (cond) misses.push({ key, desc }); };
@@ -6890,13 +6940,29 @@ async function aiEnrichProspect(p, persistUsage, instruction) {
   if (consigne) schemaObj.notes = schemaObj.notes || "";
   schemaObj.confiance = "haute/moyenne/faible"; schemaObj.source = "";
   const cible = [p.nom, p.enseigne && p.enseigne !== p.nom ? p.enseigne : "", p.adresse || out.adresse, [p.cp || out.cp, p.ville || out.ville].filter(Boolean).join(" ")].filter(Boolean).join(" · ") || "(nom non renseigné — à identifier depuis les données ci-dessous)";
-  const sys = "Tu enrichis la fiche d'un point de vente français (jouets / loisirs créatifs) à partir du web : site officiel, fiche Google, store locator de l'enseigne, et registres officiels si besoin. Tu ne recherches QUE les champs demandés — les autres sont déjà connus. Tu n'inventes JAMAIS une donnée (identifiant, adresse, courriel, nom) : en cas de doute, tu laisses le champ vide. Tu réponds UNIQUEMENT par du JSON valide.";
-  const knownVals = { SIRET: p.siret || out.siret, SIREN: p.siren || out.siren, "Raison sociale": p.raisonSociale || out.raisonSociale, Adresse: p.adresse || out.adresse, Ville: [p.cp || out.cp, p.ville || out.ville].filter(Boolean).join(" "), "Téléphone": p.telephone || p.contactTel, "E-mail": p.email || p.contactEmail, Site: p.site, Facebook: p.facebook, Instagram: p.instagram };
-  const known = Object.entries(knownVals).filter(([, v]) => has(v)).map(([k, v]) => k + " : " + v).join(" ; ");
-  const user = `Établissement : ${cible}.${known ? "\nDonnées déjà connues (sers-t'en pour identifier l'établissement, ne les recherche pas) : " + known + "." : ""}
-Recherche UNIQUEMENT les informations suivantes, vérifiables (attention aux homonymes : ne retiens que l'établissement correspondant aux données connues) :
+  const sys = "Tu enrichis la fiche d'un point de vente français (jouets / loisirs créatifs) à partir du web : site officiel, fiche Google, store locator de l'enseigne, et registres officiels si besoin. Des sources officielles gratuites ont DÉJÀ été consultées avant toi : leurs résultats te sont fournis comme faits ÉTABLIS et VÉRIFIÉS. Sers-t'en pour cibler tes recherches, ne les redemande pas et ne les contredis pas. Tu ne recherches QUE les champs demandés. Tu n'inventes JAMAIS une donnée (identifiant, adresse, courriel, nom) : en cas de doute, tu laisses le champ vide. Tu réponds UNIQUEMENT par du JSON valide.";
+  // Les faits issus des sources gratuites sont transmis à l'IA comme point de départ vérifié : ils
+  // lui évitent de re-chercher ce qui est déjà connu et surtout lui donnent des clés de recherche
+  // très discriminantes (raison sociale exacte, SIREN, dirigeant, adresse normalisée).
+  const officiels = {
+    "Raison sociale (registre officiel)": out.raisonSociale,
+    "SIREN (registre officiel)": out.siren,
+    "SIRET de cet établissement (registre officiel)": out.siret,
+    "Forme juridique (registre officiel)": out.formeJuridique,
+    "Dirigeant (registre officiel)": [out.contactPrenom, out.contactNom, out.contactFonction ? "(" + out.contactFonction + ")" : ""].filter(Boolean).join(" "),
+    "Adresse (registre / base adresse nationale)": [out.adresse, out.cp, out.ville].filter(Boolean).join(" "),
+    "Téléphone (OpenStreetMap / site officiel)": out.telephone,
+    "E-mail (OpenStreetMap / site officiel)": out.email,
+    "Site officiel": out.site || p.site,
+  };
+  const faits = Object.entries(officiels).filter(([, v]) => has(v)).map(([k, v]) => "- " + k + " : " + v).join("\n");
+  const saisis = Object.entries({ SIRET: p.siret, SIREN: p.siren, Adresse: [p.adresse, p.cp, p.ville].filter(Boolean).join(" "), "Téléphone": p.telephone || p.contactTel, "E-mail": p.email || p.contactEmail, Facebook: p.facebook, Instagram: p.instagram })
+    .filter(([k, v]) => has(v) && !has(officiels[k])).map(([k, v]) => k + " : " + v).join(" ; ");
+  const user = `Établissement : ${cible}.
+${faits ? "FAITS DÉJÀ ÉTABLIS par des sources officielles gratuites (registre des entreprises, OpenStreetMap, base adresse nationale, site officiel du magasin). Ils sont fiables : appuie-toi dessus pour identifier le bon établissement et cibler tes recherches, ne les redemande pas.\n" + faits + "\n" : ""}${saisis ? "Autres données de la fiche : " + saisis + ".\n" : ""}
+Recherche UNIQUEMENT les informations suivantes, vérifiables (attention aux homonymes : ne retiens que l'établissement correspondant aux faits ci-dessus) :
 ${misses.map((m) => "- " + m.key + " : " + m.desc).join("\n")}
-Si l'établissement appartient à une enseigne ou un réseau (JouéClub, King Jouet, Cultura…), consulte en priorité la fiche magasin du site officiel de l'enseigne (store locator) : elle donne souvent l'adresse exacte, le téléphone et le courriel du point de vente.
+${has(out.raisonSociale) ? "Utilise la raison sociale exacte « " + out.raisonSociale + " »" + (has(out.siren) ? " et le SIREN " + out.siren : "") + " dans tes requêtes : c'est le moyen le plus sûr de tomber sur la bonne société.\n" : ""}${has(out.site) || has(p.site) ? "Le site officiel du magasin est " + (out.site || p.site) + " : commence par y chercher (page contact, mentions légales, « qui sommes-nous »).\n" : ""}Si l'établissement appartient à une enseigne ou un réseau (JouéClub, King Jouet, Cultura…), consulte en priorité la fiche magasin du site officiel de l'enseigne (store locator) : elle donne souvent l'adresse exacte, le téléphone et le courriel du point de vente.
 Renvoie UNIQUEMENT un objet JSON valide (aucun texte ni balise autour) avec EXACTEMENT ces clés :
 ${JSON.stringify(schemaObj)}
 "source" = registre / source principale utilisée. Tout champ non trouvé reste une chaîne vide.${consigne ? "\n\nPRIORITÉ DEMANDÉE PAR L'UTILISATEUR (concentre ta recherche là-dessus, sans rien inventer, et résume les trouvailles dans \"notes\") :\n" + consigne : ""}`;
