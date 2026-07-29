@@ -8882,7 +8882,13 @@ function ProspectMailing({ data, persist, onClose }) {
         throw new Error(dt.error || "dépôt indisponible");
       }
     } catch (e) {
-      setPieceErr("Dépôt du document impossible (" + ((e && e.message) || e) + "). Un PDF de moins de 3 Mo passe sans dépôt ; au-delà, il faut autoriser le stockage Supabase (seau « pieces-jointes » accessible en écriture, ou clé de service côté serveur).");
+      const msg = String((e && e.message) || e);
+      // Cas de loin le plus fréquent au premier usage : le seau n'existe pas et le navigateur, qui ne
+      // dispose que de la clé anon, n'a pas le droit de le créer. On donne le geste exact à faire.
+      const seauManquant = /bucket not found|bucket.*not.*exist|not found/i.test(msg);
+      setPieceErr(seauManquant
+        ? "Le dépôt de documents n'est pas encore activé : le seau « pieces-jointes » n'existe pas et le navigateur n'a pas le droit de le créer. Ajoutez la variable SUPABASE_SERVICE_ROLE_KEY dans Vercel (Réglages → Variables d'environnement) : le serveur créera le seau tout seul. Sinon, créez-le dans Supabase (Storage → New bucket, privé) avec une règle d'écriture pour les utilisateurs authentifiés. En attendant, un PDF de moins de 3 Mo passe sans dépôt."
+        : "Dépôt du document impossible (" + msg + "). Un PDF de moins de 3 Mo passe sans dépôt ; au-delà, il faut autoriser le stockage Supabase (seau « pieces-jointes » accessible en écriture, ou clé de service côté serveur).");
     } finally { setPieceBusy(false); }
   };
   const [cards, setCards] = useWaveCards();
