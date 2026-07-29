@@ -75,6 +75,31 @@ const aiJobs = {
     return p;
   },
 };
+// État de la vague de mailing de prospection, conservé HORS des composants. La génération elle-même
+// tourne déjà dans aiJobs, qui survit au démontage : fermer le volet ne l'interrompt pas et les appels
+// IA restent facturés. Sans ce magasin, les mails déjà rédigés — et les filtres saisis — étaient
+// pourtant perdus à la fermeture. On peut désormais sortir du volet et y revenir sur la même page.
+const mailingWave = {
+  cards: [],
+  form: {}, // valeurs des champs du volet (filtres, consigne, ton, sélection…)
+  subs: new Set(),
+  sub(f) { this.subs.add(f); return () => this.subs.delete(f); },
+  _notify() { this.subs.forEach((f) => { try { f(this.cards); } catch (e) {} }); },
+  setCards(next) { this.cards = typeof next === "function" ? next(this.cards) : next; this._notify(); },
+  reset() { this.cards = []; this.form = {}; this._notify(); },
+};
+// Cartes de la vague : le magasin est la source de vérité, si bien que la génération continue de les
+// alimenter même quand le volet est fermé (un setState sur un composant démonté serait sans effet).
+function useWaveCards() {
+  const [cards, set] = useState(mailingWave.cards);
+  useEffect(() => mailingWave.sub(set), []);
+  return [cards, (n) => mailingWave.setCards(n)];
+}
+// useState dont la valeur survit à la fermeture du volet (mémorisée dans mailingWave.form).
+function useWaveState(key, initial) {
+  const [v, setV] = useState(() => (key in mailingWave.form ? mailingWave.form[key] : (typeof initial === "function" ? initial() : initial)));
+  return [v, (upd) => setV((prev) => { const next = typeof upd === "function" ? upd(prev) : upd; mailingWave.form[key] = next; return next; })];
+}
 function useAiJobs() {
   const [, force] = useState(0);
   useEffect(() => aiJobs.subscribe(() => force((x) => x + 1)), []);
@@ -7902,7 +7927,8 @@ function Prospection({ data, persist, go }) {
         <button className={cx("btn", selMode ? "btn-p" : "btn-g")} onClick={() => { setSelMode((v) => !v); if (selMode) clearSel(); }} title="Sélection multiple : cocher des fiches pour leur appliquer une action groupée (statut, type, étiquette, liste, enrichissement…)"><CheckSquare size={16} /> {selMode ? "Terminer la sélection" : "Sélectionner"}</button>
         <button className={cx("btn", fIncomplete ? "btn-p" : "btn-g")} onClick={() => setFIncomplete((v) => !v)} title="N'afficher que les fiches incomplètes (moins de 70 % des champs clés renseignés) pour cibler l'effort de complétion"><AlertTriangle size={16} /> À compléter</button>
         <button className="btn btn-ai" onClick={() => setEnrichOpen(true)} disabled={enriching} title="Compléter automatiquement les fiches prospect via recherche web (choix des catégories et du nombre), en priorité les e-mails et téléphones manquants (tâche de fond)"><Sparkles size={16} className={enriching ? "spin" : ""} /> {enriching ? ("Enrichissement… " + (enrichJob && enrichJob.total ? enrichJob.done + "/" + enrichJob.total : "")) : "Enrichir les fiches"}</button>
-        <button className="btn btn-ai" onClick={() => setMailingOpen(true)} title="Générer une vague de mails de premier contact personnalisés (angles vrais) et créer des brouillons Gmail"><Mail size={16} /> Mailing</button>
+        {(() => { const wave = jobsP.get("mailing:wave"); return (
+          <button className="btn btn-ai" onClick={() => setMailingOpen(true)} title={wave ? "Génération en cours — le volet peut être fermé sans interrompre la vague, rouvrez-le pour suivre l'avancement" : "Générer une vague de mails de premier contact personnalisés (angles vrais) et créer des brouillons Gmail"}><Mail size={16} className={wave ? "spin" : ""} /> {wave ? "Mailing… " + (wave.total ? wave.done + "/" + wave.total : "") : "Mailing"}</button>); })()}
         <button className="btn btn-ghost" onClick={openMergeDoublons} title="Détecter les prospects en double (même SIRET, même adresse, ou même SIREN + ville), les passer en revue et choisir ceux à fusionner"><Copy size={16} /> Fusionner les doublons</button>
         <button className="btn btn-g" onClick={() => setImportOpen(true)} title="Importer une liste de prospects (Excel, CSV ou texte) ; MITMIT peut ensuite les rechercher et compléter automatiquement"><Upload size={16} /> Importer</button>
         <button className="btn btn-p" onClick={() => setEdit({ id: "p_" + Date.now(), nom: "", enseigne: "", type: "autre", format: "", adresse: "", ville: "", cp: "", departement: "", region: "", telephone: "", site: "", email: "", statut: "a_qualifier", potentiel: "", notes: "", source: "Saisie manuelle", accountId: null, createdAt: TODAY() })}><Plus size={16} /> Ajouter un prospect</button>
@@ -8007,27 +8033,29 @@ function Prospection({ data, persist, go }) {
 function ProspectMailing({ data, persist, onClose }) {
   const prospects = data.prospects || [];
   const DEFAULT_TYPES = ["cooperative", "chaine", "franchise", "independant", "specialiste"];
-  const [types, setTypes] = useState(() => new Set(DEFAULT_TYPES));
+  // Tous les états du volet passent par useWaveState / useWaveCards : on peut fermer le volet pendant
+  // la génération (qui continue) et le rouvrir sur exactement la même page, mails rédigés compris.
+  const [types, setTypes] = useWaveState("types", () => new Set(DEFAULT_TYPES));
   // « Autre » : recherche libre par nom / enseigne (ex. « JouéClub » sélectionne tous les JouéClub,
   // tous types confondus). Active seulement quand la puce « Autre » est cochée et le champ rempli.
-  const [nameQuery, setNameQuery] = useState("");
+  const [nameQuery, setNameQuery] = useWaveState("nameQuery", "");
   const nameQ = types.has("autre") ? normStr(nameQuery) : "";
   const regions = useMemo(() => [...new Set(prospects.map((p) => p.region).filter(Boolean))].sort(), [prospects]);
-  const [region, setRegion] = useState("tous");
-  const [statuts, setStatuts] = useState(() => new Set(["a_contacter"]));
-  const [showTreated, setShowTreated] = useState(false);
+  const [region, setRegion] = useWaveState("region", "tous");
+  const [statuts, setStatuts] = useWaveState("statuts", () => new Set(["a_contacter"]));
+  const [showTreated, setShowTreated] = useWaveState("showTreated", false);
   // Ciblage par liste enregistrée (Brevo/HubSpot) et par étiquette (Notion).
   const mailLists = data.prospectLists || [];
-  const [listFilter, setListFilter] = useState("tous");
-  const [tagFilter, setTagFilter] = useState("tous");
+  const [listFilter, setListFilter] = useWaveState("listFilter", "tous");
+  const [tagFilter, setTagFilter] = useWaveState("tagFilter", "tous");
   const mailTags = useMemo(() => [...new Set(prospects.filter((p) => !p.accountId).flatMap((p) => p.tags || []))].sort((a, b) => a.localeCompare(b, "fr")), [prospects]);
-  const [consigne, setConsigne] = useState("proposer un court échange pour présenter la gamme");
-  const [tones, setTones] = useState(() => new Set(["professionnel"]));
+  const [consigne, setConsigne] = useWaveState("consigne", "proposer un court échange pour présenter la gamme");
+  const [tones, setTones] = useWaveState("tones", () => new Set(["professionnel"]));
   const toggleTone = (k) => setTones((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const tonStr = () => [...tones].map((k) => (MSG_TONES.find((t) => t.key === k) || {}).hint).filter(Boolean).join(" et ");
-  const [sel, setSel] = useState(() => new Set());
-  const [cards, setCards] = useState([]);
-  const [confirmReseau, setConfirmReseau] = useState(false);
+  const [sel, setSel] = useWaveState("sel", () => new Set());
+  const [cards, setCards] = useWaveCards();
+  const [confirmReseau, setConfirmReseau] = useWaveState("confirmReseau", false);
   const jobs = useAiJobs();
   const running = jobs.has("mailing:wave");
   const waveJob = jobs.get("mailing:wave");
@@ -8037,8 +8065,8 @@ function ProspectMailing({ data, persist, onClose }) {
   // lancée à l'ouverture du volet) et des données MITMIT (statut, brouillon créé, échanges journalisés).
   // Ces prospects sont masqués par défaut et jamais présélectionnés : on ne redémarche pas quelqu'un
   // déjà contacté.
-  const [gmSent, setGmSent] = useState(() => new Map());
-  const [gmCheck, setGmCheck] = useState({ busy: false, msg: "", done: false });
+  const [gmSent, setGmSent] = useWaveState("gmSent", () => new Map());
+  const [gmCheck, setGmCheck] = useWaveState("gmCheck", { busy: false, msg: "", done: false });
   const runGmailCheck = async () => {
     const list = prospects.filter((p) => !p.accountId && prospectAddresses(p).length);
     if (!list.length) { setGmCheck({ busy: false, msg: "", done: true }); return; }
@@ -8051,7 +8079,9 @@ function ProspectMailing({ data, persist, onClose }) {
       setGmCheck({ busy: false, done: true, msg: "⚠ Vérification Gmail indisponible (" + ((e && e.message) || e) + ") : seuls les antécédents enregistrés dans MITMIT sont pris en compte." });
     }
   };
-  useEffect(() => { runGmailCheck(); }, []);
+  // Vérification lancée à la première ouverture seulement : en revenant sur le volet, on retrouve le
+  // résultat précédent plutôt que de réinterroger Gmail (bouton « Revérifier » pour le rafraîchir).
+  useEffect(() => { if (!(mailingWave.form.gmCheck && mailingWave.form.gmCheck.done)) runGmailCheck(); }, []);
   // Antécédent de contact, toutes sources confondues (Gmail d'abord, sinon les données MITMIT).
   const contactedInfo = (p) => {
     const g = gmSent.get(p.id);
@@ -8072,7 +8102,13 @@ function ProspectMailing({ data, persist, onClose }) {
   }).map((p) => ({ p, a: anglesOf(p), deja: contactedInfo(p) })), [prospects, types, region, statuts, showTreated, listFilter, tagFilter, nameQ, gmSent, data.accounts, data.sites, data.interactions]);
   const filterSig = [...types].sort().join(",") + "|" + region + "|" + [...statuts].sort().join(",") + "|" + showTreated + "|" + listFilter + "|" + tagFilter + "|" + nameQ + "|G" + gmSent.size;
   // Présélection : jamais les prospects déjà contactés (ils restent cochables à la main si besoin).
-  useEffect(() => { setSel(new Set(filtered.filter((x) => !x.deja).map((x) => x.p.id))); }, [filterSig]);
+  // Recalculée uniquement quand les filtres CHANGENT réellement : au retour sur le volet, la sélection
+  // manuelle est conservée telle quelle au lieu d'être réinitialisée.
+  useEffect(() => {
+    if (mailingWave.form.__sig === filterSig) return;
+    mailingWave.form.__sig = filterSig;
+    setSel(new Set(filtered.filter((x) => !x.deja).map((x) => x.p.id)));
+  }, [filterSig]);
   const toggleType = (k) => setTypes((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const toggleStatut = (k) => setStatuts((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const toggleSel = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -8147,7 +8183,7 @@ function ProspectMailing({ data, persist, onClose }) {
   const CONF = { haute: { label: "haute", color: "#2bb673" }, standard: { label: "standard", color: "#F8B133" }, a_revoir: { label: "à revoir", color: "#FF5A45" } };
   const ANGLE_LBL = { proximite: "proximité", reseau_enseigne: "réseau enseigne", reseau_region: "réseau régional", adequation_produit: "adéquation produit" };
   return (<Modal title="Mailing de prospection" onClose={onClose} xl guard={false}>
-    <p style={{ fontSize: 12.5, color: "var(--muted)", marginTop: -2 }}>Génère des mails de premier contact, personnalisés et adossés à des angles vrais (proximité, réseau d'enseigne, adéquation). La vague crée des <strong>brouillons Gmail</strong>, jamais d'envoi. Envoyez ensuite par petits paquets espacés depuis Gmail : un envoi massif et rapproché dégrade la délivrabilité. Dès que Gmail confirme l'<strong>envoi</strong> d'un mail (à la synchronisation des courriels, automatique ou manuelle), la fiche du prospect passe d'elle-même de Prospection à <strong>Groupes &amp; établissements</strong>.</p>
+    <p style={{ fontSize: 12.5, color: "var(--muted)", marginTop: -2 }}>Génère des mails de premier contact, personnalisés et adossés à des angles vrais (proximité, réseau d'enseigne, adéquation). La vague crée des <strong>brouillons Gmail</strong>, jamais d'envoi. Envoyez ensuite par petits paquets espacés depuis Gmail : un envoi massif et rapproché dégrade la délivrabilité. Dès que Gmail confirme l'<strong>envoi</strong> d'un mail (à la synchronisation des courriels, automatique ou manuelle), la fiche du prospect passe d'elle-même de Prospection à <strong>Groupes &amp; établissements</strong>. Vous pouvez <strong>fermer ce volet pendant la rédaction</strong> : la vague continue en arrière-plan et vous la retrouvez ici, mails compris, en le rouvrant.</p>
     <div className="fld"><label>Types de commerce ciblés</label><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{Object.entries(PROSPECT_TYPES).map(([k, v]) => { const on = types.has(k); return (<button key={k} type="button" className={cx("btn", "btn-s", on ? "btn-p" : "btn-g")} onClick={() => toggleType(k)} title={k === "chaine" ? "Les mails de cette catégorie ne proposent PAS un référencement : ils cherchent le bon interlocuteur en centrale." : (k === "autre" ? "Ouvre un champ de recherche par nom : tapez une partie du nom ou de l'enseigne pour cibler ces magasins, tous types confondus." : undefined)}>{v.label}{k === "chaine" ? " ⓘ" : ""}{k === "autre" ? " 🔎" : ""}</button>); })}</div>
     {types.has("autre") && <div style={{ marginTop: 7 }}><input value={nameQuery} onChange={(e) => setNameQuery(e.target.value)} placeholder="Ex : JouéClub — tapez une partie du nom ou de l'enseigne…" /><div style={{ fontSize: 11, color: nameQ ? "var(--blue)" : "var(--muted)", marginTop: 4, fontWeight: nameQ ? 700 : 400 }}>{nameQ ? "Recherche par nom active : « " + nameQuery.trim() + " » remplace les types cochés (tous types confondus, accents et majuscules ignorés)." : "Tapez une partie du nom (ex : « JouéClub ») pour sélectionner tous les magasins dont le nom ou l'enseigne correspond, quel que soit leur type. Champ vide : « Autre » filtre le type Autre, comme avant."}</div></div>}
     <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 5 }}>« Chaîne / réseau (via centrale) » : ces mails cherchent le bon interlocuteur en centrale, ils ne proposent pas de référencement. GSS et Autre décochés par défaut (circuits via acheteurs nationaux).</div></div>
@@ -8177,7 +8213,10 @@ function ProspectMailing({ data, persist, onClose }) {
     {cards.length > 0 && <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", borderTop: "1px solid var(--line)", paddingTop: 10, marginBottom: 8 }}>
         <label style={{ fontSize: 12, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}><input type="checkbox" checked={confirmReseau} onChange={(e) => setConfirmReseau(e.target.checked)} style={{ width: "auto" }} /> j'ai vérifié les affirmations de réseau</label>
-        <button className="btn btn-g" onClick={createAllSafe} disabled={!batchEligible.length} title="Ne traite que les cartes sans alerte et non « à revoir »"><Check size={15} /> Créer tous les brouillons sans alerte ({batchEligible.length})</button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="btn btn-ghost btn-s" disabled={running} onClick={async () => { const ok = await appConfirm("Effacer les " + cards.length + " mail(s) de cette vague ? Les brouillons déjà créés dans Gmail sont conservés.", { title: "Effacer la vague", confirmLabel: "Effacer" }); if (ok) setCards([]); }} title="Repartir d'une vague vierge (les brouillons Gmail déjà créés ne sont pas touchés)"><X size={14} /> Effacer la vague</button>
+          <button className="btn btn-g" onClick={createAllSafe} disabled={!batchEligible.length} title="Ne traite que les cartes sans alerte et non « à revoir »"><Check size={15} /> Créer tous les brouillons sans alerte ({batchEligible.length})</button>
+        </div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: "50vh", overflowY: "auto", paddingRight: 4 }}>
         {cards.map((c) => { const conf = CONF[c.confiance] || CONF.standard; const reseau = isReseauClaim(c); return (
