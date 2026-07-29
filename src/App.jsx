@@ -3000,8 +3000,56 @@ async function resolveLogoUrl(domain) {
   for (const url of candidates) { if (await imageLoads(url)) return url; }
   return gfav;
 }
-// Recherche web (via Claude) du domaine du site officiel d'une enseigne, pour en déduire le logo.
-async function webFindDomain(query, persistUsage) {
+// ===== Socle commun : ce que les sources GRATUITES savent d'un lieu =====
+// Interrogé AVANT toute recherche IA, partout dans l'application (prospects, groupes,
+// établissements, logos, recherche par zone). Chaque source est optionnelle et silencieuse en cas
+// d'échec : on renvoie ce qu'on a pu trouver, l'IA ne complétera que le reste.
+// Résultat mémoïsé par (nom + ville) le temps de la session : sur une chaîne, trente magasins
+// interrogeaient trente fois les mêmes sources.
+const _lieuCache = new Map();
+async function sourcesGratuitesLieu({ nom, enseigne, ville, cp, marque }) {
+  const cle = [nom, enseigne, ville, cp, marque ? "m" : ""].join("|").toLowerCase();
+  if (_lieuCache.has(cle)) return _lieuCache.get(cle);
+  const out = { site: "", facebook: "", instagram: "", telephone: "", email: "", horaires: "", adresse: "", cp: "", ville: "", sources: [] };
+  const has = (v) => Boolean(String(v || "").trim());
+  // 1) OpenStreetMap : le point de vente lui-même (téléphone, site, horaires, réseaux, adresse).
+  try {
+    const place = await osmFindPlace(nom || enseigne, ville);
+    if (place) {
+      out.site = place.site; out.facebook = place.facebook; out.instagram = place.instagram;
+      out.telephone = place.telephone; out.email = place.email; out.horaires = place.horaires;
+      out.adresse = place.adresse; out.cp = place.cp; out.ville = place.ville;
+      if (has(place.telephone) || has(place.site) || has(place.horaires) || has(place.email)) out.sources.push("OpenStreetMap");
+    }
+  } catch (e) {}
+  // 2) Wikidata : la fiche de la MARQUE (site officiel, Facebook, Instagram). Utile quand le point
+  //    de vente n'a rien en propre — et c'est justement le cas des enseignes nationales.
+  if (marque && (!has(out.site) || !has(out.facebook) || !has(out.instagram))) {
+    try {
+      const w = await wikidataBrand(enseigne || nom);
+      if (w) {
+        if (!has(out.site)) out.site = w.site;
+        if (!has(out.facebook)) out.facebook = w.facebook;
+        if (!has(out.instagram)) out.instagram = w.instagram;
+        if (has(w.site) || has(w.facebook) || has(w.instagram)) out.sources.push("Wikidata");
+      }
+    } catch (e) {}
+  }
+  // 3) Base Adresse Nationale : complète code postal / ville à partir de l'adresse.
+  if (has(out.adresse) && (!has(out.cp) || !has(out.ville))) {
+    try { const b = await banNormalize([out.adresse, cp, ville].filter(Boolean).join(" ")); if (b) { if (!has(out.cp)) out.cp = b.cp; if (!has(out.ville)) out.ville = b.ville; } } catch (e) {}
+  }
+  _lieuCache.set(cle, out);
+  return out;
+}
+// Domaine du site officiel d'une enseigne (sert à déduire le logo).
+// GRATUIT d'abord : Wikidata puis OpenStreetMap. L'IA n'est sollicitée qu'en dernier recours.
+async function webFindDomain(query, persistUsage, ville) {
+  const dom = (u) => { try { return new URL(ensureHttp(u)).hostname.replace(/^www\./, ""); } catch (e) { return ""; } };
+  try {
+    const g = await sourcesGratuitesLieu({ nom: query, enseigne: query, ville: ville || "", marque: true });
+    if (g && g.site) { const d = dom(g.site); if (d) return d; }
+  } catch (e) {}
   const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 300, tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }], messages: [{ role: "user", content: "Donne le domaine du site web officiel de l'enseigne ou de l'entreprise : \"" + query + "\". Réponds UNIQUEMENT par un objet JSON sans texte ni Markdown : {\"domaine\":\"exemple.fr\"}. Si tu n'es pas sûr, mets une chaîne vide." }] }) });
   if (!res.ok) throw new Error("API " + res.status);
   const dt = await res.json();
@@ -3018,17 +3066,6 @@ function smartLink(a) {
   if (a.facebook) return { url: ensureHttp(a.facebook), label: "Facebook", Icon: Facebook };
   if (a.instagram) return { url: ensureHttp(a.instagram), label: "Instagram", Icon: Instagram };
   return { url: "https://www.google.com/search?q=" + encodeURIComponent([a.enseigne, a.ville].filter(Boolean).join(" ")), label: "Rechercher", Icon: Search };
-}
-// Recherche web (via Claude) de la présence en ligne officielle : site web, Facebook, Instagram.
-async function aiFindLinks(query, persistUsage) {
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 600, tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }], messages: [{ role: "user", content: "Recherche la présence en ligne officielle de cet établissement ou enseigne : \"" + query + "\". Donne, uniquement si tu les trouves de façon fiable : l'URL du site web officiel, l'URL de la page Facebook officielle, l'URL du compte Instagram officiel. N'invente RIEN : laisse une chaîne vide si tu n'es pas certain. Réponds UNIQUEMENT par un objet JSON sans texte ni Markdown : {\"site\":\"\",\"facebook\":\"\",\"instagram\":\"\"}." }] }) });
-  if (!res.ok) throw new Error("API " + res.status);
-  const dt = await res.json();
-  if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
-  const text = (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
-  const m = text.match(/\{[\s\S]*\}/); const o = m ? JSON.parse(m[0]) : {};
-  const clean = (v) => (typeof v === "string" ? v.trim() : "");
-  return { site: clean(o.site), facebook: clean(o.facebook), instagram: clean(o.instagram) };
 }
 // Recherche web des horaires d'ouverture habituels d'un magasin (fiche Google / site officiel).
 // Renvoie une chaîne au format français jour par jour, directement exploitable par parseHoraires
@@ -3056,21 +3093,41 @@ async function aiFindHoraires(query, persistUsage) {
   // parfaitement interprétable en grille, l'affichage retombe proprement sur le texte brut.
   return h && /\d\s*[h:]/.test(h) ? h : "";
 }
-// Présence en ligne + horaires en UN SEUL appel IA (au lieu de deux appels parallèles, chacun avec ses
-// propres recherches web) : divise par deux le coût de la recherche IA d'une fiche établissement.
-async function aiFindLinksHoraires(query, persistUsage, wantHoraires) {
-  const prompt = "Recherche la présence en ligne officielle de cet établissement ou enseigne : \"" + query + "\" — site web officiel, page Facebook officielle, compte Instagram officiel" +
-    (wantHoraires ? ", AINSI QUE les horaires d'ouverture habituels de CE magasin (fiche Google Business / site officiel), au format français jour par jour, séparés par des points-virgules (ex. \"Lun 10h-19h; Mar 10h-19h; …; Dim fermé\" ; coupure méridienne : \"Lun 9h30-12h30 et 14h-19h\")" : "") +
-    ". N'invente RIEN : laisse une chaîne vide si tu n'es pas certain. Réponds UNIQUEMENT par un objet JSON sans texte ni Markdown : {\"site\":\"\",\"facebook\":\"\",\"instagram\":\"\"" + (wantHoraires ? ",\"horaires\":\"\"" : "") + "}.";
+// Présence en ligne + horaires d'une fiche établissement.
+// Sources GRATUITES d'abord (OpenStreetMap pour le magasin, Wikidata pour la marque), puis un seul
+// appel IA pour ce qui manque encore — et aucun appel du tout si tout a été trouvé gratuitement.
+// `ctx` porte le contexte utile aux sources gratuites : { nom, enseigne, ville, cp, marque }.
+async function aiFindLinksHoraires(query, persistUsage, wantHoraires, ctx) {
+  const clean = (v) => (typeof v === "string" ? v.trim() : "");
+  const has = (v) => Boolean(clean(v));
+  const out = { site: "", facebook: "", instagram: "", horaires: "" };
+  try {
+    const g = await sourcesGratuitesLieu(ctx || { nom: query, enseigne: (ctx && ctx.enseigne) || "", ville: (ctx && ctx.ville) || "", marque: true });
+    if (g) { out.site = g.site; out.facebook = g.facebook; out.instagram = g.instagram; if (wantHoraires) out.horaires = g.horaires; }
+  } catch (e) {}
+  const manque = [];
+  if (!has(out.site)) manque.push("site");
+  if (!has(out.facebook)) manque.push("facebook");
+  if (!has(out.instagram)) manque.push("instagram");
+  if (wantHoraires && !has(out.horaires)) manque.push("horaires");
+  if (!manque.length) return out; // tout trouvé gratuitement : zéro appel payant
+  const veutHoraires = manque.includes("horaires");
+  const prompt = "Recherche, pour cet établissement ou enseigne : \"" + query + "\", UNIQUEMENT les informations suivantes : " + manque.join(", ") + "." +
+    (veutHoraires ? " Les horaires sont ceux d'ouverture habituels de CE magasin (fiche Google Business / site officiel), au format français jour par jour, séparés par des points-virgules (ex. \"Lun 10h-19h; Mar 10h-19h; …; Dim fermé\" ; coupure méridienne : \"Lun 9h30-12h30 et 14h-19h\")." : "") +
+    (has(out.site) ? " Le site officiel est déjà connu : " + out.site + " — sers-t'en comme point de départ, ne le recherche pas." : "") +
+    " N'invente RIEN : laisse une chaîne vide si tu n'es pas certain. Réponds UNIQUEMENT par un objet JSON sans texte ni Markdown : {" + manque.map((k) => "\"" + k + "\":\"\"").join(",") + "}.";
   const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 700, tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }], messages: [{ role: "user", content: prompt }] }) });
   if (!res.ok) throw new Error("API " + res.status);
   const dt = await res.json();
   if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
   const text = (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
   const m = text.match(/\{[\s\S]*\}/); let o = {}; try { o = m ? JSON.parse(m[0]) : {}; } catch (e) {}
-  const clean = (v) => (typeof v === "string" ? v.trim() : "");
+  if (!has(out.site)) out.site = clean(o.site);
+  if (!has(out.facebook)) out.facebook = clean(o.facebook);
+  if (!has(out.instagram)) out.instagram = clean(o.instagram);
   const h = clean(o.horaires);
-  return { site: clean(o.site), facebook: clean(o.facebook), instagram: clean(o.instagram), horaires: h && /\d\s*[h:]/.test(h) ? h : "" };
+  if (wantHoraires && !has(out.horaires) && h && /\d\s*[h:]/.test(h)) out.horaires = h;
+  return out;
 }
 // Encart photo / logo éditable : téléversement, URL, logo automatique (web) ou logo du groupe.
 function EntityPhoto({ value, onChange, initials: ini, bg, round, size = 64, enseigne, groupLogo, fallback, linkedinHref, persistUsage }) {
@@ -4043,24 +4100,19 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
     const q = [s.label, acc && acc.enseigne, s.adresse || (acc && acc.ville)].filter(Boolean).join(" ");
     const ville = (acc && acc.ville) || "";
     try {
-      // Étage 1 GRATUIT : OpenStreetMap (liens + horaires du point de vente) puis Wikidata pour les
-      // liens officiels de l'enseigne. L'IA payante ne prend le relais que sur ce qui manque encore.
-      const free = { site: "", facebook: "", instagram: "", horaires: "" };
-      try { const pl = await osmFindPlace(s.label || (acc && acc.enseigne), ville); if (pl) { free.site = pl.site; free.facebook = pl.facebook; free.instagram = pl.instagram; free.horaires = pl.horaires; } } catch (e) {}
-      if (!free.site && acc && acc.enseigne) { try { const w = await wikidataBrand(acc.enseigne); if (w) { free.site = free.site || w.site; free.facebook = free.facebook || w.facebook; free.instagram = free.instagram || w.instagram; } } catch (e) {} }
-      const needHoraires = !String(s.horaires || "").trim() && !free.horaires;
-      const needLinks = (!s.site && !free.site) || (!s.facebook && !free.facebook) || (!s.instagram && !free.instagram);
-      // Un seul appel IA pour liens + horaires (au lieu de deux) — et zéro appel si tout est déjà couvert.
-      const ai = (needLinks || needHoraires) ? await aiFindLinksHoraires(q, usage, needHoraires) : { site: "", facebook: "", instagram: "", horaires: "" };
-      const links = { site: free.site || ai.site, facebook: free.facebook || ai.facebook, instagram: free.instagram || ai.instagram };
-      const horaires = free.horaires || ai.horaires || "";
+      // aiFindLinksHoraires enchaîne lui-même les étages : sources GRATUITES (OpenStreetMap pour le
+      // point de vente, Wikidata pour la marque) puis, seulement si nécessaire, un appel IA ciblé
+      // sur ce qui manque. Zéro appel payant si tout a été trouvé gratuitement.
+      const needHoraires = !String(s.horaires || "").trim();
+      const links = await aiFindLinksHoraires(q, usage, needHoraires, { nom: s.label, enseigne: acc && acc.enseigne, ville, cp: s.cp || (acc && acc.cp), marque: true });
+      const horaires = links.horaires || "";
       const patch = {}; const got = [];
       if (links.site && !s.site) { patch.site = links.site; got.push("site web"); }
       if (links.facebook && !s.facebook) { patch.facebook = links.facebook; got.push("Facebook"); }
       if (links.instagram && !s.instagram) { patch.instagram = links.instagram; got.push("Instagram"); }
       if (horaires && !String(s.horaires || "").trim()) { patch.horaires = horaires; got.push("horaires"); }
-      if (got.length) { saveSite({ ...s, ...patch }); setAiMsg("Trouvé par l'IA : " + got.join(", ") + "."); }
-      else setAiMsg(s.site ? "Site web déjà renseigné." : "Aucune information fiable trouvée par l'IA.");
+      if (got.length) { saveSite({ ...s, ...patch }); setAiMsg("Trouvé : " + got.join(", ") + "."); }
+      else setAiMsg(s.site ? "Site web déjà renseigné." : "Aucune information fiable trouvée.");
     } catch (e) { setAiMsg("Recherche IA indisponible ici (fonctionne dans l'app Claude)."); }
     finally { setAiBusy(false); }
   };
@@ -4230,8 +4282,11 @@ function AccountDetail({ account, data, persist, go, onBack, onEdit, onAddContac
     const usage = (u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }));
     const q = [a.enseigne, a.ville].filter(Boolean).join(" ");
     try {
+      // Les deux fonctions interrogent d'abord les sources GRATUITES (Wikidata / OpenStreetMap pour
+      // les liens, registre des entreprises pour l'identité légale) et ne sollicitent l'IA que pour
+      // ce qui manque encore — souvent rien du tout sur un groupe.
       const [links, info] = await Promise.all([
-        aiFindLinks(q, usage).catch(() => ({})),
+        aiFindLinksHoraires(q, usage, false, { nom: a.enseigne, enseigne: a.enseigne, ville: a.ville, marque: true }).catch(() => ({})),
         aiAutofill({ kind: "enseigne", enseigne: a.enseigne, ville: a.ville, adresse: a.adressePostale }).then((r) => { if (r && r.usage) usage(r.usage); return r; }).catch(() => ({})),
       ]);
       const patch = {}; const got = [];
@@ -4239,8 +4294,8 @@ function AccountDetail({ account, data, persist, go, onBack, onEdit, onAddContac
       fill("site", links.site, "site web"); fill("facebook", links.facebook, "Facebook"); fill("instagram", links.instagram, "Instagram");
       fill("siren", info.siren, "SIREN"); fill("raisonSociale", info.raisonSociale, "raison sociale"); fill("formeJuridique", info.formeJuridique, "forme juridique");
       fill("ville", info.ville, "ville"); fill("adressePostale", info.adresse, "adresse");
-      if (got.length) { saveAccount(patch); setAiMsg("Fiche enrichie par l'IA : " + got.join(", ") + "."); }
-      else setAiMsg("Aucune nouvelle information fiable trouvée par l'IA.");
+      if (got.length) { saveAccount(patch); setAiMsg("Fiche enrichie : " + got.join(", ") + (info.confiance && info.confiance !== "haute" ? " (confiance " + info.confiance + " — à vérifier)" : "") + "."); }
+      else setAiMsg("Aucune nouvelle information fiable trouvée.");
     } catch (e) { setAiMsg("Recherche IA indisponible ici (fonctionne dans l'app Claude)."); }
     finally { setAiBusy(false); }
   };
@@ -6653,8 +6708,55 @@ Si la requête est une zone, donne entre 6 et 10 établissements ; si c'est un �
   return { stores: Array.isArray(arr) ? arr : [], usage: data.usage || null };
 }
 async function aiAutofill({ kind, enseigne, ville, adresse, typesEtab }) {
-  const sys = "Tu identifies des informations factuelles et vérifiables sur une entreprise française ou l'un de ses établissements, à partir des registres officiels (annuaire-entreprises.data.gouv.fr / RNE / INSEE, pappers.fr, societe.com, infogreffe.fr, data.inpi.fr) et de sources fiables. Tu n'inventes JAMAIS un numéro d'identification, une adresse ou une raison sociale : en cas de doute, tu laisses le champ vide (chaîne vide).";
-  const cible = [enseigne, adresse, ville].filter(Boolean).join(", ");
+  const has = (v) => Boolean(String(v || "").trim());
+  const onlyNumF = (v) => (typeof v === "string" ? v.replace(/\s/g, "") : "");
+  // ===== Étage GRATUIT, avant toute recherche IA =====
+  // Registre des entreprises pour l'identité légale, OpenStreetMap pour les coordonnées du point de
+  // vente, base adresse nationale pour l'adresse, site officiel pour l'e-mail et le téléphone.
+  const g = { siren: "", siret: "", raisonSociale: "", formeJuridique: "", ville: "", adresse: "", cp: "", telephone: "", email: "", horaires: "", site: "", sources: [] };
+  try {
+    const r = await lookupSirene([enseigne, ville].filter(Boolean).join(" "), ville);
+    if (r) {
+      g.siren = r.siren || ""; g.raisonSociale = r.raisonSociale || ""; g.formeJuridique = r.formeJuridique || "";
+      if (r.mono || r.etabMatch) { g.siret = r.siret || ""; g.adresse = r.adresse || ""; g.cp = r.cp || ""; g.ville = r.ville || ""; }
+      if (g.siren) g.sources.push("SIRENE (annuaire-entreprises)");
+    }
+  } catch (e) {}
+  if (kind === "établissement") {
+    try {
+      const lieu = await sourcesGratuitesLieu({ nom: enseigne, enseigne, ville, cp: g.cp, marque: true });
+      if (lieu) {
+        g.telephone = lieu.telephone; g.email = lieu.email; g.horaires = lieu.horaires; g.site = lieu.site;
+        if (!has(g.adresse) && has(lieu.adresse)) { g.adresse = lieu.adresse; g.cp = g.cp || lieu.cp; g.ville = g.ville || lieu.ville; }
+        (lieu.sources || []).forEach((s) => { if (!g.sources.includes(s)) g.sources.push(s); });
+      }
+    } catch (e) {}
+    // Site officiel du magasin : lecture gratuite de ses pages contact / mentions légales.
+    if (has(g.site) && (!has(g.email) || !has(g.telephone))) {
+      try {
+        const sc = await scrapeContact(g.site);
+        if (sc) {
+          if (!has(g.email) && sc.email) g.email = sc.email;
+          if (!has(g.telephone)) { const t = [sc.telephone, ...(sc.telephones || [])].filter(Boolean).find((x) => telCoherent(x, g.cp)); if (t) g.telephone = t; }
+          if (sc.email || g.telephone) if (!g.sources.includes("site officiel")) g.sources.push("site officiel");
+        }
+      } catch (e) {}
+    }
+  }
+  // Ce que l'IA doit encore chercher. Pour une enseigne, le registre couvre presque tout : dans la
+  // majorité des cas il ne reste rien et AUCUN appel payant n'est fait.
+  const manque = kind === "établissement"
+    ? ["siret", "adresse", "telephone", "email", "horaires", "site", "typeEtablissement", "note"].filter((k) => k === "typeEtablissement" || k === "note" ? true : !has(g[k]))
+    : ["siren", "raisonSociale", "formeJuridique", "ville", "adresse"].filter((k) => !has(g[k]));
+  // La recherche au registre se fait ici par NOM (aucun SIRET/SIREN en entrée) : elle peut tomber sur
+  // un homonyme — « JouéClub » remonte par exemple une association du même nom. On annonce donc au
+  // mieux une confiance MOYENNE, jamais « haute », pour que l'utilisateur vérifie avant de s'y fier.
+  const confFree = g.sources.length ? "moyenne" : "?";
+  const base = { siren: g.siren, siret: g.siret, raisonSociale: g.raisonSociale, formeJuridique: g.formeJuridique, ville: g.ville || ville || "", adresse: g.adresse, telephone: g.telephone, email: g.email, horaires: g.horaires, site: g.site, typeEtablissement: "", note: "", confiance: confFree, source: g.sources.join(" + "), usage: null };
+  if (!manque.length) return base; // tout couvert gratuitement
+  const sys = "Tu identifies des informations factuelles et vérifiables sur une entreprise française ou l'un de ses établissements, à partir des registres officiels (annuaire-entreprises.data.gouv.fr / RNE / INSEE, pappers.fr, societe.com, infogreffe.fr, data.inpi.fr) et de sources fiables. Des sources officielles gratuites ont DÉJÀ été consultées : leurs résultats te sont donnés comme faits établis — appuie-toi dessus, ne les recherche pas. Tu n'inventes JAMAIS un numéro d'identification, une adresse ou une raison sociale : en cas de doute, tu laisses le champ vide (chaîne vide).";
+  const cible = [enseigne, g.adresse || adresse, g.ville || ville].filter(Boolean).join(", ");
+  const acquis = [g.raisonSociale && "Raison sociale : " + g.raisonSociale, g.siren && "SIREN : " + g.siren, g.siret && "SIRET : " + g.siret, g.adresse && "Adresse : " + [g.adresse, g.cp, g.ville].filter(Boolean).join(" "), g.site && "Site officiel : " + g.site, g.telephone && "Téléphone : " + g.telephone].filter(Boolean).join(" ; ");
   let user, schema;
   if (kind === "établissement") {
     user = `Pour cet établissement précis : ${cible}.\nTrouve dans les sources officielles ou la fiche Google de l'établissement :\n- siret : SIRET (14 chiffres) de l'établissement situé EXACTEMENT à cette adresse et cette ville (ni le siège social, ni un autre établissement, et JAMAIS le SIRET d'un magasin d'une autre enseigne de la même zone). Si tu n'es pas certain qu'il corresponde à cette adresse, laisse vide.\n- adresse : adresse postale complète et exacte de l'établissement (numéro, voie, code postal, ville).\n- telephone : numéro de téléphone fixe (standard / accueil) de CE magasin à cette adresse précise, au format français (ex. « 05 63 12 34 56 »). Vérifie qu'il correspond bien à cet établissement et pas au siège ou à un autre point de vente ; en cas de doute, laisse vide.\n- email : adresse e-mail générique de contact de CE magasin (accueil, commande), publiée sur le site officiel ou la fiche Google de l'établissement. Pas l'e-mail d'une personne. En cas de doute, laisse vide.\n- horaires : horaires d'ouverture habituels de l'établissement, en une ligne courte et lisible (ex. « Lun-Sam 10h-19h, Dim fermé »), depuis la fiche Google ou le site officiel. En cas de doute, laisse vide.\n- site : URL du site internet officiel de l'établissement ou de son enseigne (ex. « https://www.cultura.com »), trouvée sur le web. Privilégie le site officiel de la marque ; pas d'annuaire ni de page Google. En cas de doute, laisse vide.\n- typeEtablissement : choisis la valeur la plus juste UNIQUEMENT parmi cette liste : ${(typesEtab || []).join(" | ")}. Si aucune ne convient avec certitude, laisse vide.\n- note : une phrase factuelle décrivant l'établissement (univers de produits, implantation centre-ville ou périphérie). Aucun superlatif commercial.\nSi l'établissement appartient à une enseigne ou un réseau, consulte AUSSI le site officiel de l'enseigne et sa page « trouver un magasin » (store locator), comme le ferait une recherche Google : la fiche magasin de l'enseigne (ex. la fiche du magasin sur joueclub.fr pour un JouéClub) donne souvent l'adresse exacte, le téléphone, les horaires et le courriel du point de vente.\nAttention aux homonymes : ne retiens que l'établissement de la ville indiquée.`;
@@ -6663,7 +6765,9 @@ async function aiAutofill({ kind, enseigne, ville, adresse, typesEtab }) {
     user = `Pour l'entreprise qui exploite l'enseigne : ${cible}.\nTrouve dans les sources officielles :\n- siren : SIREN (9 chiffres) de la personne morale, ou numéro RNA (W + 9 chiffres) si c'est une association. NE METS PAS de SIRET ici.\n- raisonSociale, formeJuridique.\n- ville : ville du siège social ou de rattachement.\n- adresse : adresse postale complète du siège ou de l'établissement principal.\nAttention aux homonymes : si une ville est fournie, ne retiens que l'entité qui lui correspond.`;
     schema = '{"siren":"","raisonSociale":"","formeJuridique":"","ville":"","adresse":"","confiance":"haute/moyenne/faible","source":""}';
   }
-  user += `\n\nRenvoie UNIQUEMENT un objet JSON valide, sans aucun texte ni balise autour, avec EXACTEMENT ces clés :\n${schema}\n"source" = nom de la source officielle utilisée. Tout champ non trouvé reste une chaîne vide.`;
+  user += (acquis ? `\n\nFAITS DÉJÀ ÉTABLIS par les sources officielles gratuites (fiables — sers-t'en pour identifier la bonne entité, ne les recherche pas) : ${acquis}.` : "")
+    + `\n\nNe recherche QUE : ${manque.join(", ")}.`
+    + `\n\nRenvoie UNIQUEMENT un objet JSON valide, sans aucun texte ni balise autour, avec EXACTEMENT ces clés :\n${schema}\n"source" = nom de la source officielle utilisée. Tout champ non trouvé reste une chaîne vide.`;
   const res = await fetch(CLAUDE_URL, {
     method: "POST", headers: await claudeHeaders(),
     body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1200, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }] }),
@@ -6673,8 +6777,19 @@ async function aiAutofill({ kind, enseigne, ville, adresse, typesEtab }) {
   const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
   const m = text.match(/\{[\s\S]*\}/); if (!m) throw new Error("réponse illisible");
   const o = JSON.parse(m[0]);
-  const onlyNum = (v) => (typeof v === "string" ? v.replace(/\s/g, "") : "");
-  return { siren: onlyNum(o.siren), siret: onlyNum(o.siret), raisonSociale: (o.raisonSociale || "").trim(), formeJuridique: (o.formeJuridique || "").trim(), ville: (o.ville || "").trim(), adresse: (o.adresse || "").trim(), telephone: (o.telephone || "").trim(), email: (o.email || "").trim(), horaires: (o.horaires || "").trim(), site: (o.site || "").trim(), typeEtablissement: (o.typeEtablissement || "").trim(), note: (o.note || "").trim(), confiance: o.confiance || "?", source: (o.source || "").trim(), usage: data.usage || null };
+  // Les valeurs obtenues gratuitement (registre officiel, OSM, site du magasin) priment toujours
+  // sur celles de l'IA : elles viennent de sources vérifiables.
+  const pick = (libre, ia) => has(libre) ? libre : String(ia || "").trim();
+  const src = [g.sources.join(" + "), (o.source || "").trim()].filter(Boolean).join(" + ");
+  return {
+    siren: pick(g.siren, onlyNumF(o.siren)), siret: pick(g.siret, onlyNumF(o.siret)),
+    raisonSociale: pick(g.raisonSociale, o.raisonSociale), formeJuridique: pick(g.formeJuridique, o.formeJuridique),
+    ville: pick(g.ville, o.ville), adresse: pick(g.adresse, o.adresse),
+    telephone: pick(g.telephone, o.telephone), email: pick(g.email, o.email),
+    horaires: pick(g.horaires, o.horaires), site: pick(g.site, o.site),
+    typeEtablissement: (o.typeEtablissement || "").trim(), note: (o.note || "").trim(),
+    confiance: o.confiance || confFree, source: src, usage: data.usage || null,
+  };
 }
 // Extraction robuste d'un objet JSON dans une réponse IA (tolère le Markdown et le texte autour),
 // par équilibrage des accolades — plus fiable qu'une regex gloutonne, pour un meilleur taux de réussite.
