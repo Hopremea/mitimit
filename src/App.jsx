@@ -8735,6 +8735,24 @@ function ProspectMailing({ data, persist, onClose }) {
   const toggleTone = (k) => setTones((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const tonStr = () => [...tones].map((k) => (MSG_TONES.find((t) => t.key === k) || {}).hint).filter(Boolean).join(" et ");
   const [sel, setSel] = useWaveState("sel", () => new Set());
+  // Document joint à TOUS les brouillons de la vague (catalogue, plaquette…). Gardé en mémoire de
+  // travail seulement : un PDF de plusieurs mégaoctets n'a rien à faire dans les données synchronisées
+  // (stockage local et Supabase), qui seraient alourdies à chaque sauvegarde. Il faut donc le
+  // resélectionner après un rechargement de la page, jamais entre deux ouvertures du volet.
+  const [piece, setPiece] = useWaveState("piece", null);
+  const [pieceErr, setPieceErr] = useState("");
+  const choisirPiece = async (file) => {
+    setPieceErr("");
+    if (!file) return;
+    // 3 Mo : au-delà, Vercel refuse la requête (le base64 gonfle le fichier d'un tiers) avant même
+    // que le serveur ne la voie. On le dit ici plutôt que de laisser remonter une erreur opaque.
+    if (file.size > 3 * 1024 * 1024) { setPieceErr("Fichier trop lourd (" + (file.size / 1048576).toFixed(1) + " Mo). Maximum 3 Mo."); return; }
+    if (!/pdf$/i.test(file.type || "") && !/\.pdf$/i.test(file.name || "")) { setPieceErr("Seuls les PDF sont acceptés."); return; }
+    try {
+      const dataUrl = await fileToBase64(file);
+      setPiece({ name: file.name, size: file.size, dataUrl });
+    } catch (e) { setPieceErr("Lecture du fichier impossible."); }
+  };
   const [cards, setCards] = useWaveCards();
   const [confirmReseau, setConfirmReseau] = useWaveState("confirmReseau", false);
   const jobs = useAiJobs();
@@ -8838,11 +8856,13 @@ function ProspectMailing({ data, persist, onClose }) {
     }
     updateCard(c.id, { sending: true, sendMsg: "" });
     try {
-      const res = await fetch("/api/gmail-draft", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ to, subject: c.objet || ("PEN'UP 3D — " + (c.prospect.nom || "")), body: c.corps }) });
+      const pj = piece ? [{ filename: piece.name, mimeType: "application/pdf", contentBase64: piece.dataUrl }] : [];
+      const res = await fetch("/api/gmail-draft", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ to, subject: c.objet || ("PEN'UP 3D — " + (c.prospect.nom || "")), body: c.corps, attachments: pj }) });
       const dt = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(dt.error || ("Erreur " + res.status));
-      persist((d) => ({ ...d, prospects: d.prospects.map((x) => x.id === c.prospect.id ? { ...x, statut: "brouillon_cree", brouillonDate: TODAY(), brouillonObjet: c.objet || "", notes: appendNote(x.notes, "Brouillon de prospection créé le " + TODAY() + (c.objet ? " — " + c.objet : "")) } : x) }));
-      updateCard(c.id, { sending: false, done: true, sendMsg: "✅ Brouillon créé dans Gmail" });
+      const mentionPj = piece ? " — pièce jointe : " + piece.name : "";
+      persist((d) => ({ ...d, prospects: d.prospects.map((x) => x.id === c.prospect.id ? { ...x, statut: "brouillon_cree", brouillonDate: TODAY(), brouillonObjet: c.objet || "", notes: appendNote(x.notes, "Brouillon de prospection créé le " + TODAY() + (c.objet ? " — " + c.objet : "") + mentionPj) } : x) }));
+      updateCard(c.id, { sending: false, done: true, sendMsg: "✅ Brouillon créé dans Gmail" + (piece ? " (avec " + piece.name + ")" : "") });
       return true;
     } catch (e) { updateCard(c.id, { sending: false, sendMsg: "❌ " + ((e && e.message) || e) }); return false; }
   };
@@ -8912,6 +8932,16 @@ function ProspectMailing({ data, persist, onClose }) {
     </div>
     <div className="fld"><label>Consigne de vague (action visée, pour les mails de référencement)</label><input value={consigne} onChange={(e) => setConsigne(e.target.value)} placeholder="Ex : proposer un échange en visio, envoyer le catalogue, un coffret d'essai…" /><span style={{ fontSize: 11, color: "var(--muted)" }}>Ignorée pour les prospects en objectif « identifier le contact » (chaîne, GSS…), où l'action est imposée.</span></div>
     <div className="fld"><label>Ton (cumulable)</label><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{MSG_TONES.map((t) => { const on = tones.has(t.key); return (<button key={t.key} type="button" className={cx("btn", "btn-s", on ? "btn-p" : "btn-g")} onClick={() => toggleTone(t.key)} title={t.hint}>{t.label}</button>); })}</div><span style={{ fontSize: 11, color: "var(--muted)" }}>Cochez un ou plusieurs tons ; ils se combinent. Aucun ton coché : registre neutre. Le ton n'autorise jamais d'affirmation fausse.</span></div>
+    <div className="fld"><label>Document joint (PDF, facultatif)</label>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        {piece
+          ? <><span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, border: "1px solid var(--line)", borderRadius: 9, padding: "6px 10px", background: "#fff" }}><Paperclip size={14} style={{ color: "var(--red)" }} />{piece.name}<span style={{ fontWeight: 500, color: "var(--muted)" }}>· {(piece.size / 1024).toFixed(0)} Ko</span></span>
+            <button type="button" className="btn btn-ghost btn-s" onClick={() => { setPiece(null); setPieceErr(""); }}><X size={13} /> Retirer</button></>
+          : <label className="btn btn-g btn-s" style={{ cursor: "pointer" }}><Paperclip size={14} /> Choisir un PDF<input type="file" accept="application/pdf,.pdf" style={{ display: "none" }} onChange={(e) => { choisirPiece(e.target.files && e.target.files[0]); e.target.value = ""; }} /></label>}
+      </div>
+      {pieceErr && <span style={{ fontSize: 11.5, color: "var(--red)", fontWeight: 700 }}>{pieceErr}</span>}
+      <span style={{ fontSize: 11, color: "var(--muted)" }}>Joint à <strong>tous</strong> les brouillons de la vague (catalogue, plaquette…). Maximum 3 Mo. Le document reste sélectionné si vous fermez le volet, mais pas après un rechargement de la page.</span>
+    </div>
     <div style={{ border: "1px solid var(--line)", borderRadius: 12, maxHeight: 240, overflowY: "auto", margin: "6px 0 10px" }}>
       {filtered.length === 0 ? <div className="empty" style={{ padding: 16 }}>Aucun prospect ne correspond aux filtres.</div> : filtered.map(({ p, a, deja }) => { const on = sel.has(p.id); const mailTo = prospectMailAddress(p); const noMail = !mailTo; return (
         <label key={p.id} className="hrow" style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 11px", borderBottom: "1px solid var(--line)", cursor: "pointer", opacity: (a.risque === "bloquant" || deja) ? 0.6 : 1 }}>
