@@ -1489,6 +1489,22 @@ function computeEventDuplicates(events, opts = {}) {
   });
   return groups.sort((a, b) => b.length - a.length);
 }
+// Pop-up d'information au survol : rendu en portail (document.body) et positionné en fixe, borné à
+// l'écran, donc jamais tronqué par la carte qui le contient ni masqué par un élément voisin. Bascule
+// au-dessus de la cible quand la place manque en dessous.
+function useHoverPop() {
+  const [pop, setPop] = useState(null);
+  const open = (e, content, width = 320) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const W = Math.min(width, window.innerWidth - 16);
+    const x = Math.max(8, Math.min(r.left + r.width / 2 - W / 2, window.innerWidth - W - 8));
+    const below = r.bottom + 260 <= window.innerHeight;
+    setPop({ x, w: W, content, top: below ? r.bottom + 8 : null, bottom: below ? null : window.innerHeight - r.top + 8 });
+  };
+  const close = () => setPop(null);
+  const node = pop ? createPortal(<div className="hoverpop" style={{ left: pop.x, width: pop.w, top: pop.top != null ? pop.top : "auto", bottom: pop.bottom != null ? pop.bottom : "auto" }}>{pop.content}</div>, document.body) : null;
+  return { open, close, node };
+}
 // Petit triangle d'alerte jaune ; au survol, un paragraphe explicatif sur fond blanc (pop-up).
 // Le pop-up est rendu en portail (document.body) et positionné en fixe, borné à l'écran : il passe
 // AU-DESSUS des cartes voisines (chaque tuile crée son propre contexte d'empilement) et n'est jamais
@@ -2321,6 +2337,7 @@ ${ACCENT_CSS}
 .tile{cursor:pointer;background:rgba(255,255,255,.52);-webkit-backdrop-filter:blur(16px) saturate(170%);backdrop-filter:blur(16px) saturate(170%);box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 4px 16px rgba(20,32,58,.06);transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease;}
 .tile:hover{transform:translateY(-3px);box-shadow:0 12px 26px rgba(20,32,58,.14);border-color:#cfdcf3;background:var(--bg);}
 .warntip{position:relative;display:inline-flex;align-items:center;cursor:help;flex-shrink:0;}
+.hoverpop{position:fixed;z-index:9999;background:#fff;color:#3a4358;border:1px solid #e2e7f0;border-radius:12px;padding:10px 12px;font-size:12px;line-height:1.5;text-align:left;box-shadow:0 12px 32px rgba(20,32,58,.26);pointer-events:none;font-family:'Plus Jakarta Sans',system-ui,sans-serif;}
 .warntip-pop{display:block;position:fixed;z-index:9999;background:#fff;color:#3a4358;border:1px solid #f0c36d;border-radius:10px;padding:9px 11px;font-size:11.5px;line-height:1.5;font-weight:500;text-align:left;box-shadow:0 10px 28px rgba(20,32,58,.28);white-space:normal;pointer-events:none;font-family:'Plus Jakarta Sans',system-ui,sans-serif;}
 .tile:active{transform:translateY(-1px);box-shadow:0 6px 14px rgba(20,32,58,.12);}
 .pu-root.dark .tile:hover{box-shadow:0 12px 26px rgba(0,0,0,.45);border-color:#33415a;}
@@ -3279,8 +3296,27 @@ function ActivityChart({ deals }) {
 // centrées dégressives, nombre par niveau) et une vue « camembert » (parts + nombre par niveau).
 function FunnelTile({ accounts, go }) {
   const [mode, setMode] = useState("funnel");
-  const rows = STAGES.map((s) => ({ ...s, count: (accounts || []).filter((a) => (a.stage || "prospect") === s.id).length }));
+  const rows = STAGES.map((s) => ({ ...s, items: (accounts || []).filter((a) => (a.stage || "prospect") === s.id) })).map((r) => ({ ...r, count: r.items.length }));
   const total = rows.reduce((s, r) => s + r.count, 0);
+  // Survol d'une étape : liste nominative des établissements concernés (au-delà de 14, le reste est
+  // résumé — la tuile n'est pas un listing, elle renvoie vers l'onglet Groupes & établissements).
+  const pop = useHoverPop();
+  const MAX_POP = 14;
+  const popContent = (r) => (<>
+    <div style={{ fontWeight: 800, color: "var(--ink)", display: "flex", alignItems: "center", gap: 7, marginBottom: r.count ? 7 : 0 }}>
+      <i style={{ background: r.color, width: 10, height: 10, borderRadius: 3, flexShrink: 0, display: "inline-block" }} />{r.label}
+      <span style={{ marginLeft: "auto", color: "#6b7589", fontWeight: 700 }}>{r.count} établissement{r.count > 1 ? "s" : ""}</span>
+    </div>
+    {r.count === 0 ? <div style={{ color: "#6b7589" }}>Aucun établissement à cette étape.</div> : (<>
+      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        {r.items.slice(0, MAX_POP).map((a) => (<div key={a.id} style={{ display: "flex", gap: 6, alignItems: "baseline" }}>
+          <span style={{ fontWeight: 700, color: "var(--ink)" }}>{a.enseigne || "Sans nom"}</span>
+          {a.ville && <span style={{ color: "#8b94a7", fontSize: 11 }}>{a.ville}</span>}
+        </div>))}
+      </div>
+      {r.count > MAX_POP && <div style={{ color: "#6b7589", marginTop: 5, fontStyle: "italic" }}>+ {r.count - MAX_POP} autre{r.count - MAX_POP > 1 ? "s" : ""}…</div>}
+    </>)}
+  </>);
   const maxCount = Math.max(1, ...rows.map((r) => r.count));
   const pct = (n) => total ? Math.round((n / total) * 100) : 0;
   const pieData = rows.filter((r) => r.count > 0);
@@ -3298,7 +3334,7 @@ function FunnelTile({ accounts, go }) {
           <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ width: 130, flexShrink: 0, textAlign: "right", fontSize: 12.5, fontWeight: 700, color: "var(--ink)" }}>{r.label}</div>
             <div style={{ flex: 1, display: "flex", justifyContent: "center" }}>
-              <div className="funbar" title={r.count + " établissement(s) · " + pct(r.count) + "%"} style={{ width: w + "%", minWidth: 60, height: 42, borderRadius: 9, background: r.count ? r.color : "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, color: r.count ? onColor(r.color) : "var(--muted)", boxShadow: r.count ? "0 2px 8px " + r.color + "55" : "none", transition: "width .55s cubic-bezier(.22,1,.36,1), transform .16s cubic-bezier(.2,.8,.2,1), filter .16s ease" }}>
+              <div className="funbar" onMouseEnter={(e) => pop.open(e, popContent(r), 340)} onMouseLeave={pop.close} onClick={() => go("accounts")} style={{ cursor: "pointer", width: w + "%", minWidth: 60, height: 42, borderRadius: 9, background: r.count ? r.color : "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, color: r.count ? onColor(r.color) : "var(--muted)", boxShadow: r.count ? "0 2px 8px " + r.color + "55" : "none", transition: "width .55s cubic-bezier(.22,1,.36,1), transform .16s cubic-bezier(.2,.8,.2,1), filter .16s ease" }}>
                 <span className="pu-display tnum" style={{ fontSize: 18, fontWeight: 800 }}>{r.count}</span>
                 <span style={{ fontSize: 11, opacity: .85 }}>{pct(r.count)}%</span>
               </div>
@@ -3319,7 +3355,7 @@ function FunnelTile({ accounts, go }) {
         </div>
         <div style={{ flex: "1 1 200px", display: "flex", flexDirection: "column", gap: 7 }}>
           {rows.map((r) => (
-            <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 12.5 }}>
+            <div key={r.id} className="hrow" onMouseEnter={(e) => pop.open(e, popContent(r), 340)} onMouseLeave={pop.close} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 12.5, padding: "2px 4px", borderRadius: 7, cursor: "default" }}>
               <i style={{ background: r.color, width: 11, height: 11, borderRadius: 3, flexShrink: 0 }} />
               <span style={{ flex: 1, fontWeight: 600 }}>{r.label}</span>
               <span className="pu-display tnum" style={{ fontWeight: 800 }}>{r.count}</span>
@@ -3333,6 +3369,7 @@ function FunnelTile({ accounts, go }) {
       <span style={{ color: "var(--muted)" }}>{total} établissement(s), de prospect à client fidèle.</span>
       <button className="lnk" style={{ fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }} onClick={() => go("accounts")}>Voir les établissements <ChevronRight size={14} /></button>
     </div>
+    {pop.node}
   </div>);
 }
 // ============== COCKPIT COMMERCIAL GAMIFIÉ ==============
