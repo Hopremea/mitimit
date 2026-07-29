@@ -7542,6 +7542,7 @@ async function enrichProspectPreparer(p, instruction) {
   const user = `Établissement : ${cible}.
 ${faits ? "FAITS DÉJÀ ÉTABLIS par des sources officielles gratuites (registre des entreprises, OpenStreetMap, base adresse nationale, site officiel du magasin). Ils sont fiables : appuie-toi dessus pour identifier le bon établissement et cibler tes recherches, ne les redemande pas.\n" + faits + "\n" : ""}${saisis ? "Autres données de la fiche : " + saisis + ".\n" : ""}
 Recherche UNIQUEMENT les informations suivantes, vérifiables (attention aux homonymes : ne retiens que l'établissement correspondant aux faits ci-dessus) :
+RECOUPEMENT OBLIGATOIRE entre l'identifiant, le nom et la ville, dans les deux sens : (a) un SIREN ou un SIRET n'est retenu que si le registre renvoie une société dont la raison sociale correspond au nom ou à l'enseigne de la fiche ET un établissement situé dans sa ville ; (b) inversement, si un identifiant déjà connu de la fiche renvoie une société d'une autre ville ou d'une autre enseigne, dis-le dans "notes" au lieu de bâtir le reste dessus ; (c) ne recopie jamais l'identifiant d'un magasin voisin ou d'une autre enseigne de la même zone commerciale. Au moindre écart, laisse le champ vide.
 ${misses.map((m) => "- " + m.key + " : " + m.desc).join("\n")}
 ${has(out.raisonSociale) ? "Utilise la raison sociale exacte « " + out.raisonSociale + " »" + (has(out.siren) ? " et le SIREN " + out.siren : "") + " dans tes requêtes : c'est le moyen le plus sûr de tomber sur la bonne société.\n" : ""}${has(out.site) || has(p.site) ? "Le site officiel du magasin est " + (out.site || p.site) + " : commence par y chercher (page contact, mentions légales, « qui sommes-nous »).\n" : ""}Si l'établissement appartient à une enseigne ou un réseau (JouéClub, King Jouet, Cultura…), consulte en priorité la fiche magasin du site officiel de l'enseigne (store locator) : elle donne souvent l'adresse exacte, le téléphone et le courriel du point de vente.
 Renvoie UNIQUEMENT un objet JSON valide (aucun texte ni balise autour) avec EXACTEMENT ces clés :
@@ -8065,8 +8066,20 @@ function Prospection({ data, persist, go }) {
     // (la transitivité de l'union-find pourrait sinon chaîner des enseignes incompatibles).
     const brandOf = (p) => enseigneNorm(p.enseigne || "");
     const brandCompat = (x, y) => { const bx = brandOf(x), by = brandOf(y); if (!bx || !by || bx === by) return true; const ax = norm(x.adresse), ay = norm(y.adresse); return !!(ax && ax.length >= 6 && ax === ay); };
+    // Recoupement identifiant ↔ nom / ville : un SIRET ou un SIREN identique ne suffit PAS si les deux
+    // fiches désignent visiblement deux magasins différents (villes différentes ET noms différents).
+    // C'est le cas typique d'un identifiant recopié à tort par la recherche : fusionner supprimerait un
+    // magasin réel. On refuse alors le rapprochement — le triangle d'alerte signale déjà l'incohérence.
+    const placeCompat = (x, y) => {
+      const lx = localityOf(x), ly = localityOf(y);
+      if (!lx.ville || !ly.ville || lx.ville === ly.ville) return true; // ville inconnue ou identique : rien ne contredit
+      const nx = nameCore(x), ny = nameCore(y);
+      if (nx && ny && nx === ny) return true; // même nom exact dans deux villes : saisie à rapprocher malgré tout
+      const ax = norm(x.adresse), ay = norm(y.adresse);
+      return !!(ax && ax.length >= 6 && ax === ay); // même adresse exacte : un des deux libellés de ville est erroné
+    };
     const byKey = {};
-    active.forEach((p) => { sigOf(p).forEach((k) => { const o = byKey[k]; if (o != null) { if (brandCompat(byId[o], p)) union(o, p.id); } else byKey[k] = p.id; }); });
+    active.forEach((p) => { sigOf(p).forEach((k) => { const o = byKey[k]; if (o != null) { if (brandCompat(byId[o], p) && placeCompat(byId[o], p)) union(o, p.id); } else byKey[k] = p.id; }); });
     const clusters = {};
     active.forEach((p) => { const r = find(p.id); (clusters[r] = clusters[r] || []).push(p); });
     const splitByBrand = (g) => { const brands = new Set(g.map(brandOf).filter(Boolean)); if (brands.size <= 1) return [g]; const sub = {}; g.forEach((p) => { const b = brandOf(p) || "·sans"; (sub[b] = sub[b] || []).push(p); }); return Object.values(sub); };
@@ -8084,10 +8097,23 @@ function Prospection({ data, persist, go }) {
     const ctFields = (c) => c ? { contactEmail: c.email || "", contactTel: c.mobile || c.fixe || "", contactNom: c.nom || "" } : {};
     const estabs = [];
     (data.accounts || []).forEach((a) => { if (a.archived || isGroupe(a)) return; estabs.push({ kind: "account", id: a.id, label: a.enseigne || "Établissement", acc: a, keys: identityKeys({ nom: a.enseigne, enseigne: a.enseigne, adresse: a.adressePostale || a.adresseLivraison, ville: a.ville, siren: a.siren, ...ctFields(pickCt(ctByAcc[a.id])) }) }); });
-    (data.sites || []).forEach((s) => { if (s.archived || (s.type !== "pdv" && s.type !== "decision") || archivedAcc.has(s.accountId)) return; const acc = accById[s.accountId]; estabs.push({ kind: "site", id: s.id, accountId: s.accountId, acc, label: s.label || (acc && acc.enseigne) || "Établissement", keys: identityKeys({ nom: s.label, enseigne: acc ? acc.enseigne : "", adresse: s.adresse, ville: s.ville, cp: s.cp, siret: s.siret, siren: acc ? acc.siren : "", ...ctFields(pickCt(ctBySite[s.id]) || pickCt(ctByAcc[s.accountId])) }) }); });
+    (data.sites || []).forEach((s) => { if (s.archived || (s.type !== "pdv" && s.type !== "decision") || archivedAcc.has(s.accountId)) return; const acc = accById[s.accountId]; estabs.push({ kind: "site", id: s.id, accountId: s.accountId, acc, site: s, label: s.label || (acc && acc.enseigne) || "Établissement", keys: identityKeys({ nom: s.label, enseigne: acc ? acc.enseigne : "", adresse: s.adresse, ville: s.ville, cp: s.cp, siret: s.siret, siren: acc ? acc.siren : "", ...ctFields(pickCt(ctBySite[s.id]) || pickCt(ctByAcc[s.accountId])) }) }); });
     const keyMap = {}; estabs.forEach((e) => { e.keys.forEach((k) => { if (keyMap[k] == null) keyMap[k] = e; }); });
+    // Recoupement identifiant ↔ nom / ville, comme entre prospects : un SIRET commun ne rapproche pas un
+    // prospect d'un établissement situé dans une autre ville sous un autre nom.
+    const villeOf = (o) => normStr(o.ville || parseLocality(o.adresse || "").ville || "");
+    const nomOf = (o) => normStr(o.nom || o.label || o.enseigne || "");
+    const crossCompat = (pr, e) => {
+      const src = e.kind === "site" ? { ville: e.site && e.site.ville, adresse: e.site && e.site.adresse, nom: e.label } : { ville: e.acc && e.acc.ville, adresse: e.acc && e.acc.adressePostale, nom: e.label };
+      const vp = villeOf(pr), ve = villeOf(src);
+      if (!vp || !ve || vp === ve) return true;
+      const np = nomOf(pr), ne = nomOf(src);
+      if (np && ne && np === ne) return true;
+      const ap = normStr(pr.adresse || ""), ae = normStr(src.adresse || "");
+      return !!(ap && ap.length >= 6 && ap === ae);
+    };
     const out = [];
-    prospects.filter((p) => !p.accountId).forEach((p) => { const pk = identityKeys({ nom: p.nom, enseigne: p.enseigne, adresse: p.adresse, ville: p.ville, cp: p.cp, siret: p.siret, siren: p.siren, email: p.email, contactEmail: p.contactEmail, telephone: p.telephone, contactTel: p.contactTel, contactNom: p.contactNom }); for (const k of pk) { if (keyMap[k]) { out.push({ prospect: p, target: keyMap[k] }); break; } } });
+    prospects.filter((p) => !p.accountId).forEach((p) => { const pk = identityKeys({ nom: p.nom, enseigne: p.enseigne, adresse: p.adresse, ville: p.ville, cp: p.cp, siret: p.siret, siren: p.siren, email: p.email, contactEmail: p.contactEmail, telephone: p.telephone, contactTel: p.contactTel, contactNom: p.contactNom }); for (const k of pk) { const e = keyMap[k]; if (e && crossCompat(p, e)) { out.push({ prospect: p, target: e }); break; } } });
     return out;
   };
   const openMergeDoublons = () => {
@@ -8098,7 +8124,7 @@ function Prospection({ data, persist, go }) {
   };
   // Fusionne uniquement les groupes sélectionnés : on garde la fiche la plus complète, on complète ses
   // champs manquants depuis les autres, on retient le statut le plus avancé et on cumule les notes.
-  const applyMergeClusters = (selected) => {
+  const applyMergeClusters = (selected, verified) => {
     const norm = (s) => normStr(s || "");
     const STATUT_ORDER = ["a_qualifier", "a_contacter", "contacte", "rdv", "converti"];
     const removeIds = new Set(); const mergedById = {}; let groups = 0, extra = 0;
@@ -8120,6 +8146,32 @@ function Prospection({ data, persist, go }) {
       // Nettoyage : si le champ « site » de la fiche fusionnée contient en réalité un nom, on le bascule
       // dans « nom » (s'il manque) puis on vide le champ site — un vrai site web (URL) est conservé.
       if (base.site && !isUrlLike(base.site)) { if (!String(base.nom || "").trim()) base.nom = base.site; base.site = ""; }
+      // Identité re-vérifiée au registre officiel juste avant la fusion, à partir du nom et du
+      // SIREN/SIRET de la fiche conservée : elle FAIT AUTORITÉ sur les identifiants, qui ont pu être
+      // hérités à tort d'une fiche absorbée. Le reste des informations a déjà été transféré ci-dessus.
+      const v = verified && verified[base.id];
+      if (v) {
+        const villeFiche = norm(base.ville || parseLocality(base.adresse || "").ville || "");
+        const villeReg = norm(v.ville || "");
+        const contredit = !!(villeFiche && villeReg && villeFiche !== villeReg);
+        if (v.siren) base.siren = v.siren;
+        if (v.raisonSociale) base.raisonSociale = v.raisonSociale;
+        if (v.formeJuridique) base.formeJuridique = v.formeJuridique;
+        // Le SIRET (établissement) n'est repris que lorsque le registre l'a identifié sans ambiguïté
+        // (société mono-établissement, ou établissement correspondant à la ville) et sans contradiction.
+        if (v.siret && !contredit) {
+          base.siret = v.siret;
+          if (v.adresse && !String(base.adresse || "").trim()) base.adresse = v.adresse;
+          if (v.cp && !String(base.cp || "").trim()) base.cp = v.cp;
+          if (v.ville && !String(base.ville || "").trim()) base.ville = v.ville;
+        } else if (!v.siret && base.siret && base.siren && !String(base.siret).startsWith(String(base.siren))) {
+          // Un SIRET qui ne commence pas par le SIREN vérifié ne peut pas appartenir à cette société.
+          base.notes = (base.notes ? base.notes + "\n— " : "") + "SIRET " + base.siret + " écarté à la fusion : incompatible avec le SIREN " + base.siren + " confirmé au registre.";
+          base.siret = "";
+        }
+        if (!v.siret && !base.contactNom && v.dirigeantNom) { base.contactNom = v.dirigeantNom; base.contactPrenom = v.dirigeantPrenom || ""; base.contactFonction = v.dirigeantFonction || ""; }
+        base.notes = (base.notes ? base.notes + "\n— " : "") + "Identité vérifiée au registre (annuaire-entreprises) le " + TODAY() + (contredit ? " — la ville du registre (" + (v.ville || "?") + ") diffère de la fiche : identifiants d'établissement laissés en l'état, à contrôler." : "") + ".";
+      }
       mergedById[base.id] = base; groups++;
     });
     if (removeIds.size) persist((d) => ({ ...d, prospects: d.prospects.filter((p) => !removeIds.has(p.id)).map((p) => mergedById[p.id] || p) }));
@@ -8152,14 +8204,27 @@ function Prospection({ data, persist, go }) {
     });
     return n;
   };
-  const confirmMerge = (selectedClusters, selectedCross) => {
-    const r = applyMergeClusters(selectedClusters || []);
-    const nX = applyCrossMerges(selectedCross || []);
+  // Fusion : on relance D'ABORD une recherche d'identité au registre officiel (gratuite) à partir du nom
+  // et du SIREN/SIRET de la fiche conservée, PUIS on transfère les autres informations. Sans cela, un
+  // identifiant erroné hérité d'une fiche absorbée se serait installé dans la fiche survivante.
+  const confirmMerge = async (selectedClusters, selectedCross) => {
+    const clusters = selectedClusters || [];
     setDupOpen(null);
+    if (clusters.length) setDupMsg({ ok: true, t: "Vérification de l'identité au registre officiel (annuaire-entreprises)…" });
+    const verified = {}; let nVerif = 0;
+    for (const g of clusters) {
+      const keep = g && g[0]; if (!keep) continue;
+      const q = (keep.siret || keep.siren || [keep.raisonSociale || keep.nom || keep.enseigne, keep.ville].filter(Boolean).join(" ")).trim();
+      if (!q) continue;
+      try { const r = await lookupSirene(q, keep.ville || keep.cp); if (r) { verified[keep.id] = r; nVerif++; } } catch (e) { /* registre indisponible : la fusion se fait sans re-vérification */ }
+    }
+    const r = applyMergeClusters(clusters, verified);
+    const nX = applyCrossMerges(selectedCross || []);
     const parts = [];
     if (r.extra) parts.push(r.extra + " doublon(s) prospection fusionné(s)");
+    if (nVerif) parts.push(nVerif + " identité(s) re-vérifiée(s) au registre");
     if (nX) parts.push(nX + " prospect(s) rattaché(s) à un établissement existant et supprimé(s)");
-    setDupMsg({ ok: !!parts.length, t: parts.length ? parts.join(" · ") + "." : "Aucune fusion appliquée." }); setTimeout(() => setDupMsg(null), 6000);
+    setDupMsg({ ok: !!parts.length, t: parts.length ? parts.join(" · ") + "." : "Aucune fusion appliquée." }); setTimeout(() => setDupMsg(null), 8000);
   };
   // Conversion manuelle : logique partagée avec la conversion automatique après envoi Gmail confirmé.
   const convert = (p) => { persist((d) => convertProspectData(d, p).data); setEdit(null); };
@@ -8230,7 +8295,7 @@ function Prospection({ data, persist, go }) {
     if (!q2) { setSirMsg({ ok: false, t: "Renseignez un SIRET / SIREN, ou un nom + ville." }); return; }
     setSirBusy(true); setSirMsg(null);
     try {
-      const r = await lookupSirene(q2);
+      const r = await lookupSirene(q2, edit.ville || edit.cp || "");
       if (!r) { setSirMsg({ ok: false, t: "Aucune entreprise trouvée dans le registre officiel." }); return; }
       const patch = {}; const filled = [];
       const fill = (k, v, label) => { if (v && !String(edit[k] || "").trim()) { patch[k] = v; filled.push(label); } };
