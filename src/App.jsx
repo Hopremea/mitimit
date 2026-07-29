@@ -6831,7 +6831,12 @@ const REGIONS_DEPTS = {
   "Guadeloupe": ["971"], "Martinique": ["972"], "Guyane": ["973"], "La Réunion": ["974"], "Mayotte": ["976"],
 };
 const DEPT_REGION = {}; Object.entries(REGIONS_DEPTS).forEach(([r, ds]) => ds.forEach((d) => { DEPT_REGION[d] = r; }));
-async function aiEnrichProspect(p, persistUsage, instruction) {
+// Phase 1 : tout ce qui est GRATUIT (registres, OSM, BAN, site officiel), puis préparation de la
+// requête IA pour les seuls champs encore manquants. Renvoie { out, body } — body vaut null quand
+// les sources gratuites ont tout couvert (aucun appel payant à faire).
+// Ce découpage permet d'envoyer la phase IA soit immédiatement (fiche unique), soit en LOT via
+// l'API Batch d'Anthropic (enrichissement de masse, 50 % moins cher sur les tokens).
+async function enrichProspectPreparer(p, instruction) {
   // Enrichissement ÉCONOME en trois temps :
   // 1) SIRENE / annuaire-entreprises (GRATUIT) pour toute l'identité légale (SIREN, SIRET, raison
   //    sociale, forme juridique, dirigeant, adresse si société mono-établissement) ;
@@ -6935,7 +6940,7 @@ async function aiEnrichProspect(p, persistUsage, instruction) {
   need(!has(p.contactNom) && !has(out.contactNom), "contact", "dirigeant ou responsable identifié (prénom, nom, fonction, e-mail, téléphone, source de l'info)");
   need(!has(p.notes) && !has(out.notes), "notes", "une phrase factuelle (univers produits, implantation)");
   const consigne = (instruction || "").trim();
-  if (!misses.length && !consigne) return out; // tout est couvert par les sources gratuites : zéro appel IA
+  if (!misses.length && !consigne) return { out, body: null }; // tout est couvert par les sources gratuites : zéro appel payant
   const schemaObj = {};
   misses.forEach((m) => { if (m.key === "contact") schemaObj.contact = { prenom: "", nom: "", fonction: "", email: "", telephone: "", source: "" }; else schemaObj[m.key] = ""; });
   if (consigne) schemaObj.notes = schemaObj.notes || "";
@@ -6968,31 +6973,57 @@ Renvoie UNIQUEMENT un objet JSON valide (aucun texte ni balise autour) avec EXAC
 ${JSON.stringify(schemaObj)}
 "source" = registre / source principale utilisée. Tout champ non trouvé reste une chaîne vide.${consigne ? "\n\nPRIORITÉ DEMANDÉE PAR L'UTILISATEUR (concentre ta recherche là-dessus, sans rien inventer, et résume les trouvailles dans \"notes\") :\n" + consigne : ""}`;
   const body = { model: "claude-haiku-4-5", max_tokens: 1000, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }] };
+  return { out, body };
+}
+// Phase 2 : fusion de la réponse IA dans le résultat des sources gratuites. Les valeurs déjà
+// obtenues gratuitement priment toujours (elles viennent de registres officiels).
+function enrichProspectAppliquer(p, out, text) {
+  const has = (v) => Boolean(String(v || "").trim());
   const onlyNum = (v) => (typeof v === "string" ? v.replace(/[^0-9A-Za-z]/g, "") : "");
+  const o = parseJsonObject(text); const c = o.contact || {};
+  const take = (k, v) => { if (has(v) && !has(out[k])) out[k] = v; };
+  take("nom", (o.nom || "").trim());
+  take("site", (o.site || "").trim()); take("facebook", (o.facebook || "").trim()); take("instagram", (o.instagram || "").trim());
+  take("siren", onlyNum(o.siren)); take("siret", onlyNum(o.siret)); take("raisonSociale", (o.raisonSociale || "").trim()); take("formeJuridique", (o.formeJuridique || "").trim());
+  take("adresse", (o.adresse || "").trim()); take("cp", onlyNum(o.cp)); take("ville", (o.ville || "").trim());
+  take("telephone", (o.telephone || "").trim()); take("email", (o.email || "").trim());
+  take("contactPrenom", (c.prenom || "").trim()); take("contactNom", (c.nom || "").trim()); take("contactFonction", (c.fonction || "").trim()); take("contactEmail", (c.email || "").trim()); take("contactTel", (c.telephone || "").trim()); take("contactSource", (c.source || "").trim());
+  take("notes", (o.notes || "").trim());
+  if (o.confiance) out.confiance = out.confiance === "haute" ? "haute" : o.confiance;
+  if (o.source) out.source = out.source ? out.source + " + " + String(o.source).trim() : String(o.source).trim();
+  // Le code postal a pu arriver via l'IA : re-déduire département / région localement si besoin.
+  const dep2 = cpToDepartement(p.cp || out.cp);
+  if (dep2 && !has(out.departement) && !has(p.departement)) { out.departement = dep2; if (!has(p.region)) out.region = DEPT_REGION[dep2] || ""; }
+  return out;
+}
+// Extrait le texte d'une réponse Claude (blocs « text » uniquement, hors blocs d'outil).
+const claudeText = (data) => (data && data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+// ===== Client de l'API Batch (traitement par lot, 50 % moins cher sur les tokens) =====
+const BATCH_URL = "/api/claude-batch";
+async function batchCall(action, payload) {
+  const res = await fetch(BATCH_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action, ...payload }) });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((j && j.error) || ("API " + res.status));
+  return j;
+}
+// Identifiant de requête dans un lot : l'API exige [a-zA-Z0-9_-] et l'unicité. On utilise la
+// POSITION dans le lot plutôt que l'id de la fiche : unique par construction, et aucun risque de
+// collision par troncature qui appliquerait le résultat d'un magasin à un autre.
+const batchId = (i) => "f" + i;
+// Enrichissement d'UNE fiche, en direct (fiche ouverte, bouton « Approfondir ») : phase gratuite
+// puis appel IA immédiat. C'est le chemin à privilégier pour l'unitaire, où l'attente compte.
+async function aiEnrichProspect(p, persistUsage, instruction) {
+  const { out, body } = await enrichProspectPreparer(p, instruction);
+  if (!body) return out; // les sources gratuites ont tout couvert
   try {
     const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify(body) });
     if (!res.ok) throw new Error("API " + res.status);
     const data = await res.json();
     if (data.usage && persistUsage) persistUsage(data.usage);
     out.usage = data.usage || null;
-    const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
-    const o = parseJsonObject(text); const c = o.contact || {};
-    const take = (k, v) => { if (has(v) && !has(out[k])) out[k] = v; };
-    take("nom", (o.nom || "").trim());
-    take("site", (o.site || "").trim()); take("facebook", (o.facebook || "").trim()); take("instagram", (o.instagram || "").trim());
-    take("siren", onlyNum(o.siren)); take("siret", onlyNum(o.siret)); take("raisonSociale", (o.raisonSociale || "").trim()); take("formeJuridique", (o.formeJuridique || "").trim());
-    take("adresse", (o.adresse || "").trim()); take("cp", onlyNum(o.cp)); take("ville", (o.ville || "").trim());
-    take("telephone", (o.telephone || "").trim()); take("email", (o.email || "").trim());
-    take("contactPrenom", (c.prenom || "").trim()); take("contactNom", (c.nom || "").trim()); take("contactFonction", (c.fonction || "").trim()); take("contactEmail", (c.email || "").trim()); take("contactTel", (c.telephone || "").trim()); take("contactSource", (c.source || "").trim());
-    take("notes", (o.notes || "").trim());
-    if (o.confiance) out.confiance = out.confiance === "haute" ? "haute" : o.confiance;
-    if (o.source) out.source = out.source ? out.source + " + " + String(o.source).trim() : String(o.source).trim();
-    // Le code postal a pu arriver via l'IA : re-déduire département / région localement si besoin.
-    const dep2 = cpToDepartement(p.cp || out.cp);
-    if (dep2 && !has(out.departement) && !has(p.departement)) { out.departement = dep2; if (!has(p.region)) out.region = DEPT_REGION[dep2] || ""; }
-    return out;
+    return enrichProspectAppliquer(p, out, claudeText(data));
   } catch (e) {
-    // Si le registre gratuit a déjà apporté quelque chose, on le conserve plutôt que de tout perdre.
+    // Si les sources gratuites ont déjà apporté quelque chose, on le conserve plutôt que tout perdre.
     if (out.source) return out;
     throw e;
   }
@@ -7188,28 +7219,46 @@ function Prospection({ data, persist, go }) {
   // `instruction` : consigne libre décrivant ce que l'utilisateur veut enrichir en priorité.
   // Lance l'enrichissement IA sur une file de fiches déjà constituée (utilisé par « Enrichir les fiches »
   // ET par les actions groupées « Enrichir la sélection »).
+  // Exécution commune (sans confirmation) : phase gratuite appliquée au fil de l'eau, puis envoi en
+  // LOT de ce qui reste. Partagée par l'enrichissement en masse et la recherche post-import.
+  const lancerEnrich = (queue, consigne, libelle) => {
+    if (aiJobs.has("prospects:enrich")) { setEnrichMsg({ ok: false, t: "Un enrichissement est déjà en cours." }); return; }
+    if (data.claudeBatch && data.claudeBatch.id) { setEnrichMsg({ ok: false, t: "Un lot d'enrichissement est déjà en cours de traitement. Attendez sa fin (ou abandonnez-le) avant d'en lancer un autre." }); return; }
+    setEnrichMsg(null);
+    aiJobs.run("prospects:enrich", libelle, async (prog) => {
+      // --- Phase 1 : sources gratuites, appliquées au fil de l'eau (aucun coût) ---
+      let done = 0; prog(0, queue.length);
+      const aFaire = []; let nGratuit = 0;
+      for (const p of queue) {
+        try {
+          const { out, body } = await enrichProspectPreparer(p, consigne);
+          if (out.source) { persist((d) => ({ ...d, prospects: d.prospects.map((x) => x.id === p.id ? applyProspectEnrich(x, out) : x) })); nGratuit++; }
+          if (body) aFaire.push({ id: p.id, out, body });
+        } catch (e) {}
+        done++; prog(done, queue.length);
+      }
+      if (!aFaire.length) {
+        setEnrichMsg({ ok: true, t: "Terminé sans aucun appel payant : " + nGratuit + " fiche(s) complétée(s) par les seules sources gratuites." });
+        return;
+      }
+      // --- Phase 2 : ce qui reste part en lot chez Anthropic (50 % moins cher sur les tokens) ---
+      try {
+        const requests = aFaire.map((r, i) => ({ custom_id: batchId(i), params: r.body }));
+        const lot = await batchCall("create", { requests });
+        if (!lot || !lot.id) throw new Error("lot non créé");
+        persist((d) => ({ ...d, claudeBatch: { id: lot.id, at: new Date().toISOString(), count: aFaire.length, gratuit: nGratuit, outs: aFaire.reduce((m, r, i) => { m[batchId(i)] = { id: r.id, out: r.out }; return m; }, {}) } }));
+        setEnrichMsg({ ok: true, t: nGratuit + " fiche(s) complétée(s) gratuitement. " + aFaire.length + " fiche(s) envoyée(s) à l'IA en lot (50 % moins cher) — résultats appliqués automatiquement dès qu'ils arrivent, généralement en moins d'une heure. Vous pouvez fermer l'application." });
+      } catch (e) {
+        setEnrichMsg({ ok: false, t: "Sources gratuites appliquées sur " + nGratuit + " fiche(s), mais l'envoi du lot IA a échoué (" + ((e && e.message) || e) + "). Réessayez plus tard." });
+      }
+    });
+  };
   const runEnrichQueue = (queue, instruction) => {
     if (aiJobs.has("prospects:enrich")) { setEnrichMsg({ ok: false, t: "Un enrichissement est déjà en cours." }); return; }
     if (!queue || !queue.length) { setEnrichMsg({ ok: false, t: "Aucune fiche enrichissable." }); return; }
     const consigne = (instruction || "").trim();
-    appConfirm("Enrichir " + queue.length + " fiche(s) prospect via recherche web IA" + (consigne ? ", selon votre consigne" : ", en priorité les e-mails et téléphones manquants") + " ? L'identité légale est d'abord cherchée GRATUITEMENT dans le registre SIRENE ; l'IA ne complète que les champs restants. Coût estimé : ~" + (queue.length * 0.05).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " € maximum. Cela peut prendre plusieurs minutes. Rien n'est inventé, à vérifier ensuite.", { title: "Enrichir les fiches", confirmLabel: "Lancer" }).then((ok) => {
-      if (!ok) return;
-      let nMail = 0, nTel = 0;
-      setEnrichMsg(null);
-      aiJobs.run("prospects:enrich", "Enrichir les prospects", async (prog) => {
-        let done = 0; prog(0, queue.length);
-        for (const p of queue) {
-          try {
-            const r = await aiEnrichProspect(p, (u) => persist((d) => ({ ...d, claudeUsage: addUsage(d.claudeUsage, u) })), consigne);
-            if ((r.email || r.contactEmail) && !(p.email || "").trim()) nMail++;
-            if ((r.telephone || r.contactTel) && !(p.telephone || "").trim()) nTel++;
-            persist((d) => ({ ...d, prospects: d.prospects.map((x) => x.id === p.id ? applyProspectEnrich(x, r) : x) }));
-          } catch (e) {}
-          done++; prog(done, queue.length);
-          await new Promise((res) => setTimeout(res, 200));
-        }
-        setEnrichMsg({ ok: true, t: "Enrichissement terminé : " + nMail + " e-mail(s) et " + nTel + " téléphone(s) ajoutés sur " + queue.length + " fiche(s). À vérifier (rien d'inventé)." });
-      });
+    appConfirm("Enrichir " + queue.length + " fiche(s) prospect ? Déroulé : les sources officielles GRATUITES (SIRENE, OpenStreetMap, base adresse, site du magasin) sont interrogées d'abord et appliquées immédiatement ; seuls les champs encore manquants partent ensuite à l'IA, groupés en un LOT facturé 50 % moins cher sur les tokens. Le lot met généralement moins d'une heure (24 h au maximum) : vous pouvez fermer l'application, les résultats seront appliqués au retour. Coût estimé : ~" + (queue.length * 0.03).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " € maximum. Rien n'est inventé, à vérifier ensuite.", { title: "Enrichir les fiches", confirmLabel: "Lancer" }).then((ok) => {
+      if (ok) lancerEnrich(queue, consigne, "Enrichir les prospects");
     });
   };
   const enrichAll = (types, limit, instruction) => {
@@ -7222,18 +7271,11 @@ function Prospection({ data, persist, go }) {
     if (limit && limit > 0) queue = queue.slice(0, limit);
     runEnrichQueue(queue, instruction);
   };
-  // Recherche web IA lancée sur les prospects fraîchement importés (tâche de fond).
+  // Recherche lancée sur les prospects fraîchement importés (option cochée à l'import) : même
+  // déroulé que l'enrichissement en masse — sources gratuites d'abord, puis lot IA.
   const enrichCreated = (created) => {
-    if (aiJobs.has("prospects:enrich") || !created.length) return;
-    aiJobs.run("prospects:enrich", "Rechercher les prospects importés", async (prog) => {
-      let done = 0; prog(0, created.length);
-      for (const p of created) {
-        try { const r = await aiEnrichProspect(p, (u) => persist((d) => ({ ...d, claudeUsage: addUsage(d.claudeUsage, u) }))); persist((d) => ({ ...d, prospects: d.prospects.map((x) => x.id === p.id ? applyProspectEnrich(x, r) : x) })); } catch (e) { }
-        done++; prog(done, created.length);
-        await new Promise((res) => setTimeout(res, 200));
-      }
-      setEnrichMsg({ ok: true, t: "Recherche terminée sur " + created.length + " prospect(s) importé(s). À vérifier (rien d'inventé)." });
-    });
+    if (!created.length) return;
+    lancerEnrich(created, "", "Rechercher les prospects importés");
   };
   // Création des prospects importés, puis recherche IA optionnelle. Dédoublonnage renforcé : on écarte
   // toute fiche qui correspond à un prospect DÉJÀ enregistré OU à un établissement / groupe / point de
@@ -7658,6 +7700,14 @@ function Prospection({ data, persist, go }) {
     </div>
     {dupMsg && <div className="card" style={{ borderLeft: "4px solid " + (dupMsg.ok ? "var(--green)" : "#9aa6bd"), marginBottom: 12, fontSize: 12.5 }}>{dupMsg.t}</div>}
     {enrichMsg && <div className="card" style={{ borderLeft: "4px solid " + (enrichMsg.ok ? "var(--green)" : "var(--red)"), marginBottom: 12, fontSize: 12.5 }}>{enrichMsg.t}</div>}
+    {/* Lot IA en cours : il tourne côté Anthropic, l'application peut être fermée entre-temps. */}
+    {data.claudeBatch && data.claudeBatch.id && (() => { const b = data.claudeBatch; const depuis = Math.max(0, Math.round((Date.now() - new Date(b.at).getTime()) / 60000)); return (
+      <div className="card" style={{ borderLeft: "4px solid var(--blue)", marginBottom: 12, fontSize: 12.5, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <Sparkles size={15} className="spin" style={{ color: "var(--blue)", flexShrink: 0 }} />
+        <span style={{ flex: 1, minWidth: 220 }}><strong>{b.count} fiche(s)</strong> en cours d'enrichissement par l'IA en lot (50 % moins cher) — lancé il y a {depuis < 1 ? "moins d'une minute" : depuis + " min"}. Les résultats s'appliqueront automatiquement, même si vous fermez l'application.</span>
+        <button className="btn btn-g btn-s" onClick={() => appConfirm("Abandonner le lot d'enrichissement en cours ? Les fiches déjà complétées par les sources gratuites sont conservées ; les résultats IA de ce lot seront perdus.", { title: "Abandonner le lot ?", confirmLabel: "Abandonner" }).then((ok) => { if (!ok) return; batchCall("cancel", { id: b.id }).catch(() => {}); persist((d) => ({ ...d, claudeBatch: null, claudeBatchMsg: { ok: false, t: "Lot d'enrichissement abandonné." } })); })}>Abandonner</button>
+      </div>); })()}
+    {data.claudeBatchMsg && <div className="card" style={{ borderLeft: "4px solid " + (data.claudeBatchMsg.ok ? "var(--green)" : "var(--red)"), marginBottom: 12, fontSize: 12.5, display: "flex", alignItems: "center", gap: 10 }}><span style={{ flex: 1 }}>{data.claudeBatchMsg.t}</span><button className="btn btn-g btn-s" onClick={() => persist((d) => ({ ...d, claudeBatchMsg: null }))}>Fermer</button></div>}
     <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}><span>{list.length} prospect(s){list.length !== activeCount ? " sur " + activeCount : ""} · groupés par {gd.label.toLowerCase()}</span>{selMode && <><button className="btn btn-ghost btn-s" onClick={selectAllVisible}><CheckSquare size={13} /> Tout sélectionner ({list.length})</button>{selCount > 0 && <button className="btn btn-ghost btn-s" onClick={clearSel}><X size={13} /> Désélectionner ({selCount})</button>}</>}</div>
     {list.length === 0 ? <div className="card empty">Aucun prospect ne correspond.</div> : groups.map((g) => { const m = gd.meta ? gd.meta(g.key) : null; const lbl = m ? m.label : g.key; const col = m ? m.color : "#9aa6bd"; return (
       <div key={g.key} style={{ marginBottom: 20 }}>
@@ -10338,6 +10388,83 @@ function ConfirmHost() {
     </div>
   </div>);
 }
+// ===== Alerte de dépense IA =====
+// À chaque palier de 5 € atteint DANS LA JOURNÉE, une fenêtre s'impose à l'écran avec le montant du
+// jour. Ce n'est PAS un blocage : rien n'est coupé, on informe pour que la dépense ne file jamais
+// à l'insu de l'utilisateur (c'est ce qui avait produit la facture de 84 $).
+const CLAUDE_ALERTE_PAS_EUR = 5;
+// Palier déjà signalé aujourd'hui (0 si l'acquittement date d'un autre jour : remise à zéro chaque jour).
+function paliersSignales(u) { const a = u && u.alerte; return a && a.date === TODAY() ? (a.palier || 0) : 0; }
+function ClaudeSpendAlert({ usage, onAck }) {
+  const u = usage || {};
+  const jour = (u.days && u.days[TODAY()]) || null;
+  const eur = jour ? usageDayEur(jour) : 0;
+  const palier = Math.floor(eur / CLAUDE_ALERTE_PAS_EUR); // 1 = 5 € franchis, 2 = 10 €, etc.
+  const vu = paliersSignales(u);
+  // Un seul affichage même si plusieurs paliers sont franchis d'un coup (gros lot d'enrichissement).
+  if (palier <= vu) return null;
+  const fmt = (x) => x.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const tokensEur = claudeEur(jour), webEur = webSearchUsd(jour.webSearches || 0) * CLAUDE_USD_EUR;
+  return (<div role="alertdialog" aria-modal="true" aria-label="Alerte de dépense IA" style={{ position: "fixed", inset: 0, background: "rgba(20,22,30,.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 18, zIndex: 100000 }}>
+    <div style={{ background: "var(--card)", borderRadius: 16, padding: "24px 24px 20px", maxWidth: 460, width: "100%", boxShadow: "0 24px 70px rgba(0,0,0,.3)", borderTop: "5px solid var(--orange)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 14 }}>
+        <div style={{ width: 40, height: 40, borderRadius: 11, background: "#fdf0e2", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><AlertTriangle size={21} color="var(--orange)" /></div>
+        <div><div className="pu-display" style={{ fontWeight: 800, fontSize: 17 }}>Dépense IA : {fmt(palier * CLAUDE_ALERTE_PAS_EUR)} € franchis aujourd'hui</div>
+        <div style={{ fontSize: 12, color: "var(--muted)" }}>Alerte à chaque tranche de {CLAUDE_ALERTE_PAS_EUR} €</div></div>
+      </div>
+      <div style={{ background: "var(--bg)", borderRadius: 12, padding: "14px 16px", marginBottom: 14 }}>
+        <div style={{ fontSize: 12, color: "var(--muted)" }}>Total estimé de la journée</div>
+        <div style={{ fontSize: 32, fontWeight: 800, color: "var(--orange)" }} className="tnum">{fmt(eur)} €</div>
+        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4 }}>dont <span className="tnum">{fmt(tokensEur)} €</span> de tokens · <span className="tnum">{fmt(webEur)} €</span> de recherche web ({num(jour.webSearches || 0)} recherche{(jour.webSearches || 0) > 1 ? "s" : ""}) · {num(jour.calls || 0)} appel{(jour.calls || 0) > 1 ? "s" : ""}</div>
+      </div>
+      <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55, marginBottom: 18 }}>Rien n'est bloqué : l'IA reste utilisable. Si le montant vous surprend, la cause la plus fréquente est un enrichissement de masse en cours — vous pouvez le laisser finir ou le suspendre. Le détail jour par jour est dans <strong>Intégrations</strong>.</div>
+      <div style={{ display: "flex", justifyContent: "flex-end" }}><button className="btn btn-p" onClick={() => onAck(palier)}>Compris</button></div>
+    </div>
+  </div>);
+}
+// ===== Surveillance du lot d'enrichissement IA =====
+// Un lot Anthropic est asynchrone (moins d'une heure en général, 24 h au maximum). Le lot en cours
+// est enregistré dans les données : ce veilleur le reprend donc aussi après un rechargement ou une
+// fermeture de l'application, et applique les résultats dès qu'ils sont disponibles.
+function ClaudeBatchWatcher({ batch, persist }) {
+  const id = batch && batch.id;
+  useEffect(() => {
+    if (!id) return;
+    let stop = false;
+    const tick = async () => {
+      let r;
+      try { r = await batchCall("results", { id }); }
+      catch (e) {
+        // Lot introuvable (supprimé, ou expiré au-delà de 29 jours) : on cesse de le surveiller.
+        if (/404|not_found|introuvable/i.test(String((e && e.message) || e))) { persist((d) => ({ ...d, claudeBatch: null, claudeBatchMsg: { ok: false, t: "Le lot d'enrichissement n'est plus disponible côté Anthropic — il a été abandonné." } })); }
+        return;
+      }
+      if (stop || !r || r.pending) return; // toujours en traitement : on repassera
+      const outs = (batch && batch.outs) || {};
+      let nOk = 0, nEchec = 0;
+      persist((d) => {
+        let prospects = d.prospects || []; let usage = d.claudeUsage;
+        for (const line of (r.results || [])) {
+          const ent = outs[line.custom_id]; if (!ent) continue;
+          const resu = line.result || {};
+          if (resu.type !== "succeeded" || !resu.message) { nEchec++; continue; }
+          if (resu.message.usage) usage = addUsage(usage, resu.message.usage);
+          try {
+            const fiche = prospects.find((x) => x.id === ent.id) || {};
+            const out = enrichProspectAppliquer(fiche, { ...ent.out }, claudeText(resu.message));
+            prospects = prospects.map((x) => x.id === ent.id ? applyProspectEnrich(x, out) : x);
+            nOk++;
+          } catch (e) { nEchec++; }
+        }
+        return { ...d, prospects, claudeUsage: usage, claudeBatch: null, claudeBatchMsg: { ok: true, t: "Lot d'enrichissement terminé : " + nOk + " fiche(s) complétée(s) par l'IA" + (nEchec ? " (" + nEchec + " sans résultat exploitable)" : "") + ". À vérifier (rien d'inventé)." } };
+      });
+    };
+    tick(); // vérification immédiate (utile juste après un rechargement)
+    const iv = setInterval(tick, 30000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [id]);
+  return null;
+}
 // Code météo WMO (Open-Meteo) → emoji + libellé court FR.
 function wmoMeta(code) {
   if (code === 0) return { e: "☀️", l: "Ensoleillé" };
@@ -10820,7 +10947,7 @@ export default function App() {
     return { accounts: data.accounts.length, repertoire: data.contacts.length, prospection: data.prospects.filter((p) => p.statut === "a_contacter").length, deals: data.deals.length, pipeline: data.deals.filter((d) => d.statut !== "livre" && d.statut !== "refuse").length, agenda: agendaAl, stock: stockAl, reassort: reAl, sav: savAl, presto: prestoAl };
   }, [data]);
   const meta = TABS.find((t) => t.id === tab);
-  return (<div className={cx("pu-root", navOpen && "nav-open", theme === "dark" && "dark", "color-" + bgColor, "pat-" + bgPattern, "acc-" + accent)}><style>{CSS}</style><ConfirmHost /><FilamentConfetti />
+  return (<div className={cx("pu-root", navOpen && "nav-open", theme === "dark" && "dark", "color-" + bgColor, "pat-" + bgPattern, "acc-" + accent)}><style>{CSS}</style><ConfirmHost /><ClaudeBatchWatcher batch={data.claudeBatch} persist={persist} /><ClaudeSpendAlert usage={data.claudeUsage} onAck={(palier) => persist((p2) => ({ ...p2, claudeUsage: { ...(p2.claudeUsage || {}), alerte: { date: TODAY(), palier } } }))} /><FilamentConfetti />
     <div className="sb-scrim no-print" onClick={() => setNavOpen(false)} aria-hidden="true" />
     <aside className="sb">
       <div className="brand"><img src="/logo-mitmit.png" alt="MITMIT" style={{ width: 88, height: 88, maxWidth: 88, borderRadius: 20, alignSelf: "center" }} /><div className="brand-accent" /><div style={{ display: "flex", flexDirection: "column", gap: 2 }}><small style={{ letterSpacing: ".12em" }}>MITMIT · Poste de pilotage B2B</small><span style={{ fontSize: 9.5, color: "var(--muted)", fontWeight: 600, lineHeight: 1.3, textTransform: "none", letterSpacing: 0 }} title="Le petit nom du cockpit">Module Intégré de Traitement, Marges, Inventaire &amp; Tarification</span></div></div>
