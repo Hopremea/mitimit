@@ -373,7 +373,25 @@ function seedSites() {
     { id: "s_eeny_mc", accountId: "acc_eenymeeny", label: "Eeny Meeny Monaco", type: "pdv", typeSurface: "Petite surface", adresse: "13 rue Princesse Caroline, 98000 Monaco", lat: 43.7355, lng: 7.4214 },
   ];
 }
-const PROSPECT_TYPES = { cooperative: { label: "Coopérative", color: "#3F60AA" }, chaine: { label: "Chaîne / réseau (via centrale)", color: "#7c5cf0" }, franchise: { label: "Franchisé (commande seul)", color: "#5b54c9" }, independant: { label: "Indépendant", color: "#2bb673" }, specialiste: { label: "Spécialiste / Concept store", color: "#F8B133" }, gss: { label: "GSS / Grande surface", color: "#FF5A45" }, autre: { label: "Autre", color: "#9aa6bd" } };
+const PROSPECT_TYPES = { cooperative: { label: "Coopérative", color: "#3F60AA" }, chaine: { label: "Chaîne / réseau (via centrale)", color: "#7c5cf0" }, franchise: { label: "Franchisé (commande seul)", color: "#5b54c9" }, independant: { label: "Indépendant", color: "#2bb673" }, specialiste: { label: "Spécialiste / Concept store", color: "#F8B133" }, gss: { label: "GSS / Grande surface", color: "#FF5A45" },
+  // Cibles hors retail : elles n'ont ni SIRET commercial ni enseigne, mais leurs propres
+  // identifiants (UAI pour un établissement scolaire, RNA pour une association).
+  scolaire: { label: "Scolaire (école, collège, lycée)", color: "#0EA5A4" }, periscolaire: { label: "Périscolaire / Centre de loisirs", color: "#14b8a6" }, petite_enfance: { label: "Crèche / Petite enfance", color: "#22c55e" }, association: { label: "Association / Ludothèque", color: "#d97706" }, mediatheque: { label: "Médiathèque / Bibliothèque", color: "#8b5cf6" },
+  autre: { label: "Autre", color: "#9aa6bd" } };
+// Types dont l'identité ne repose PAS sur le registre du commerce : l'écran, l'import et
+// l'enrichissement doivent leur présenter les bons champs.
+const TYPES_HORS_RETAIL = new Set(["scolaire", "periscolaire", "petite_enfance", "association", "mediatheque"]);
+const estHorsRetail = (p) => TYPES_HORS_RETAIL.has(String((p && p.type) || ""));
+// Identifiant officiel pertinent selon le type : UAI pour une école (identifiant national de
+// l'Éducation nationale), RNA pour une association (W + 9 chiffres), SIRET/SIREN pour le reste.
+function identifiantProspect(p) {
+  if (!p) return null;
+  const t = String(p.type || "");
+  if (t === "scolaire") return p.uai ? { label: "UAI", value: p.uai, titre: "Identifiant national de l'établissement scolaire" } : null;
+  if (t === "association") { const rna = /^W\d{9}$/i.test(String(p.siren || "")) ? p.siren : ""; return rna ? { label: "RNA", value: rna, titre: "Numéro d'association au répertoire national" } : (p.siren ? { label: "SIREN", value: p.siren, titre: "Association immatriculée au registre des entreprises" } : null); }
+  if (p.siret) return { label: "SIRET", value: p.siret, titre: "SIRET de l'établissement" };
+  return p.siren ? { label: "SIREN", value: p.siren, titre: "SIREN de la société" } : null;
+}
 const PROSPECT_STATUT = { a_qualifier: { label: "À qualifier", color: "#9aa6bd" }, a_contacter: { label: "À contacter", color: "#F8B133" }, brouillon_cree: { label: "Brouillon créé", color: "#0EA5A4" }, contacte: { label: "Contacté", color: "#3F60AA" }, rdv: { label: "RDV planifié", color: "#7c5cf0" }, converti: { label: "Converti en compte client", color: "#2bb673" }, ecarte: { label: "Écarté", color: "#FF5A45" } };
 const POTENTIEL_META = { fort: { label: "Fort", color: "#2bb673" }, moyen: { label: "Moyen", color: "#F8B133" }, faible: { label: "Faible", color: "#9aa6bd" } };
 function seedProspects() {
@@ -1405,7 +1423,7 @@ function identityKeys(o) {
 // recherche IA (produit en croix) : nom, enseigne, SIRET, SIREN, adresse, ville, téléphone, e-mail ou site.
 function hasProspectIdentity(p) {
   if (!p) return false;
-  return ["nom", "enseigne", "siret", "siren", "adresse", "ville", "telephone", "email", "site", "contactTel", "contactEmail", "raisonSociale"].some((k) => String(p[k] || "").trim());
+  return ["nom", "enseigne", "siret", "siren", "uai", "adresse", "ville", "telephone", "email", "site", "contactTel", "contactEmail", "raisonSociale"].some((k) => String(p[k] || "").trim());
 }
 // Score de complétude d'une fiche prospect (0-100) : proportion des champs clés renseignés.
 const COMPLETENESS_FIELDS = ["nom", "enseigne", "type", "adresse", "cp", "ville", "telephone", "email", "site", "siren", "contactNom", "contactEmail"];
@@ -6982,6 +7000,118 @@ async function osmSearchStores(zone) {
   const els = await overpassQuery(`[out:json][timeout:25];${sel}out tags center 80;`);
   return els.map(osmTagsToStore).filter((x) => x.nom);
 }
+// ===== Cibles de prospection hors magasins de jouets — toutes GRATUITES, sans clé =====
+// Résout une zone saisie librement (« Toulouse », « 31 », « Haute-Garonne ») en code de département
+// et code postal, pour filtrer les recherches nationales. Gratuit (geo.api.gouv.fr).
+async function geoResolveZone(zone) {
+  const z = String(zone || "").trim(); if (!z) return null;
+  if (/^\d{2}$|^\d{3}$/.test(z)) return { departement: z, cp: "", nom: z };
+  if (/^\d{5}$/.test(z)) return { departement: cpToDepartement(z), cp: z, nom: z };
+  try {
+    const r = await fetch("https://geo.api.gouv.fr/communes?nom=" + encodeURIComponent(z) + "&fields=nom,code,codeDepartement,codesPostaux,population&limit=1&boost=population");
+    if (r.ok) { const j = await r.json(); const c = j && j[0]; if (c) return { departement: c.codeDepartement || "", cp: (c.codesPostaux || [])[0] || "", nom: c.nom, commune: c.nom, population: c.population || 0 }; }
+  } catch (e) {}
+  try {
+    const r = await fetch("https://geo.api.gouv.fr/departements?nom=" + encodeURIComponent(z) + "&fields=nom,code&limit=1");
+    if (r.ok) { const j = await r.json(); const d = j && j[0]; if (d) return { departement: d.code, cp: "", nom: d.nom }; }
+  } catch (e) {}
+  return null;
+}
+// Écoles, collèges et lycées — annuaire officiel de l'Éducation nationale. Fournit l'adresse, le
+// téléphone ET l'e-mail institutionnel, ce qu'aucune autre source publique ne donne aussi largement.
+async function educationSearch(zone, limit = 60) {
+  const g = await geoResolveZone(zone); if (!g) return [];
+  const where = g.commune ? `nom_commune like "${String(g.commune).replace(/"/g, "")}"` : (g.cp ? `code_postal="${g.cp}"` : `code_departement="${g.departement}"`);
+  const url = "https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/fr-en-annuaire-education/records?limit=" + Math.min(limit, 100) + "&where=" + encodeURIComponent(where + ' and etat="OUVERT"');
+  const r = await fetch(url); if (!r.ok) throw new Error("API éducation " + r.status);
+  const j = await r.json();
+  return (j.results || []).map((e) => ({
+    nom: e.nom_etablissement || "", type: "scolaire",
+    uai: e.identifiant_de_l_etablissement || "",
+    siret: /^\d{14}$/.test(String(e.siren_siret || "")) ? e.siren_siret : "",
+    adresse: e.adresse_1 || "", cp: e.code_postal || "", ville: e.nom_commune || "",
+    departement: e.code_departement || "", region: e.libelle_region || "",
+    telephone: e.telephone || "", email: e.mail || "", site: e.web || "",
+    notes: [e.type_etablissement, e.statut_public_prive, e.appartenance_education_prioritaire && e.appartenance_education_prioritaire !== "N" ? "Éducation prioritaire" : ""].filter(Boolean).join(" · "),
+    lat: e.latitude || null, lng: e.longitude || null,
+  })).filter((x) => x.nom);
+}
+// Associations et ludothèques — registre national des entreprises (les associations y sont
+// immatriculées). Le dirigeant déclaré sert de premier interlocuteur.
+async function associationSearch(zone, motCle = "", limit = 40) {
+  const g = await geoResolveZone(zone); if (!g) return [];
+  const params = new URLSearchParams({ per_page: String(Math.min(limit, 25)), est_association: "true", etat_administratif: "A" });
+  if (g.departement) params.set("departement", g.departement);
+  params.set("q", motCle || "ludothèque");
+  const r = await fetch("https://recherche-entreprises.api.gouv.fr/search?" + params.toString());
+  if (!r.ok) throw new Error("API entreprises " + r.status);
+  const j = await r.json();
+  return (j.results || []).map((e) => {
+    const s = e.siege || {}; const d = (e.dirigeants || []).find((x) => x.type_dirigeant === "personne physique") || null;
+    return {
+      nom: e.nom_complet || e.nom_raison_sociale || "", type: "association",
+      siren: e.siren || "", raisonSociale: e.nom_raison_sociale || "", formeJuridique: natureJuridiqueLabel(e.nature_juridique),
+      adresse: s.adresse || "", cp: s.code_postal || "", ville: s.libelle_commune || "",
+      departement: cpToDepartement(s.code_postal), region: "",
+      contactPrenom: d ? ((d.prenoms || "").split(/\s+/)[0] || "") : "", contactNom: d ? (d.nom || "") : "",
+      contactFonction: d ? (d.qualite && d.qualite !== "Autre" ? d.qualite : "Dirigeant") : "",
+      contactSource: d ? "RNE/INSEE (annuaire-entreprises)" : "",
+      notes: "Association", telephone: "", email: "", site: "",
+    };
+  }).filter((x) => x.nom);
+}
+// Entreprises par code d'activité (NAF) sur un département : recensement EXHAUSTIF, là où
+// OpenStreetMap et l'IA ne donnent qu'un échantillon.
+const NAF_CIBLES = [
+  { code: "47.65Z", label: "Jeux et jouets (magasin spécialisé)", type: "" },
+  { code: "47.62Z", label: "Journaux et papeterie", type: "" },
+  { code: "47.61Z", label: "Livres (librairies)", type: "" },
+  { code: "47.19B", label: "Autres commerces de détail en magasin non spécialisé", type: "" },
+  { code: "47.59B", label: "Meubles, décoration et divers", type: "" },
+  { code: "85.10Z", label: "Enseignement pré-primaire (maternelles privées)", type: "petite_enfance" },
+  { code: "88.91A", label: "Accueil de jeunes enfants (crèches, halte-garderies)", type: "petite_enfance" },
+  { code: "88.99B", label: "Action sociale sans hébergement (centres de loisirs)", type: "periscolaire" },
+  { code: "93.29Z", label: "Activités récréatives et de loisirs", type: "periscolaire" },
+  { code: "91.01Z", label: "Bibliothèques et médiathèques", type: "mediatheque" },
+];
+// Catégorie de prospect induite par le code d'activité : une crèche n'est pas un magasin.
+const typeDepuisNaf = (naf) => (NAF_CIBLES.find((n) => n.code === naf) || {}).type || "";
+async function nafSearch(zone, naf, limit = 50) {
+  const g = await geoResolveZone(zone); if (!g || !g.departement) return [];
+  const typeNaf = typeDepuisNaf(naf);
+  const params = new URLSearchParams({ activite_principale: naf, departement: g.departement, per_page: String(Math.min(limit, 25)), etat_administratif: "A" });
+  const r = await fetch("https://recherche-entreprises.api.gouv.fr/search?" + params.toString());
+  if (!r.ok) throw new Error("API entreprises " + r.status);
+  const j = await r.json();
+  return (j.results || []).map((e) => {
+    // On privilégie l'établissement situé dans le département demandé plutôt que le siège social,
+    // qui peut être à l'autre bout de la France pour une chaîne.
+    const etabs = (e.matching_etablissements || []).filter((x) => String(x.etat_administratif || "A") === "A");
+    const loc = etabs.find((x) => cpToDepartement(x.code_postal) === g.departement) || etabs[0] || e.siege || {};
+    const d = (e.dirigeants || []).find((x) => x.type_dirigeant === "personne physique") || null;
+    return {
+      nom: e.nom_complet || e.nom_raison_sociale || "", type: typeNaf || (e.nombre_etablissements > 3 ? "chaine" : "independant"),
+      siren: e.siren || "", siret: loc.siret || "", raisonSociale: e.nom_raison_sociale || "", formeJuridique: natureJuridiqueLabel(e.nature_juridique),
+      adresse: loc.adresse || "", cp: loc.code_postal || "", ville: loc.libelle_commune || "",
+      departement: cpToDepartement(loc.code_postal), region: "",
+      contactPrenom: d ? ((d.prenoms || "").split(/\s+/)[0] || "") : "", contactNom: d ? (d.nom || "") : "",
+      contactFonction: d ? (d.qualite && d.qualite !== "Autre" ? d.qualite : "Dirigeant") : "",
+      contactSource: d ? "RNE/INSEE (annuaire-entreprises)" : "",
+      notes: "", telephone: "", email: "", site: "",
+    };
+  }).filter((x) => x.nom);
+}
+// Médiathèques et bibliothèques via OpenStreetMap (amenity=library) : elles animent souvent des
+// ateliers créatifs et achètent du matériel.
+async function osmSearchLieux(zone, filtre, type) {
+  const a = await nominatimArea(/france/i.test(zone) ? zone : zone + ", France"); if (!a) return [];
+  let sel;
+  if (a.areaId) sel = `area(${a.areaId})->.z;nwr${filtre}["name"](area.z);`;
+  else if (a.bbox && a.bbox.length === 4) sel = `nwr${filtre}["name"](${a.bbox[0]},${a.bbox[2]},${a.bbox[1]},${a.bbox[3]});`;
+  else return [];
+  const els = await overpassQuery(`[out:json][timeout:25];${sel}out tags center 60;`);
+  return els.map(osmTagsToStore).filter((x) => x.nom).map((x) => ({ ...x, type }));
+}
 // UN établissement précis (nom + ville) sur OpenStreetMap : téléphone, site, horaires… — GRATUIT.
 async function osmFindPlace(name, ville) {
   const n = String(name || "").trim(); const v = String(ville || "").trim(); if (!n || !v) return null;
@@ -7403,7 +7533,10 @@ function Prospection({ data, persist, go }) {
   const [selMode, setSelMode] = useState(false); const [selIds, setSelIds] = useState(() => new Set());
   const [sirBusy, setSirBusy] = useState(false); const [sirMsg, setSirMsg] = useState(null);
   const [edit, setEdit] = useState(null);
-  const [zone, setZone] = useState("Occitanie"); const [kind, setKind] = useState("toutes"); const [busy, setBusy] = useState(false); const [aiMsg, setAiMsg] = useState(null); const [aiErr, setAiErr] = useState(null);
+  const [zone, setZone] = useState("Occitanie"); const [kind, setKind] = useState("toutes");
+  // Source de la recherche : magasins (OSM + IA) ou registres officiels gratuits (NAF, écoles,
+  // associations, médiathèques). Seule « magasins » peut engager une dépense.
+  const [source, setSource] = useState("magasins"); const [naf, setNaf] = useState(NAF_CIBLES[0].code); const [assoMot, setAssoMot] = useState("ludothèque"); const [busy, setBusy] = useState(false); const [aiMsg, setAiMsg] = useState(null); const [aiErr, setAiErr] = useState(null);
   const aiElapsed = useElapsed(busy);
   // Approfondir la recherche IA sur la fiche prospect ouverte : complète les champs encore vides.
   const [pfBusy, setPfBusy] = useState(false); const [pfMsg, setPfMsg] = useState(null);
@@ -7783,10 +7916,37 @@ function Prospection({ data, persist, go }) {
     // Registre global : la recherche continue même si l'on quitte l'onglet, et reste visible partout.
     aiJobs.run("prospects:search", "Recherche de prospects", async () => {
       try {
+        const z = zone.trim() || "France";
+        // ===== Sources 100 % GRATUITES : registres officiels, aucune IA, aucune dépense =====
+        if (source !== "magasins") {
+          // La zone doit d'abord être résolue en département / commune. Si elle ne l'est pas, c'est
+          // soit une saisie non reconnue, soit un registre momentanément indisponible : on le dit,
+          // au lieu d'afficher « aucun résultat » qui ferait croire à une zone vide.
+          const gz = await geoResolveZone(z);
+          if (!gz) { setAiErr("Zone « " + z + " » non reconnue, ou service d'annuaire momentanément indisponible. Saisissez une ville, un numéro de département (ex. 31) ou un nom de département, puis réessayez."); return; }
+          let lignes = [], libelle = "";
+          if (source === "ecoles") { lignes = await educationSearch(z); libelle = "établissement(s) scolaire(s)"; }
+          else if (source === "associations") { lignes = await associationSearch(z, assoMot); libelle = "association(s)"; }
+          else if (source === "naf") { lignes = await nafSearch(z, naf); libelle = "entreprise(s)"; }
+          else if (source === "mediatheques") { lignes = await osmSearchLieux(z, '["amenity"="library"]', "mediatheque"); libelle = "médiathèque(s)"; }
+          // Dédoublonnage sur les mêmes clés que le reste de l'application : on ne recrée jamais une
+          // fiche déjà présente (prospect, établissement ou groupe).
+          const drafts = lignes.map((l) => ({ ...l, statut: "a_qualifier", potentiel: "", source: "Registre officiel · " + TODAY(), accountId: null, createdAt: TODAY() }));
+          const { created, skipped } = createDraftsWithDedup(drafts, data);
+          if (created.length) {
+            persist((d) => ({ ...d, prospects: [...created, ...(d.prospects || [])] }));
+            setQ(""); setFType("tous"); setFRegion("tous"); setFlashIds(new Set(created.map((c) => c.id)));
+          }
+          const dup = skipped ? " " + skipped + " doublon(s) écarté(s)." : "";
+          setAiMsg(created.length
+            ? created.length + " " + libelle + " ajouté(s) au listing, sans aucune dépense." + dup + " À vérifier avant action."
+            : ("Aucun nouveau résultat pour cette zone." + dup));
+          return;
+        }
+        // ===== Magasins : OpenStreetMap d'abord (gratuit), l'IA seulement si nécessaire =====
         // Étage 1 GRATUIT : OpenStreetMap liste les magasins jouets / jeux / loisirs créatifs de la
         // zone avec adresse, téléphone, site et horaires. L'IA (payante) n'est appelée qu'ensuite,
         // et seulement si OSM n'a pas suffi (zone peu cartographiée ou recherche d'un nom précis).
-        const z = zone.trim() || "France";
         let osm = [];
         try { osm = await osmSearchStores(z); } catch (e) {}
         const seenOsm = new Set(data.prospects.map((p) => ((p.nom || "") + "|" + (p.ville || "")).toLowerCase()));
@@ -7842,7 +8002,11 @@ function Prospection({ data, persist, go }) {
       <div style={{ fontSize: 12.5, color: "var(--muted)", display: "flex", alignItems: "flex-start", gap: 6 }}><MapPin size={14} style={{ flexShrink: 0, marginTop: 1 }} /><span>{[p.adresse, ((p.cp || "") + " " + (p.ville || "")).trim()].filter(Boolean).join(", ")}</span></div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 2 }}><Badge color={tm.color}>{tm.label}</Badge>{p.region && <Badge color="#9aa6bd">{p.region}</Badge>}<Badge color={sm.color}>{sm.label}</Badge></div>
       {(p.tags || []).length > 0 && <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{(p.tags || []).map((t) => <span key={t} onClick={(e) => { e.stopPropagation(); setFTag(t); }} title={"Filtrer sur l'étiquette « " + t + " »"} style={{ fontSize: 10.5, fontWeight: 700, color: "#6d28d9", background: "#f3ecff", border: "1px solid #ddd0fb", borderRadius: 20, padding: "1px 8px", cursor: "pointer" }}>#{t}</span>)}</div>}
-      {(p.contactNom || p.siren || p.siret) && <div style={{ fontSize: 12, color: "var(--muted)", display: "flex", flexWrap: "wrap", gap: 10, marginTop: 2 }}>{p.contactNom && <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><User size={13} />{[p.contactPrenom, p.contactNom].filter(Boolean).join(" ")}{p.contactFonction ? (" · " + p.contactFonction) : ""}</span>}{p.siren && <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Building2 size={12} />SIREN {p.siren}</span>}{p.siret && <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }} title="SIRET de l'établissement"><MapPin size={12} />SIRET {p.siret}</span>}</div>}
+      {(() => { const ident = identifiantProspect(p); return (p.contactNom || ident) ? (
+        <div style={{ fontSize: 12, color: "var(--muted)", display: "flex", flexWrap: "wrap", gap: 10, marginTop: 2 }}>
+          {p.contactNom && <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><User size={13} />{[p.contactPrenom, p.contactNom].filter(Boolean).join(" ")}{p.contactFonction ? (" · " + p.contactFonction) : ""}</span>}
+          {ident && <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }} title={ident.titre}><Building2 size={12} />{ident.label} {ident.value}</span>}
+        </div>) : null; })()}
       <div style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center", flexWrap: "wrap" }} onClick={(e) => e.stopPropagation()}>
         <a className="iconbtn" href={mapsUrl(p)} target="_blank" rel="noreferrer" title="Voir sur Google Maps"><MapPin size={15} /></a>
         {p.site && <a className="iconbtn" href={ensureHttp(p.site)} target="_blank" rel="noreferrer" title={"Site web : " + cleanDomain(p.site)}><ExternalLink size={15} /></a>}
@@ -7867,11 +8031,29 @@ function Prospection({ data, persist, go }) {
       ))}</div>}
     </div>) : (<>
     <div className="card" style={{ marginBottom: 14 }}>
-      <div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><Sparkles size={17} style={{ color: "var(--orange)" }} /> Recherche IA de prospects</h3></div>
+      <div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><Sparkles size={17} style={{ color: "var(--orange)" }} /> Recherche de prospects</h3></div>
       <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-        <div className="fld" style={{ flex: 1, minWidth: 200, marginBottom: 0 }}><label>Zone ou établissement précis</label><input value={zone} onChange={(e) => setZone(e.target.value)} placeholder="Ex. Occitanie, Bordeaux… ou « L'Atelier chez soi »" onKeyDown={(e) => { if (e.key === "Enter" && !busy) runAI(); }} /></div>
-        <div className="fld" style={{ minWidth: 170, marginBottom: 0 }}><label>Cible</label><select value={kind} onChange={(e) => setKind(e.target.value)}><option value="toutes">Tous</option><option value="chaine">Chaînes & franchises</option><option value="independant">Indépendants & concept stores</option></select></div>
-        <button className="btn-save" disabled={busy} onClick={runAI} style={busy ? { opacity: .7, cursor: "wait" } : {}}>{busy ? (<><Sparkles size={15} className="spin" /> Recherche en cours… {fmtElapsed(aiElapsed)}</>) : (<><Sparkles size={15} /> Lancer la recherche IA</>)}</button>
+        <div className="fld" style={{ flex: 1, minWidth: 200, marginBottom: 0 }}><label>Zone ou établissement précis</label><input value={zone} onChange={(e) => setZone(e.target.value)} placeholder={source === "magasins" ? "Ex. Occitanie, Bordeaux… ou « L'Atelier chez soi »" : "Ville, département (31) ou nom de département"} onKeyDown={(e) => { if (e.key === "Enter" && !busy) runAI(); }} /></div>
+        {/* Chaque source interroge un registre officiel différent : le choix change complètement
+            la nature des fiches créées (et, pour toutes sauf « magasins », le coût est nul). */}
+        <div className="fld" style={{ minWidth: 210, marginBottom: 0 }}><label>Chercher quoi ?</label><select value={source} onChange={(e) => setSource(e.target.value)}>
+          <option value="magasins">Magasins de jouets / loisirs</option>
+          <option value="naf">Commerces par code d'activité (NAF)</option>
+          <option value="ecoles">Scolaire (écoles, collèges, lycées)</option>
+          <option value="associations">Associations & ludothèques</option>
+          <option value="mediatheques">Médiathèques & bibliothèques</option>
+        </select></div>
+        {source === "magasins" && <div className="fld" style={{ minWidth: 170, marginBottom: 0 }}><label>Cible</label><select value={kind} onChange={(e) => setKind(e.target.value)}><option value="toutes">Tous</option><option value="chaine">Chaînes & franchises</option><option value="independant">Indépendants & concept stores</option></select></div>}
+        {source === "naf" && <div className="fld" style={{ minWidth: 230, marginBottom: 0 }}><label>Code d'activité</label><select value={naf} onChange={(e) => setNaf(e.target.value)}>{NAF_CIBLES.map((n) => <option key={n.code} value={n.code}>{n.code} — {n.label}</option>)}</select></div>}
+        {source === "associations" && <div className="fld" style={{ minWidth: 170, marginBottom: 0 }}><label>Mot-clé</label><input value={assoMot} onChange={(e) => setAssoMot(e.target.value)} placeholder="ludothèque" /></div>}
+        <button className="btn-save" disabled={busy} onClick={runAI} style={busy ? { opacity: .7, cursor: "wait" } : {}}>{busy ? (<><Sparkles size={15} className="spin" /> Recherche en cours… {fmtElapsed(aiElapsed)}</>) : (<><Sparkles size={15} /> {source === "magasins" ? "Lancer la recherche" : "Lancer (gratuit)"}</>)}</button>
+      </div>
+      <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 8, lineHeight: 1.5 }}>
+        {source === "magasins" && "OpenStreetMap d'abord (gratuit) ; l'IA ne complète que si la zone est peu cartographiée."}
+        {source === "naf" && "Registre national des entreprises : recensement exhaustif d'un code d'activité sur un département. Gratuit, sans IA."}
+        {source === "ecoles" && "Annuaire officiel de l'Éducation nationale : adresse, téléphone et e-mail institutionnel de chaque établissement. Gratuit, sans IA."}
+        {source === "associations" && "Registre national des entreprises (les associations y sont immatriculées), avec le dirigeant déclaré. Gratuit, sans IA."}
+        {source === "mediatheques" && "OpenStreetMap : bibliothèques et médiathèques de la zone. Gratuit, sans IA."}
       </div>
       {aiMsg && <div style={{ fontSize: 12.5, color: "var(--green)", marginTop: 10, display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}><CheckCircle2 size={14} /> {aiMsg}</div>}
       {aiErr && <div style={{ fontSize: 12.5, color: "var(--red)", marginTop: 10, lineHeight: 1.5 }}>{aiErr}</div>}
