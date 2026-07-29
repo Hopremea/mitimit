@@ -1501,26 +1501,32 @@ function enseigneNorm(name) {
 function computeIdentityAnomalies(data) {
   const digits = (s) => String(s || "").replace(/\D/g, "");
   const entries = [];
-  (data.prospects || []).forEach((p) => { if (!p.archived && !p.accountId) entries.push({ key: "p:" + p.id, label: p.nom || p.enseigne || "Prospect", enseigne: p.enseigne || p.nom || "", siren: digits(p.siren), siret: digits(p.siret) }); });
+  (data.prospects || []).forEach((p) => { if (!p.archived && !p.accountId) entries.push({ key: "p:" + p.id, label: p.nom || p.enseigne || "Prospect", enseigne: p.enseigne || p.nom || "", ville: normStr(p.ville || villeHintOf(p)), siren: digits(p.siren), siret: digits(p.siret) }); });
   const accById = {}; (data.accounts || []).forEach((a) => { accById[a.id] = a; });
-  (data.accounts || []).forEach((a) => { if (!a.archived) entries.push({ key: "a:" + a.id, label: a.enseigne || "Compte", enseigne: a.enseigne || "", siren: digits(a.siren), siret: "" }); });
-  (data.sites || []).forEach((s) => { if (!s.archived && (s.type === "pdv" || s.type === "decision")) { const acc = accById[s.accountId]; entries.push({ key: "s:" + s.id, label: s.label || "Établissement", enseigne: (acc && acc.enseigne) || s.label || "", siren: acc ? digits(acc.siren) : "", siret: digits(s.siret) }); } });
+  (data.accounts || []).forEach((a) => { if (!a.archived) entries.push({ key: "a:" + a.id, label: a.enseigne || "Compte", enseigne: a.enseigne || "", ville: normStr(a.ville || ""), siren: digits(a.siren), siret: "" }); });
+  (data.sites || []).forEach((s) => { if (!s.archived && (s.type === "pdv" || s.type === "decision")) { const acc = accById[s.accountId]; entries.push({ key: "s:" + s.id, label: s.label || "Établissement", enseigne: (acc && acc.enseigne) || s.label || "", ville: normStr(s.ville || parseLocality(s.adresse || "").ville || ""), siren: acc ? digits(acc.siren) : "", siret: digits(s.siret) }); } });
   const out = {}; const add = (k, m) => { (out[k] = out[k] || []).push(m); };
   // 1. SIRET incohérent avec le SIREN de la même fiche (les 9 premiers chiffres du SIRET = SIREN).
   entries.forEach((e) => { if (e.siret.length === 14 && e.siren.length === 9 && !e.siret.startsWith(e.siren)) add(e.key, "Le SIRET " + e.siret + " ne commence pas par le SIREN de la fiche (" + e.siren + ") : l'un des deux est erroné. Confusion probable de la recherche IA entre deux sociétés — à corriger à la main ou via « Vérifier via SIRENE »."); });
   // 2. Même SIRET sur plusieurs fiches.
   const bySiret = {}; entries.forEach((e) => { if (e.siret.length === 14) (bySiret[e.siret] = bySiret[e.siret] || []).push(e); });
   Object.values(bySiret).forEach((g) => { if (g.length > 1) g.forEach((e) => { const others = g.filter((x) => x !== e).map((x) => "« " + x.label + " »").slice(0, 3).join(", "); add(e.key, "SIRET " + e.siret + " également porté par " + others + ". Un SIRET identifie un seul établissement : l'une de ces fiches a hérité d'un identifiant erroné (erreur typique de la recherche IA)."); }); });
-  // 3. Même SIREN sur des enseignes différentes : légitime pour des magasins intégrés à une centrale
-  // (ex. King Jouet), suspect pour l'enseigne minoritaire — on ne signale que celle-ci.
+  // 3. Même SIREN sur des enseignes différentes ET dans des villes différentes. Le seul écart de nom
+  // ne prouve rien : la raison sociale diffère très souvent de l'enseigne (« Les Jouets du 82 »
+  // exploitant un « JouéClub Montauban »), et deux fiches d'une même ville sous deux noms sont
+  // vraisemblablement la même société. C'est la dispersion géographique qui trahit un identifiant
+  // recopié. Signalé pour l'enseigne minoritaire seulement — un SIREN de centrale sur ses propres
+  // magasins reste légitime.
   const bySiren = {}; entries.forEach((e) => { if (e.siren.length === 9 && enseigneNorm(e.enseigne)) (bySiren[e.siren] = bySiren[e.siren] || []).push(e); });
   Object.values(bySiren).forEach((g) => {
     const count = {}; g.forEach((e) => { const b = enseigneNorm(e.enseigne); count[b] = (count[b] || 0) + 1; });
     const brands = Object.keys(count); if (brands.length < 2) return;
+    const villes = new Set(g.map((e) => e.ville).filter(Boolean));
+    if (villes.size < 2) return; // même ville : raison sociale et enseigne d'une même société
     const max = Math.max(...brands.map((b) => count[b]));
     const majority = brands.filter((b) => count[b] === max);
     const lbls = [...new Set(g.map((e) => e.enseigne))].slice(0, 4).join(", ");
-    g.forEach((e) => { const b = enseigneNorm(e.enseigne); if (majority.length === 1 && b === majority[0]) return; add(e.key, "SIREN " + e.siren + " porté par des fiches d'enseignes différentes (" + lbls + "). Un SIREN de centrale est parfois légitime (magasins intégrés), mais cette fiche porte probablement l'identifiant d'une autre enseigne : vérifier l'identité légale."); });
+    g.forEach((e) => { const b = enseigneNorm(e.enseigne); if (majority.length === 1 && b === majority[0]) return; add(e.key, "SIREN " + e.siren + " porté par des fiches d'enseignes différentes ET de villes différentes (" + lbls + "). Un SIREN de centrale reste légitime sur des magasins intégrés, mais cette fiche porte probablement l'identifiant d'une autre société : vérifier quel établissement de ce SIREN correspond à son adresse."); });
   });
   return out;
 }
@@ -7131,6 +7137,20 @@ function natureJuridiqueLabel(code) {
 }
 // Recherche officielle (annuaire-entreprises / base SIRENE) — GRATUITE, sans clé ni crédit IA. À partir
 // d'un SIREN/SIRET ou d'un nom (+ ville), renvoie l'identité légale vérifiée d'une entreprise française.
+// Ville à confronter au registre pour choisir le bon établissement d'une société. À défaut du champ
+// ville ou du code postal, on la lit dans le NOM du magasin : « JouéClub Montauban » privé de son
+// enseigne laisse « Montauban ». C'est l'adresse, jamais la raison sociale, qui départage deux
+// établissements d'un même SIREN — une société peut s'appeler « Les Jouets du 82 » et exploiter un
+// « JouéClub Montauban ».
+function villeHintOf(p) {
+  if (!p) return "";
+  const v = String(p.ville || "").trim(); if (v) return v;
+  const cp = String(p.cp || "").trim(); if (cp) return cp;
+  const ens = normStr(p.enseigne || "");
+  const toks = String(p.nom || "").trim().split(/\s+/).filter(Boolean);
+  if (ens && toks.length > 1) { const rest = toks.filter((t) => normStr(t) && ens.indexOf(normStr(t)) === -1).join(" ").trim(); if (rest.length >= 3) return rest; }
+  return "";
+}
 async function lookupSirene(query, villeHint) {
   const q = String(query || "").trim(); if (!q) return null;
   const res = await fetch("https://recherche-entreprises.api.gouv.fr/search?q=" + encodeURIComponent(q) + "&per_page=1");
@@ -7530,7 +7550,7 @@ async function enrichProspectPreparer(p, instruction) {
     const byId = has(p.siret) || has(p.siren); // recherche par identifiant : résultat non ambigu
     const qs = (p.siret || p.siren || [p.raisonSociale || p.nom || p.enseigne, p.ville].filter(Boolean).join(" ")).trim();
     if (qs) {
-      const r = await lookupSirene(qs, p.ville || p.cp);
+      const r = await lookupSirene(qs, villeHintOf(p));
       // Garde-fou anti-confusion d'enseigne : une recherche PAR NOM est approximative et peut
       // renvoyer une autre société (un SIRET King Jouet sur une fiche JouéClub serait une erreur
       // grave, cf. détection d'anomalies). On n'accepte le résultat que si la raison sociale
@@ -7646,7 +7666,7 @@ async function enrichProspectPreparer(p, instruction) {
   const user = `Établissement : ${cible}.
 ${faits ? "FAITS DÉJÀ ÉTABLIS par des sources officielles gratuites (registre des entreprises, OpenStreetMap, base adresse nationale, site officiel du magasin). Ils sont fiables : appuie-toi dessus pour identifier le bon établissement et cibler tes recherches, ne les redemande pas.\n" + faits + "\n" : ""}${saisis ? "Autres données de la fiche : " + saisis + ".\n" : ""}
 Recherche UNIQUEMENT les informations suivantes, vérifiables (attention aux homonymes : ne retiens que l'établissement correspondant aux faits ci-dessus) :
-RECOUPEMENT OBLIGATOIRE entre l'identifiant, le nom et la ville, dans les deux sens : (a) un SIREN ou un SIRET n'est retenu que si le registre renvoie une société dont la raison sociale correspond au nom ou à l'enseigne de la fiche ET un établissement situé dans sa ville ; (b) inversement, si un identifiant déjà connu de la fiche renvoie une société d'une autre ville ou d'une autre enseigne, dis-le dans "notes" au lieu de bâtir le reste dessus ; (c) ne recopie jamais l'identifiant d'un magasin voisin ou d'une autre enseigne de la même zone commerciale. Au moindre écart, laisse le champ vide.
+RECOUPEMENT OBLIGATOIRE, arbitré par l'ADRESSE et non par le nom : la raison sociale enregistrée diffère très souvent de l'enseigne du magasin (« Les Jouets du 82 » exploitant « JouéClub Montauban »), un écart de nom ne prouve donc RIEN. (a) Un SIREN ou un SIRET n'est retenu que si l'un des établissements de cette société se trouve à l'adresse (ou au moins dans la ville) de la fiche ; un nom différent n'est pas un motif de rejet. (b) Inversement, un identifiant déjà présent sur la fiche dont aucun établissement ne correspond à son adresse est douteux : dis-le dans "notes" au lieu de bâtir le reste dessus. (c) Entre deux établissements d'une même société, retiens celui dont l'adresse correspond ; la ville figurant dans le nom du magasin (« JouéClub Montauban ») vaut indication d'adresse et l'emporte sur un établissement d'une autre ville. (d) Ne recopie jamais l'identifiant d'un magasin voisin exploité par une AUTRE société. Au moindre doute sur l'adresse, laisse le champ vide.
 ${misses.map((m) => "- " + m.key + " : " + m.desc).join("\n")}
 ${has(out.raisonSociale) ? "Utilise la raison sociale exacte « " + out.raisonSociale + " »" + (has(out.siren) ? " et le SIREN " + out.siren : "") + " dans tes requêtes : c'est le moyen le plus sûr de tomber sur la bonne société.\n" : ""}${has(out.site) || has(p.site) ? "Le site officiel du magasin est " + (out.site || p.site) + " : commence par y chercher (page contact, mentions légales, « qui sommes-nous »).\n" : ""}Si l'établissement appartient à une enseigne ou un réseau (JouéClub, King Jouet, Cultura…), consulte en priorité la fiche magasin du site officiel de l'enseigne (store locator) : elle donne souvent l'adresse exacte, le téléphone et le courriel du point de vente.
 Renvoie UNIQUEMENT un objet JSON valide (aucun texte ni balise autour) avec EXACTEMENT ces clés :
@@ -8190,7 +8210,16 @@ function Prospection({ data, persist, go }) {
     return Object.values(clusters).flatMap(splitByBrand).filter((g) => g.length > 1);
   };
   const PROS_FIELDS = ["nom", "enseigne", "type", "format", "adresse", "ville", "cp", "departement", "region", "telephone", "site", "email", "potentiel", "siren", "siret", "raisonSociale", "formeJuridique", "contactPrenom", "contactNom", "contactFonction", "contactEmail", "contactTel", "contactSource", "source", "lat", "lng"];
-  const prosScore = (p) => (p.accountId ? 1000 : 0) + PROS_FIELDS.reduce((n, k) => n + (p[k] ? 1 : 0), 0);
+  // Fiche proposée à la conservation : la plus complète, avec un bonus quand son NOM porte déjà sa
+  // ville (« JouéClub Montauban ») et quand elle a une adresse postale. Entre une raison sociale
+  // (« Les Jouets du 82 ») et l'enseigne située du même magasin, c'est cette dernière qui parle au
+  // commercial et qui situe l'établissement — l'utilisateur reste libre de choisir l'autre.
+  const prosScore = (p) => {
+    const base = (p.accountId ? 1000 : 0) + PROS_FIELDS.reduce((n, k) => n + (p[k] ? 1 : 0), 0);
+    const ville = normStr(p.ville || parseLocality(p.adresse || "").ville || "");
+    const nomPorteVille = !!(ville && ville.length >= 3 && normStr(p.nom || "").indexOf(ville) >= 0);
+    return base + (nomPorteVille ? 3 : 0) + (String(p.adresse || "").trim() ? 2 : 0);
+  };
   const bestOfCluster = (g) => g.slice().sort((a, b) => prosScore(b) - prosScore(a))[0];
   // Rapprochement d'un prospect avec un établissement/compte DÉJÀ enregistré (Groupes & établissements).
   const computeCrossMatches = () => {
@@ -8255,7 +8284,7 @@ function Prospection({ data, persist, go }) {
       // hérités à tort d'une fiche absorbée. Le reste des informations a déjà été transféré ci-dessus.
       const v = verified && verified[base.id];
       if (v) {
-        const villeFiche = norm(base.ville || parseLocality(base.adresse || "").ville || "");
+        const villeFiche = norm(base.ville || parseLocality(base.adresse || "").ville || villeHintOf(base));
         const villeReg = norm(v.ville || "");
         const contredit = !!(villeFiche && villeReg && villeFiche !== villeReg);
         if (v.siren) base.siren = v.siren;
@@ -8320,7 +8349,7 @@ function Prospection({ data, persist, go }) {
       const keep = g && g[0]; if (!keep) continue;
       const q = (keep.siret || keep.siren || [keep.raisonSociale || keep.nom || keep.enseigne, keep.ville].filter(Boolean).join(" ")).trim();
       if (!q) continue;
-      try { const r = await lookupSirene(q, keep.ville || keep.cp); if (r) { verified[keep.id] = r; nVerif++; } } catch (e) { /* registre indisponible : la fusion se fait sans re-vérification */ }
+      try { const r = await lookupSirene(q, villeHintOf(keep)); if (r) { verified[keep.id] = r; nVerif++; } } catch (e) { /* registre indisponible : la fusion se fait sans re-vérification */ }
     }
     const r = applyMergeClusters(clusters, verified);
     const nX = applyCrossMerges(selectedCross || []);
@@ -8399,7 +8428,7 @@ function Prospection({ data, persist, go }) {
     if (!q2) { setSirMsg({ ok: false, t: "Renseignez un SIRET / SIREN, ou un nom + ville." }); return; }
     setSirBusy(true); setSirMsg(null);
     try {
-      const r = await lookupSirene(q2, edit.ville || edit.cp || "");
+      const r = await lookupSirene(q2, villeHintOf(edit));
       if (!r) { setSirMsg({ ok: false, t: "Aucune entreprise trouvée dans le registre officiel." }); return; }
       const patch = {}; const filled = [];
       const fill = (k, v, label) => { if (v && !String(edit[k] || "").trim()) { patch[k] = v; filled.push(label); } };
