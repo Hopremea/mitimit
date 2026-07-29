@@ -1843,7 +1843,11 @@ N'ÉCRIS NI FORMULE DE POLITESSE FINALE NI SIGNATURE. Le message s'arrête sur s
 </style>
 
 <destinataire>
-Si un nom de contact est fourni, adresse-toi à lui. Sinon, adresse générique sobre ("Bonjour,").
+Le champ <magasin>.formeAppel dicte l'adresse, ne décide jamais toi-même :
+- "nom" : adresse-toi par le NOM DE FAMILLE (<magasin>.contactNom), jamais par le prénom seul. Écris "Bonjour [prénom] [nom]" quand le prénom est fourni, "Bonjour Monsieur/Madame [nom]" uniquement si une civilité figure au contexte. N'invente JAMAIS une civilité et ne la déduis jamais du prénom.
+- "generique" : adresse sobre "Bonjour," sans nom.
+Ce mail est un premier contact : le prénom seul serait une familiarité non acquise.
+Écris le nom de famille en casse normale ("Dupont"), même s'il est fourni tout en majuscules.
 </destinataire>
 
 <format_sortie>
@@ -1898,7 +1902,16 @@ function verifyProspectMail(parsed, angles) {
 // pied de mail d'opposition ajouté côté code, et vérification des affirmations.
 async function generateProspectMail({ prospect, angles, consigne, ton, mode, precedent, instruction, onUsage }) {
   const p = prospect || {};
-  const magasin = { nom: p.nom || p.enseigne || "", ville: p.ville || "", type: (PROSPECT_TYPES[p.type] || {}).label || "", enseigne: p.enseigne || "", contact: [p.contactPrenom, p.contactNom].filter(Boolean).join(" ") };
+  // Prénom et nom séparés, plus la forme d'appel : le mailing est un premier contact, donc jamais de
+  // prénom seul. Une fiche prospect ne porte pas de civilité et ne garde pas le texte des mails déjà
+  // créés — il n'y a donc ici aucun précédent à respecter, contrairement au rédacteur de messages.
+  const contactNom = String(p.contactNom || "").trim();
+  const magasin = {
+    nom: p.nom || p.enseigne || "", ville: p.ville || "", type: (PROSPECT_TYPES[p.type] || {}).label || "", enseigne: p.enseigne || "",
+    contact: [p.contactPrenom, p.contactNom].filter(Boolean).join(" "),
+    contactPrenom: String(p.contactPrenom || "").trim(), contactNom,
+    formeAppel: contactNom ? "nom" : "generique",
+  };
   const anglesPayload = {
     proximite: angles.proximite,
     reseau_enseigne: (angles.reseauEnseigne && angles.reseauEnseigne.available) ? { compte: angles.reseauEnseigne.count, enseigne: p.enseigne } : null,
@@ -4825,6 +4838,33 @@ function computeDisponibilites(reachSite, myEvents, now, plage) {
   }
   return out;
 }
+// ===== Forme d'appel : nom de famille par défaut, prénom seulement s'il a déjà été employé =====
+// Passer au prénom de sa propre initiative est une familiarité non acquise ; mais revenir au nom de
+// famille APRÈS s'être adressé par le prénom se lit comme une prise de distance. La règle suit donc
+// l'usage déjà établi par l'émetteur, et le nom de famille en l'absence de précédent.
+const sansAccents = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "");
+// Le prénom doit suivre une salutation. Sans cet ancrage, un prénom cité dans le corps du texte
+// (« j'en ai parlé à Jean ») ferait basculer à tort la forme d'appel de tous les mails suivants.
+function prenomDejaEmploye(prenom, textes) {
+  const p = sansAccents(prenom).trim();
+  if (p.length < 2) return false;
+  const esc = p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp("\\b(?:bonjour|bonsoir|salut|cher|chere)\\s+(?:cher\\s+|chere\\s+)?" + esc + "\\b", "i");
+  return (textes || []).some((t) => re.test(sansAccents(t)));
+}
+// Renvoie { forme, motif } ou null si l'on ne sait rien de l'identité du destinataire.
+// « nom » ne signifie pas forcément « civilité + nom » : sans civilité connue, on ne la devine PAS
+// (la déduire d'un prénom se trompe, et se tromper de civilité dans un mail commercial coûte cher).
+// La consigne de rédaction retombe alors sur le nom complet, qui reste sans prénom seul.
+function formeAppel(contact, textesEnvoyes) {
+  const prenom = String((contact && contact.prenom) || "").trim();
+  const nom = String((contact && contact.nom) || "").trim();
+  if (!nom) return prenom ? { forme: "prenom", motif: "Nom de famille inconnu : seul le prénom est disponible." } : null;
+  if (!prenom) return { forme: "nom", motif: "Prénom inconnu." };
+  return prenomDejaEmploye(prenom, textesEnvoyes)
+    ? { forme: "prenom", motif: "Un courriel déjà envoyé par l'émetteur s'adressait à lui par son prénom." }
+    : { forme: "nom", motif: "Aucun courriel envoyé ne s'est adressé à lui par son prénom." };
+}
 // Collecteur de contexte (fonction PURE, aucun appel réseau) transmis au modèle. Filtrage par liste
 // blanche : aucun coefficient, marge, coût, prix de cession ni scoring n'entre jamais dans cet objet.
 function buildMessageContext({ data, contactId, siteId, accountId, canal, now }) {
@@ -4882,6 +4922,18 @@ function buildMessageContext({ data, contactId, siteId, accountId, canal, now })
   }
   const derniersEnvois = relevant.filter((i) => i.direction !== "entrant").slice(0, 2).map((i) => ({ date: i.date || "", objet: i.sujet || "", texte: String(i.resume || "").slice(0, 1200) }));
   const historique = { echanges, derniersEnvois };
+  // Forme d'appel : évaluée sur TOUS les courriels envoyés, pas seulement les deux derniers gardés
+  // dans l'historique — le prénom a pu être employé la première fois et jamais depuis.
+  if (destinataire) {
+    const mailsEnvoyes = relevant.filter((i) => i.direction !== "entrant" && i.type === "email").map((i) => String(i.resume || ""));
+    const ap = formeAppel(contact, mailsEnvoyes);
+    if (ap) {
+      destinataire.prenom = contact.prenom || "";
+      destinataire.nomFamille = contact.nom || "";
+      destinataire.formeAppel = ap.forme;
+      destinataire.formeAppelMotif = ap.motif;
+    }
+  }
   const engagements = [];
   if (account && account.prochaineAction) engagements.push({ intitule: account.prochaineAction, date: account.dateAction || "" });
   events.filter((e) => (contactId && e.contactId === contactId) || (siteId && e.siteId === siteId) || (accountId && e.accountId === accountId)).filter((e) => e.date && e.date >= nowIso).sort((a, b) => (a.date || "").localeCompare(b.date || "")).slice(0, 5).forEach((e) => engagements.push({ intitule: (e.titre || "Suivi") + (EVENT_TYPES[e.type] ? " (" + EVENT_TYPES[e.type].label + ")" : ""), date: e.date + (e.heure ? " " + e.heure : "") }));
@@ -4936,6 +4988,11 @@ Privilégie la première personne du singulier (« je ») plutôt que le « nous
 5. Si un ticket SAV est ouvert, la reconnaissance du problème passe avant toute proposition commerciale.
 6. Si le contact n'a jamais répondu après plusieurs relances, change d'angle plutôt que d'insister sur le même argument, et propose une sortie simple (une réponse en un mot suffit).
 7. Si <contexte>.destinataire.typeAdresse vaut "generique", commence le corps par une ligne de routage du type "À l'attention de [civilité nom], [fonction]", et rends l'objet explicite sur l'expéditeur et le sujet.
+8. FORME D'APPEL — suis <contexte>.destinataire.formeAppel, sans jamais en décider toi-même :
+   - "nom" : adresse-toi par le NOM DE FAMILLE, jamais par le prénom seul. Si "civilite" est renseignée, écris "Bonjour [civilité] [nomFamille]". Si elle est vide, écris "Bonjour [prénom] [nomFamille]" : n'invente JAMAIS une civilité et ne la déduis jamais du prénom.
+   - "prenom" : emploie le prénom seul ("Bonjour [prénom]"). Un message déjà envoyé l'employait ; revenir au nom de famille se lirait comme une prise de distance.
+   - Champ absent (destinataire inconnu ou standard d'accueil) : adresse générique sobre, "Bonjour,".
+   Écris le nom de famille en casse normale ("Dupont"), même s'il est fourni tout en majuscules.
 </regles_de_fond>
 
 <interdits_absolus>
