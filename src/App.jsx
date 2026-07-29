@@ -1409,11 +1409,23 @@ function computeIdentityAnomalies(data) {
   return out;
 }
 // Petit triangle d'alerte jaune ; au survol, un paragraphe explicatif sur fond blanc (pop-up).
+// Le pop-up est rendu en portail (document.body) et positionné en fixe, borné à l'écran : il passe
+// AU-DESSUS des cartes voisines (chaque tuile crée son propre contexte d'empilement) et n'est jamais
+// tronqué par les bords d'une carte ou de la fenêtre.
 function WarnTip({ msgs, size = 14 }) {
+  const [pos, setPos] = useState(null);
+  const show = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const W = Math.min(300, window.innerWidth - 16);
+    let x = r.left + r.width / 2 - W / 2;
+    x = Math.max(8, Math.min(x, window.innerWidth - W - 8));
+    const below = r.bottom + 200 <= window.innerHeight;
+    setPos(below ? { x, w: W, top: r.bottom + 7 } : { x, w: W, bottom: window.innerHeight - r.top + 7 });
+  };
   if (!msgs || !msgs.length) return null;
-  return (<span className="warntip" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }} title="">
+  return (<span className="warntip" onMouseEnter={show} onMouseLeave={() => setPos(null)} onClick={(e) => { e.preventDefault(); e.stopPropagation(); }} title="">
     <AlertTriangle size={size} style={{ color: "#b45309", fill: "#FDE68A" }} />
-    <span className="warntip-pop">{msgs.map((m, i) => <span key={i} style={{ display: "block", marginTop: i ? 7 : 0 }}>{m}</span>)}</span>
+    {pos && createPortal(<span className="warntip-pop" style={{ left: pos.x, width: pos.w, top: pos.top != null ? pos.top : "auto", bottom: pos.bottom != null ? pos.bottom : "auto" }}>{msgs.map((m, i) => <span key={i} style={{ display: "block", marginTop: i ? 7 : 0 }}>{m}</span>)}</span>, document.body)}
   </span>);
 }
 // Calculateur d'angles VRAIS d'un prospect (fonction pure, aucun appel réseau). Ce qui n'est pas
@@ -2210,9 +2222,7 @@ ${ACCENT_CSS}
 .tile{cursor:pointer;background:rgba(255,255,255,.52);-webkit-backdrop-filter:blur(16px) saturate(170%);backdrop-filter:blur(16px) saturate(170%);box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 4px 16px rgba(20,32,58,.06);transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease;}
 .tile:hover{transform:translateY(-3px);box-shadow:0 12px 26px rgba(20,32,58,.14);border-color:#cfdcf3;background:var(--bg);}
 .warntip{position:relative;display:inline-flex;align-items:center;cursor:help;flex-shrink:0;}
-.warntip .warntip-pop{display:none;position:absolute;left:50%;top:calc(100% + 7px);transform:translateX(-50%);z-index:80;width:290px;max-width:74vw;background:#fff;color:#3a4358;border:1px solid #f0c36d;border-radius:10px;padding:9px 11px;font-size:11.5px;line-height:1.5;font-weight:500;text-align:left;box-shadow:0 10px 26px rgba(20,32,58,.2);white-space:normal;}
-.warntip:hover .warntip-pop{display:block;}
-.pu-root.dark .warntip .warntip-pop{background:#fff;color:#3a4358;}
+.warntip-pop{display:block;position:fixed;z-index:9999;background:#fff;color:#3a4358;border:1px solid #f0c36d;border-radius:10px;padding:9px 11px;font-size:11.5px;line-height:1.5;font-weight:500;text-align:left;box-shadow:0 10px 28px rgba(20,32,58,.28);white-space:normal;pointer-events:none;font-family:'Plus Jakarta Sans',system-ui,sans-serif;}
 .tile:active{transform:translateY(-1px);box-shadow:0 6px 14px rgba(20,32,58,.12);}
 .pu-root.dark .tile:hover{box-shadow:0 12px 26px rgba(0,0,0,.45);border-color:#33415a;}
 .acc-card h4{margin:0 0 3px;font-size:14px;}.acc-card .meta{color:var(--muted);font-size:11.5px;display:flex;align-items:center;gap:5px;}
