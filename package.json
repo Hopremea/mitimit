@@ -3,6 +3,10 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "//engines": "Version de Node imposée au dépôt plutôt qu'à chaque projet de déploiement : une version obsolète (Node 18, refusée depuis) fait échouer la compilation avant même de démarrer. @supabase/supabase-js exige Node 20 au minimum ; la borne haute est laissée ouverte pour suivre les versions prises en charge.",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
