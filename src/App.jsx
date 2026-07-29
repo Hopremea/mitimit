@@ -7662,6 +7662,19 @@ function isGrandeEnseigne(p) {
   const n = stripAccentsLow([p && p.nom, p && p.enseigne].filter(Boolean).join(" ")).replace(/['’-]/g, " ");
   return GRANDES_ENSEIGNES.some((e) => n.includes(e));
 }
+// Une adresse de PAGE MAGASIN, par opposition à la racine du site de la marque. C'est la distinction
+// qui manquait : joueclub.fr ne porte que les coordonnées du siège, mais joueclub.fr/magasin/…
+// publie le téléphone, le courriel et souvent le nom du gérant de CE point de vente. Refuser de lire
+// la seconde parce que l'enseigne est nationale revenait à se priver de la meilleure source gratuite.
+function estPageMagasin(url) {
+  const u = String(url || "").trim(); if (!u) return false;
+  try {
+    const x = new URL(/^https?:\/\//i.test(u) ? u : "https://" + u);
+    const chemin = x.pathname.replace(/\/+$/, "");
+    // Un chemin réduit à « / » ou à une page d'accueil n'apporte rien de propre au magasin.
+    return chemin.length > 1 && !/^\/(index|accueil|home)\.\w+$/i.test(chemin);
+  } catch (e) { return false; }
+}
 // Département déduit du code postal (approximation Corse 2A/2B, outre-mer sur 3 chiffres) — gratuit, sans IA.
 function cpToDepartement(cp) {
   const c = String(cp || "").replace(/\D/g, ""); if (c.length !== 5) return "";
@@ -7750,7 +7763,11 @@ async function enrichProspectPreparer(p, instruction) {
       if (place) {
         if (!has(out.telephone)) out.telephone = place.telephone;
         if (!has(out.email)) out.email = place.email;
+        // Pour une grande enseigne on ne garde le site que s'il pointe la page du magasin : la
+        // racine de la marque n'apporte que les coordonnées du siège. Les réseaux sociaux restent
+        // exclus, ce sont ceux de la marque.
         if (!grande) { if (!has(out.site)) out.site = place.site; if (!has(out.facebook)) out.facebook = place.facebook; if (!has(out.instagram)) out.instagram = place.instagram; }
+        else if (!has(out.site) && estPageMagasin(place.site)) out.site = place.site;
         if (!has(out.adresse) && place.adresse) { out.adresse = place.adresse; if (!has(out.cp)) out.cp = place.cp; if (!has(out.ville)) out.ville = place.ville; }
         if (place.telephone || place.site || place.email) out.source = out.source ? out.source + " + OpenStreetMap" : "OpenStreetMap";
       }
@@ -7759,8 +7776,14 @@ async function enrichProspectPreparer(p, instruction) {
   // 2ter) Site du magasin lu par le relais serveur (GRATUIT) : e-mail et téléphone publiés sur la
   //    page d'accueil / contact / mentions légales. Inutile pour une grande enseigne (site de la
   //    marque, coordonnées du siège) — on ne le fait que pour les indépendants.
-  const siteConnu = p.site || out.site;
-  if (!grande && has(siteConnu) && (!has(p.email) && !has(out.email) || !has(p.telephone) && !has(out.telephone))) {
+  // Une page magasin l'emporte sur la racine de la marque, quel que soit l'ordre d'arrivée : c'est
+  // elle qui porte les coordonnées du point de vente.
+  const candidats = [out.site, p.site].filter((u) => has(u));
+  const siteConnu = candidats.find(estPageMagasin) || candidats[0] || "";
+  // Une grande enseigne n'est ecartee que si l'URL connue est la racine de la marque : une page
+  // magasin se lit, elle, exactement comme le site d'un independant.
+  const lisible = has(siteConnu) && (!grande || estPageMagasin(siteConnu));
+  if (lisible && (!has(p.email) && !has(out.email) || !has(p.telephone) && !has(out.telephone))) {
     try {
       const sc = await scrapeContact(siteConnu);
       if (sc) {
@@ -7785,7 +7808,12 @@ async function enrichProspectPreparer(p, instruction) {
   need(!has(p.ville) && !has(out.ville), "ville", "ville");
   need(!has(p.telephone) && !has(p.contactTel) && !has(out.telephone), "telephone", "téléphone du magasin, format français");
   need(!has(p.email) && !has(p.contactEmail) && !has(out.email), "email", "adresse e-mail GÉNÉRIQUE du magasin (accueil, contact), publiée sur le site officiel, la fiche magasin de l'enseigne ou la fiche Google — PAS celle d'une personne");
-  need(!grande && !has(p.site) && !has(out.site), "site", "URL du site web officiel de l'établissement");
+  // Pour une grande enseigne, une racine de marque déjà enregistrée ne dispense PAS de chercher la
+  // page du magasin : c'est justement elle qui manque, et la racine ne donne que le siège.
+  const pageMagasinConnue = [p.site, out.site].some(estPageMagasin);
+  need(grande ? !pageMagasinConnue : (!has(p.site) && !has(out.site)), "site", grande
+    ? "URL de la PAGE DE CE MAGASIN sur le site de l'enseigne (store locator), du type joueclub.fr/magasin/…, king-jouet.com/magasin/… — jamais la page d'accueil de la marque : c'est cette page qui publie le téléphone, le courriel et souvent le nom du responsable du point de vente"
+    : "URL du site web officiel de l'établissement");
   need(!grande && !has(p.facebook) && !has(out.facebook), "facebook", "URL de la page Facebook officielle");
   need(!grande && !has(p.instagram) && !has(out.instagram), "instagram", "URL du compte Instagram officiel");
   need(!has(p.siret) && !has(out.siret), "siret", "SIRET (14 chiffres) de CET établissement à cette adresse — il commence par le SIREN de la société exploitante ; JAMAIS le SIRET d'un magasin d'une AUTRE enseigne, même dans la même ville ou zone (un SIRET King Jouet sur une fiche JouéClub est une erreur grave) ; vide en cas de doute");
@@ -7855,6 +7883,30 @@ function enrichProspectAppliquer(p, out, text) {
 // Extrait le texte d'une réponse Claude (blocs « text » uniquement, hors blocs d'outil).
 const claudeText = (data) => (data && data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
 // ===== Client de l'API Batch (traitement par lot, 50 % moins cher sur les tokens) =====
+// Lecture GRATUITE de la page magasin, une fois que l'IA en a donné l'adresse. C'est le geste
+// évident — chercher le nom, ouvrir la page du magasin — et il ne coûte rien de plus : le relais
+// serveur fait la lecture, aucun jeton n'est consommé. Utile quand l'IA rapporte l'URL de la fiche
+// magasin sans en extraire le courriel ou le téléphone.
+async function completerDepuisPageMagasin(out, texteIA, cpRef) {
+  const has = (v) => Boolean(String(v || "").trim());
+  if (has(out.email) && has(out.telephone)) return out;
+  let url = out.site;
+  if (!has(url) && texteIA) { try { url = String((parseJsonObject(texteIA) || {}).site || "").trim(); } catch (e) {} }
+  if (!has(url) || !estPageMagasin(url)) return out;
+  try {
+    const sc = await scrapeContact(url);
+    if (!sc) return out;
+    let trouve = false;
+    if (sc.email && !has(out.email)) { out.email = sc.email; trouve = true; }
+    if (!has(out.telephone)) {
+      // Même garde que pour les indépendants : une page peut citer le numéro d'un autre magasin.
+      const tel = [sc.telephone, ...(sc.telephones || [])].filter(Boolean).find((t) => telCoherent(t, cpRef || out.cp));
+      if (tel) { out.telephone = tel; trouve = true; }
+    }
+    if (trouve) out.source = out.source ? out.source + " + page magasin" : "page magasin";
+  } catch (e) {}
+  return out;
+}
 const BATCH_URL = "/api/outils";
 async function batchCall(action, payload) {
   const res = await fetch(BATCH_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "batch:" + action, ...payload }) });
@@ -7877,7 +7929,8 @@ async function aiEnrichProspect(p, persistUsage, instruction) {
     const data = await res.json();
     if (data.usage && persistUsage) persistUsage(data.usage);
     out.usage = data.usage || null;
-    return enrichProspectAppliquer(p, out, claudeText(data));
+    const fusion = enrichProspectAppliquer(p, out, claudeText(data));
+    return await completerDepuisPageMagasin(fusion, null, p.cp || fusion.cp);
   } catch (e) {
     // Si les sources gratuites ont déjà apporté quelque chose, on le conserve plutôt que tout perdre.
     if (out.source) return out;
@@ -8006,6 +8059,10 @@ function applyProspectEnrich(x, r) {
   const tel = r.telephone || r.contactTel || ""; if (tel && !(x.telephone || "").trim()) patch.telephone = tel;
   setIf("contactEmail", r.contactEmail); setIf("contactTel", r.contactTel);
   setIf("site", r.site); setIf("facebook", r.facebook); setIf("instagram", r.instagram);
+  // Seul cas où une valeur existante est remplacée : la racine d'une marque cède la place à la page
+  // du magasin. Ce n'est pas une perte — l'URL généraliste ne disait rien de CE point de vente — et
+  // l'inverse n'arrive jamais, une page magasin déjà enregistrée est conservée.
+  if (r.site && estPageMagasin(r.site) && String(x.site || "").trim() && !estPageMagasin(x.site)) patch.site = r.site;
   setIf("siren", r.siren); setIf("siret", r.siret); setIf("raisonSociale", r.raisonSociale); setIf("formeJuridique", r.formeJuridique);
   setIf("adresse", r.adresse); setIf("cp", r.cp); setIf("ville", r.ville); setIf("departement", r.departement); setIf("region", r.region);
   setIf("contactPrenom", r.contactPrenom); setIf("contactNom", r.contactNom); setIf("contactFonction", r.contactFonction);
@@ -11669,6 +11726,16 @@ function ClaudeBatchWatcher({ batch, persist }) {
       if (stop || !r || r.pending) return; // toujours en traitement : on repassera
       const outs = (batch && batch.outs) || {};
       let nOk = 0, nEchec = 0;
+      // Lecture des pages magasin AVANT d'appliquer le lot : l'application se fait dans un réducteur
+      // d'état, forcément synchrone, où aucun appel réseau n'a sa place. Les coordonnées trouvées
+      // sont déposées dans « out », que la fusion IA ne réécrira pas (elle ne comble que le vide).
+      for (const line of (r.results || [])) {
+        const ent = outs[line.custom_id]; if (!ent || !ent.out) continue;
+        const resu = line.result || {};
+        if (resu.type !== "succeeded" || !resu.message) continue;
+        try { await completerDepuisPageMagasin(ent.out, claudeText(resu.message), ent.out.cp); } catch (e) {}
+      }
+      if (stop) return;
       persist((d) => {
         let prospects = d.prospects || []; let usage = d.claudeUsage;
         for (const line of (r.results || [])) {
