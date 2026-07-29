@@ -8942,13 +8942,14 @@ function ProspectMailing({ data, persist, onClose }) {
     return true;
   }).map((p) => ({ p, a: anglesOf(p), deja: contactedInfo(p) })), [prospects, types, region, statuts, showTreated, listFilter, tagFilter, nameQ, gmSent, data.accounts, data.sites, data.interactions]);
   const filterSig = [...types].sort().join(",") + "|" + region + "|" + [...statuts].sort().join(",") + "|" + showTreated + "|" + listFilter + "|" + tagFilter + "|" + nameQ + "|G" + gmSent.size;
-  // Présélection : jamais les prospects déjà contactés (ils restent cochables à la main si besoin).
+  // Présélection : jamais les prospects à qui un mail a réellement été ENVOYÉ (ils restent cochables
+  // à la main si besoin). Un simple brouillon ne les écarte pas, au même titre que partout ailleurs.
   // Recalculée uniquement quand les filtres CHANGENT réellement : au retour sur le volet, la sélection
   // manuelle est conservée telle quelle au lieu d'être réinitialisée.
   useEffect(() => {
     if (mailingWave.form.__sig === filterSig) return;
     mailingWave.form.__sig = filterSig;
-    setSel(new Set(filtered.filter((x) => !x.deja).map((x) => x.p.id)));
+    setSel(new Set(filtered.filter((x) => !(x.deja && x.deja.envoye)).map((x) => x.p.id)));
   }, [filterSig]);
   const toggleType = (k) => setTypes((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const toggleStatut = (k) => setStatuts((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
@@ -9055,7 +9056,12 @@ function ProspectMailing({ data, persist, onClose }) {
     if (ok) createBatch(allEligible);
   };
   const nbNoMail = selectedRows.filter((x) => !prospectMailAddress(x.p)).length;
-  const nbDeja = selectedRows.filter((x) => x.deja).length;
+  const nbDeja = selectedRows.filter((x) => x.deja && x.deja.envoye).length;
+  // « Tout sélectionner » ne coche que les fiches JOIGNABLES : générer un mail pour un prospect sans
+  // adresse consomme des jetons pour un brouillon qui ne pourra jamais être créé.
+  const joignables = filtered.filter((x) => prospectMailAddress(x.p));
+  const toutSelectionne = joignables.length > 0 && joignables.every((x) => sel.has(x.p.id));
+  const toutSelectionner = () => setSel(toutSelectionne ? new Set() : new Set(joignables.map((x) => x.p.id)));
   const nbIdent = selectedRows.filter((x) => x.a.objectif_type === "identifier_contact").length;
   const CONF = { haute: { label: "haute", color: "#2bb673" }, standard: { label: "standard", color: "#F8B133" }, a_revoir: { label: "à revoir", color: "#FF5A45" } };
   const ANGLE_LBL = { proximite: "proximité", reseau_enseigne: "réseau enseigne", reseau_region: "réseau régional", adequation_produit: "adéquation produit" };
@@ -9094,7 +9100,11 @@ function ProspectMailing({ data, persist, onClose }) {
         </label>); })}
     </div>
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-      <span style={{ fontSize: 12, color: "var(--muted)" }}>{selectedRows.length} sélectionné(s){nbNoMail ? " · " + nbNoMail + " sans adresse" : ""}{nbIdent ? " · " + nbIdent + " en recherche de contact" : ""}{nbDeja ? " · " : ""}{nbDeja ? <strong style={{ color: "#b45309" }}>{nbDeja} déjà contacté(s)</strong> : null}</span>
+      <span style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 12, color: "var(--muted)" }}>
+        <button type="button" className="btn btn-g btn-s" onClick={toutSelectionner} disabled={!joignables.length} title={toutSelectionne ? "Décocher tous les prospects de la liste" : "Cocher tous les prospects qui ont une adresse e-mail (" + joignables.length + "). Ceux sans adresse sont laissés de côté : aucun brouillon ne pourrait être créé pour eux."}>
+          {toutSelectionne ? <><X size={14} /> Tout désélectionner</> : <><CheckSquare size={14} /> Tout sélectionner ({joignables.length})</>}
+        </button>
+        {selectedRows.length} sélectionné(s){nbNoMail ? " · " + nbNoMail + " sans adresse" : ""}{nbIdent ? " · " + nbIdent + " en recherche de contact" : ""}{nbDeja ? " · " : ""}{nbDeja ? <strong style={{ color: "#b45309" }}>{nbDeja} déjà contacté(s)</strong> : null}</span>
       <button className="btn btn-p" onClick={generate} disabled={running || !selectedRows.length}><Sparkles size={15} className={running ? "spin" : ""} /> {running ? ("Génération… " + (waveJob && waveJob.total ? waveJob.done + "/" + waveJob.total : "")) : "Générer la vague (" + selectedRows.length + ")"}</button>
     </div>
     {cards.length > 0 && <>
