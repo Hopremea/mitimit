@@ -8852,9 +8852,25 @@ function ProspectMailing({ data, persist, onClose }) {
       const dep = await fetch("/api/piece", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ name: file.name }) });
       const dt = await dep.json().catch(() => ({}));
       if (dep.ok && dt.path && dt.token && supabase) {
+        // Le serveur a délivré une autorisation d'écriture signée (clé de service configurée).
         const up = await supabase.storage.from(dt.bucket).uploadToSignedUrl(dt.path, dt.token, file, { contentType: "application/pdf" });
         if (up.error) throw new Error(up.error.message || "dépôt refusé");
         setPiece({ name: file.name, size: file.size, storagePath: dt.path });
+      } else if (dep.ok && dt.mode === "client" && supabase) {
+        // Pas de clé de service côté serveur : le navigateur dépose avec sa propre session, puis
+        // transmet une URL signée que le serveur relira le temps de créer les brouillons.
+        const bucket = dt.bucket || "pieces-jointes";
+        const chemin = Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8) + "-" + String(file.name).replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80);
+        let up = await supabase.storage.from(bucket).upload(chemin, file, { contentType: "application/pdf", upsert: false });
+        if (up.error) {
+          // Seau absent au premier usage : on tente de le créer, puis on réessaie une fois.
+          try { await supabase.storage.createBucket(bucket, { public: false }); } catch (e) {}
+          up = await supabase.storage.from(bucket).upload(chemin, file, { contentType: "application/pdf", upsert: false });
+          if (up.error) throw new Error(up.error.message || "dépôt refusé par le stockage");
+        }
+        const sg = await supabase.storage.from(bucket).createSignedUrl(chemin, 6 * 3600);
+        if (sg.error || !sg.data || !sg.data.signedUrl) throw new Error((sg.error && sg.error.message) || "lien de lecture indisponible");
+        setPiece({ name: file.name, size: file.size, storageUrl: sg.data.signedUrl });
       } else if (file.size <= 3 * 1024 * 1024) {
         // Repli sans stockage : le fichier voyage dans la requête, donc borné par le plafond Vercel.
         setPiece({ name: file.name, size: file.size, dataUrl: await fileToBase64(file) });
@@ -8862,7 +8878,7 @@ function ProspectMailing({ data, persist, onClose }) {
         throw new Error(dt.error || "dépôt indisponible");
       }
     } catch (e) {
-      setPieceErr("Dépôt du document impossible (" + ((e && e.message) || e) + "). Réessayez, ou choisissez un PDF de moins de 3 Mo.");
+      setPieceErr("Dépôt du document impossible (" + ((e && e.message) || e) + "). Un PDF de moins de 3 Mo passe sans dépôt ; au-delà, il faut autoriser le stockage Supabase (seau « pieces-jointes » accessible en écriture, ou clé de service côté serveur).");
     } finally { setPieceBusy(false); }
   };
   const [cards, setCards] = useWaveCards();
@@ -8968,7 +8984,7 @@ function ProspectMailing({ data, persist, onClose }) {
     }
     updateCard(c.id, { sending: true, sendMsg: "" });
     try {
-      const pj = piece ? [piece.storagePath ? { filename: piece.name, mimeType: "application/pdf", storagePath: piece.storagePath } : { filename: piece.name, mimeType: "application/pdf", contentBase64: piece.dataUrl }] : [];
+      const pj = piece ? [piece.storagePath ? { filename: piece.name, mimeType: "application/pdf", storagePath: piece.storagePath } : piece.storageUrl ? { filename: piece.name, mimeType: "application/pdf", storageUrl: piece.storageUrl } : { filename: piece.name, mimeType: "application/pdf", contentBase64: piece.dataUrl }] : [];
       const res = await fetch("/api/gmail-draft", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ to, subject: c.objet || ("PEN'UP 3D — " + (c.prospect.nom || "")), body: c.corps, attachments: pj }) });
       const dt = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(dt.error || ("Erreur " + res.status));

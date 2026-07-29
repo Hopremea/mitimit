@@ -56,8 +56,11 @@ export default async function handler(req, res) {
     catch (e) { res.status(401).json({ error: "Session invalide ou expiree." }); return; }
   }
 
+  // Sans clé de service, ce n'est pas une panne : le navigateur possède sa propre session Supabase
+  // (clé anon + jeton Clerk) et peut déposer le fichier lui-même, puis en fournir une URL signée que
+  // le serveur relira. On le lui dit plutôt que d'échouer.
   const sb = admin();
-  if (!sb) { res.status(503).json({ error: "Stockage non configuré côté serveur (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY)." }); return; }
+  if (!sb) { res.status(200).json({ mode: "client", bucket: BUCKET }); return; }
 
   let body = {};
   try { body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {}); } catch (e) {}
