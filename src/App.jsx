@@ -3025,8 +3025,56 @@ async function resolveLogoUrl(domain) {
   for (const url of candidates) { if (await imageLoads(url)) return url; }
   return gfav;
 }
-// Recherche web (via Claude) du domaine du site officiel d'une enseigne, pour en déduire le logo.
-async function webFindDomain(query, persistUsage) {
+// ===== Socle commun : ce que les sources GRATUITES savent d'un lieu =====
+// Interrogé AVANT toute recherche IA, partout dans l'application (prospects, groupes,
+// établissements, logos, recherche par zone). Chaque source est optionnelle et silencieuse en cas
+// d'échec : on renvoie ce qu'on a pu trouver, l'IA ne complétera que le reste.
+// Résultat mémoïsé par (nom + ville) le temps de la session : sur une chaîne, trente magasins
+// interrogeaient trente fois les mêmes sources.
+const _lieuCache = new Map();
+async function sourcesGratuitesLieu({ nom, enseigne, ville, cp, marque }) {
+  const cle = [nom, enseigne, ville, cp, marque ? "m" : ""].join("|").toLowerCase();
+  if (_lieuCache.has(cle)) return _lieuCache.get(cle);
+  const out = { site: "", facebook: "", instagram: "", telephone: "", email: "", horaires: "", adresse: "", cp: "", ville: "", sources: [] };
+  const has = (v) => Boolean(String(v || "").trim());
+  // 1) OpenStreetMap : le point de vente lui-même (téléphone, site, horaires, réseaux, adresse).
+  try {
+    const place = await osmFindPlace(nom || enseigne, ville);
+    if (place) {
+      out.site = place.site; out.facebook = place.facebook; out.instagram = place.instagram;
+      out.telephone = place.telephone; out.email = place.email; out.horaires = place.horaires;
+      out.adresse = place.adresse; out.cp = place.cp; out.ville = place.ville;
+      if (has(place.telephone) || has(place.site) || has(place.horaires) || has(place.email)) out.sources.push("OpenStreetMap");
+    }
+  } catch (e) {}
+  // 2) Wikidata : la fiche de la MARQUE (site officiel, Facebook, Instagram). Utile quand le point
+  //    de vente n'a rien en propre — et c'est justement le cas des enseignes nationales.
+  if (marque && (!has(out.site) || !has(out.facebook) || !has(out.instagram))) {
+    try {
+      const w = await wikidataBrand(enseigne || nom);
+      if (w) {
+        if (!has(out.site)) out.site = w.site;
+        if (!has(out.facebook)) out.facebook = w.facebook;
+        if (!has(out.instagram)) out.instagram = w.instagram;
+        if (has(w.site) || has(w.facebook) || has(w.instagram)) out.sources.push("Wikidata");
+      }
+    } catch (e) {}
+  }
+  // 3) Base Adresse Nationale : complète code postal / ville à partir de l'adresse.
+  if (has(out.adresse) && (!has(out.cp) || !has(out.ville))) {
+    try { const b = await banNormalize([out.adresse, cp, ville].filter(Boolean).join(" ")); if (b) { if (!has(out.cp)) out.cp = b.cp; if (!has(out.ville)) out.ville = b.ville; } } catch (e) {}
+  }
+  _lieuCache.set(cle, out);
+  return out;
+}
+// Domaine du site officiel d'une enseigne (sert à déduire le logo).
+// GRATUIT d'abord : Wikidata puis OpenStreetMap. L'IA n'est sollicitée qu'en dernier recours.
+async function webFindDomain(query, persistUsage, ville) {
+  const dom = (u) => { try { return new URL(ensureHttp(u)).hostname.replace(/^www\./, ""); } catch (e) { return ""; } };
+  try {
+    const g = await sourcesGratuitesLieu({ nom: query, enseigne: query, ville: ville || "", marque: true });
+    if (g && g.site) { const d = dom(g.site); if (d) return d; }
+  } catch (e) {}
   const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 300, tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }], messages: [{ role: "user", content: "Donne le domaine du site web officiel de l'enseigne ou de l'entreprise : \"" + query + "\". Réponds UNIQUEMENT par un objet JSON sans texte ni Markdown : {\"domaine\":\"exemple.fr\"}. Si tu n'es pas sûr, mets une chaîne vide." }] }) });
   if (!res.ok) throw new Error("API " + res.status);
   const dt = await res.json();
@@ -3043,17 +3091,6 @@ function smartLink(a) {
   if (a.facebook) return { url: ensureHttp(a.facebook), label: "Facebook", Icon: Facebook };
   if (a.instagram) return { url: ensureHttp(a.instagram), label: "Instagram", Icon: Instagram };
   return { url: "https://www.google.com/search?q=" + encodeURIComponent([a.enseigne, a.ville].filter(Boolean).join(" ")), label: "Rechercher", Icon: Search };
-}
-// Recherche web (via Claude) de la présence en ligne officielle : site web, Facebook, Instagram.
-async function aiFindLinks(query, persistUsage) {
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 600, tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }], messages: [{ role: "user", content: "Recherche la présence en ligne officielle de cet établissement ou enseigne : \"" + query + "\". Donne, uniquement si tu les trouves de façon fiable : l'URL du site web officiel, l'URL de la page Facebook officielle, l'URL du compte Instagram officiel. N'invente RIEN : laisse une chaîne vide si tu n'es pas certain. Réponds UNIQUEMENT par un objet JSON sans texte ni Markdown : {\"site\":\"\",\"facebook\":\"\",\"instagram\":\"\"}." }] }) });
-  if (!res.ok) throw new Error("API " + res.status);
-  const dt = await res.json();
-  if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
-  const text = (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
-  const m = text.match(/\{[\s\S]*\}/); const o = m ? JSON.parse(m[0]) : {};
-  const clean = (v) => (typeof v === "string" ? v.trim() : "");
-  return { site: clean(o.site), facebook: clean(o.facebook), instagram: clean(o.instagram) };
 }
 // Recherche web des horaires d'ouverture habituels d'un magasin (fiche Google / site officiel).
 // Renvoie une chaîne au format français jour par jour, directement exploitable par parseHoraires
@@ -3081,21 +3118,41 @@ async function aiFindHoraires(query, persistUsage) {
   // parfaitement interprétable en grille, l'affichage retombe proprement sur le texte brut.
   return h && /\d\s*[h:]/.test(h) ? h : "";
 }
-// Présence en ligne + horaires en UN SEUL appel IA (au lieu de deux appels parallèles, chacun avec ses
-// propres recherches web) : divise par deux le coût de la recherche IA d'une fiche établissement.
-async function aiFindLinksHoraires(query, persistUsage, wantHoraires) {
-  const prompt = "Recherche la présence en ligne officielle de cet établissement ou enseigne : \"" + query + "\" — site web officiel, page Facebook officielle, compte Instagram officiel" +
-    (wantHoraires ? ", AINSI QUE les horaires d'ouverture habituels de CE magasin (fiche Google Business / site officiel), au format français jour par jour, séparés par des points-virgules (ex. \"Lun 10h-19h; Mar 10h-19h; …; Dim fermé\" ; coupure méridienne : \"Lun 9h30-12h30 et 14h-19h\")" : "") +
-    ". N'invente RIEN : laisse une chaîne vide si tu n'es pas certain. Réponds UNIQUEMENT par un objet JSON sans texte ni Markdown : {\"site\":\"\",\"facebook\":\"\",\"instagram\":\"\"" + (wantHoraires ? ",\"horaires\":\"\"" : "") + "}.";
+// Présence en ligne + horaires d'une fiche établissement.
+// Sources GRATUITES d'abord (OpenStreetMap pour le magasin, Wikidata pour la marque), puis un seul
+// appel IA pour ce qui manque encore — et aucun appel du tout si tout a été trouvé gratuitement.
+// `ctx` porte le contexte utile aux sources gratuites : { nom, enseigne, ville, cp, marque }.
+async function aiFindLinksHoraires(query, persistUsage, wantHoraires, ctx) {
+  const clean = (v) => (typeof v === "string" ? v.trim() : "");
+  const has = (v) => Boolean(clean(v));
+  const out = { site: "", facebook: "", instagram: "", horaires: "" };
+  try {
+    const g = await sourcesGratuitesLieu(ctx || { nom: query, enseigne: (ctx && ctx.enseigne) || "", ville: (ctx && ctx.ville) || "", marque: true });
+    if (g) { out.site = g.site; out.facebook = g.facebook; out.instagram = g.instagram; if (wantHoraires) out.horaires = g.horaires; }
+  } catch (e) {}
+  const manque = [];
+  if (!has(out.site)) manque.push("site");
+  if (!has(out.facebook)) manque.push("facebook");
+  if (!has(out.instagram)) manque.push("instagram");
+  if (wantHoraires && !has(out.horaires)) manque.push("horaires");
+  if (!manque.length) return out; // tout trouvé gratuitement : zéro appel payant
+  const veutHoraires = manque.includes("horaires");
+  const prompt = "Recherche, pour cet établissement ou enseigne : \"" + query + "\", UNIQUEMENT les informations suivantes : " + manque.join(", ") + "." +
+    (veutHoraires ? " Les horaires sont ceux d'ouverture habituels de CE magasin (fiche Google Business / site officiel), au format français jour par jour, séparés par des points-virgules (ex. \"Lun 10h-19h; Mar 10h-19h; …; Dim fermé\" ; coupure méridienne : \"Lun 9h30-12h30 et 14h-19h\")." : "") +
+    (has(out.site) ? " Le site officiel est déjà connu : " + out.site + " — sers-t'en comme point de départ, ne le recherche pas." : "") +
+    " N'invente RIEN : laisse une chaîne vide si tu n'es pas certain. Réponds UNIQUEMENT par un objet JSON sans texte ni Markdown : {" + manque.map((k) => "\"" + k + "\":\"\"").join(",") + "}.";
   const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 700, tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }], messages: [{ role: "user", content: prompt }] }) });
   if (!res.ok) throw new Error("API " + res.status);
   const dt = await res.json();
   if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
   const text = (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
   const m = text.match(/\{[\s\S]*\}/); let o = {}; try { o = m ? JSON.parse(m[0]) : {}; } catch (e) {}
-  const clean = (v) => (typeof v === "string" ? v.trim() : "");
+  if (!has(out.site)) out.site = clean(o.site);
+  if (!has(out.facebook)) out.facebook = clean(o.facebook);
+  if (!has(out.instagram)) out.instagram = clean(o.instagram);
   const h = clean(o.horaires);
-  return { site: clean(o.site), facebook: clean(o.facebook), instagram: clean(o.instagram), horaires: h && /\d\s*[h:]/.test(h) ? h : "" };
+  if (wantHoraires && !has(out.horaires) && h && /\d\s*[h:]/.test(h)) out.horaires = h;
+  return out;
 }
 // Encart photo / logo éditable : téléversement, URL, logo automatique (web) ou logo du groupe.
 function EntityPhoto({ value, onChange, initials: ini, bg, round, size = 64, enseigne, groupLogo, fallback, linkedinHref, persistUsage }) {
@@ -4068,24 +4125,19 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
     const q = [s.label, acc && acc.enseigne, s.adresse || (acc && acc.ville)].filter(Boolean).join(" ");
     const ville = (acc && acc.ville) || "";
     try {
-      // Étage 1 GRATUIT : OpenStreetMap (liens + horaires du point de vente) puis Wikidata pour les
-      // liens officiels de l'enseigne. L'IA payante ne prend le relais que sur ce qui manque encore.
-      const free = { site: "", facebook: "", instagram: "", horaires: "" };
-      try { const pl = await osmFindPlace(s.label || (acc && acc.enseigne), ville); if (pl) { free.site = pl.site; free.facebook = pl.facebook; free.instagram = pl.instagram; free.horaires = pl.horaires; } } catch (e) {}
-      if (!free.site && acc && acc.enseigne) { try { const w = await wikidataBrand(acc.enseigne); if (w) { free.site = free.site || w.site; free.facebook = free.facebook || w.facebook; free.instagram = free.instagram || w.instagram; } } catch (e) {} }
-      const needHoraires = !String(s.horaires || "").trim() && !free.horaires;
-      const needLinks = (!s.site && !free.site) || (!s.facebook && !free.facebook) || (!s.instagram && !free.instagram);
-      // Un seul appel IA pour liens + horaires (au lieu de deux) — et zéro appel si tout est déjà couvert.
-      const ai = (needLinks || needHoraires) ? await aiFindLinksHoraires(q, usage, needHoraires) : { site: "", facebook: "", instagram: "", horaires: "" };
-      const links = { site: free.site || ai.site, facebook: free.facebook || ai.facebook, instagram: free.instagram || ai.instagram };
-      const horaires = free.horaires || ai.horaires || "";
+      // aiFindLinksHoraires enchaîne lui-même les étages : sources GRATUITES (OpenStreetMap pour le
+      // point de vente, Wikidata pour la marque) puis, seulement si nécessaire, un appel IA ciblé
+      // sur ce qui manque. Zéro appel payant si tout a été trouvé gratuitement.
+      const needHoraires = !String(s.horaires || "").trim();
+      const links = await aiFindLinksHoraires(q, usage, needHoraires, { nom: s.label, enseigne: acc && acc.enseigne, ville, cp: s.cp || (acc && acc.cp), marque: true });
+      const horaires = links.horaires || "";
       const patch = {}; const got = [];
       if (links.site && !s.site) { patch.site = links.site; got.push("site web"); }
       if (links.facebook && !s.facebook) { patch.facebook = links.facebook; got.push("Facebook"); }
       if (links.instagram && !s.instagram) { patch.instagram = links.instagram; got.push("Instagram"); }
       if (horaires && !String(s.horaires || "").trim()) { patch.horaires = horaires; got.push("horaires"); }
-      if (got.length) { saveSite({ ...s, ...patch }); setAiMsg("Trouvé par l'IA : " + got.join(", ") + "."); }
-      else setAiMsg(s.site ? "Site web déjà renseigné." : "Aucune information fiable trouvée par l'IA.");
+      if (got.length) { saveSite({ ...s, ...patch }); setAiMsg("Trouvé : " + got.join(", ") + "."); }
+      else setAiMsg(s.site ? "Site web déjà renseigné." : "Aucune information fiable trouvée.");
     } catch (e) { setAiMsg("Recherche IA indisponible ici (fonctionne dans l'app Claude)."); }
     finally { setAiBusy(false); }
   };
@@ -4255,8 +4307,11 @@ function AccountDetail({ account, data, persist, go, onBack, onEdit, onAddContac
     const usage = (u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }));
     const q = [a.enseigne, a.ville].filter(Boolean).join(" ");
     try {
+      // Les deux fonctions interrogent d'abord les sources GRATUITES (Wikidata / OpenStreetMap pour
+      // les liens, registre des entreprises pour l'identité légale) et ne sollicitent l'IA que pour
+      // ce qui manque encore — souvent rien du tout sur un groupe.
       const [links, info] = await Promise.all([
-        aiFindLinks(q, usage).catch(() => ({})),
+        aiFindLinksHoraires(q, usage, false, { nom: a.enseigne, enseigne: a.enseigne, ville: a.ville, marque: true }).catch(() => ({})),
         aiAutofill({ kind: "enseigne", enseigne: a.enseigne, ville: a.ville, adresse: a.adressePostale }).then((r) => { if (r && r.usage) usage(r.usage); return r; }).catch(() => ({})),
       ]);
       const patch = {}; const got = [];
@@ -4264,8 +4319,8 @@ function AccountDetail({ account, data, persist, go, onBack, onEdit, onAddContac
       fill("site", links.site, "site web"); fill("facebook", links.facebook, "Facebook"); fill("instagram", links.instagram, "Instagram");
       fill("siren", info.siren, "SIREN"); fill("raisonSociale", info.raisonSociale, "raison sociale"); fill("formeJuridique", info.formeJuridique, "forme juridique");
       fill("ville", info.ville, "ville"); fill("adressePostale", info.adresse, "adresse");
-      if (got.length) { saveAccount(patch); setAiMsg("Fiche enrichie par l'IA : " + got.join(", ") + "."); }
-      else setAiMsg("Aucune nouvelle information fiable trouvée par l'IA.");
+      if (got.length) { saveAccount(patch); setAiMsg("Fiche enrichie : " + got.join(", ") + (info.confiance && info.confiance !== "haute" ? " (confiance " + info.confiance + " — à vérifier)" : "") + "."); }
+      else setAiMsg("Aucune nouvelle information fiable trouvée.");
     } catch (e) { setAiMsg("Recherche IA indisponible ici (fonctionne dans l'app Claude)."); }
     finally { setAiBusy(false); }
   };
@@ -6678,8 +6733,55 @@ Si la requête est une zone, donne entre 6 et 10 établissements ; si c'est un �
   return { stores: Array.isArray(arr) ? arr : [], usage: data.usage || null };
 }
 async function aiAutofill({ kind, enseigne, ville, adresse, typesEtab }) {
-  const sys = "Tu identifies des informations factuelles et vérifiables sur une entreprise française ou l'un de ses établissements, à partir des registres officiels (annuaire-entreprises.data.gouv.fr / RNE / INSEE, pappers.fr, societe.com, infogreffe.fr, data.inpi.fr) et de sources fiables. Tu n'inventes JAMAIS un numéro d'identification, une adresse ou une raison sociale : en cas de doute, tu laisses le champ vide (chaîne vide).";
-  const cible = [enseigne, adresse, ville].filter(Boolean).join(", ");
+  const has = (v) => Boolean(String(v || "").trim());
+  const onlyNumF = (v) => (typeof v === "string" ? v.replace(/\s/g, "") : "");
+  // ===== Étage GRATUIT, avant toute recherche IA =====
+  // Registre des entreprises pour l'identité légale, OpenStreetMap pour les coordonnées du point de
+  // vente, base adresse nationale pour l'adresse, site officiel pour l'e-mail et le téléphone.
+  const g = { siren: "", siret: "", raisonSociale: "", formeJuridique: "", ville: "", adresse: "", cp: "", telephone: "", email: "", horaires: "", site: "", sources: [] };
+  try {
+    const r = await lookupSirene([enseigne, ville].filter(Boolean).join(" "), ville);
+    if (r) {
+      g.siren = r.siren || ""; g.raisonSociale = r.raisonSociale || ""; g.formeJuridique = r.formeJuridique || "";
+      if (r.mono || r.etabMatch) { g.siret = r.siret || ""; g.adresse = r.adresse || ""; g.cp = r.cp || ""; g.ville = r.ville || ""; }
+      if (g.siren) g.sources.push("SIRENE (annuaire-entreprises)");
+    }
+  } catch (e) {}
+  if (kind === "établissement") {
+    try {
+      const lieu = await sourcesGratuitesLieu({ nom: enseigne, enseigne, ville, cp: g.cp, marque: true });
+      if (lieu) {
+        g.telephone = lieu.telephone; g.email = lieu.email; g.horaires = lieu.horaires; g.site = lieu.site;
+        if (!has(g.adresse) && has(lieu.adresse)) { g.adresse = lieu.adresse; g.cp = g.cp || lieu.cp; g.ville = g.ville || lieu.ville; }
+        (lieu.sources || []).forEach((s) => { if (!g.sources.includes(s)) g.sources.push(s); });
+      }
+    } catch (e) {}
+    // Site officiel du magasin : lecture gratuite de ses pages contact / mentions légales.
+    if (has(g.site) && (!has(g.email) || !has(g.telephone))) {
+      try {
+        const sc = await scrapeContact(g.site);
+        if (sc) {
+          if (!has(g.email) && sc.email) g.email = sc.email;
+          if (!has(g.telephone)) { const t = [sc.telephone, ...(sc.telephones || [])].filter(Boolean).find((x) => telCoherent(x, g.cp)); if (t) g.telephone = t; }
+          if (sc.email || g.telephone) if (!g.sources.includes("site officiel")) g.sources.push("site officiel");
+        }
+      } catch (e) {}
+    }
+  }
+  // Ce que l'IA doit encore chercher. Pour une enseigne, le registre couvre presque tout : dans la
+  // majorité des cas il ne reste rien et AUCUN appel payant n'est fait.
+  const manque = kind === "établissement"
+    ? ["siret", "adresse", "telephone", "email", "horaires", "site", "typeEtablissement", "note"].filter((k) => k === "typeEtablissement" || k === "note" ? true : !has(g[k]))
+    : ["siren", "raisonSociale", "formeJuridique", "ville", "adresse"].filter((k) => !has(g[k]));
+  // La recherche au registre se fait ici par NOM (aucun SIRET/SIREN en entrée) : elle peut tomber sur
+  // un homonyme — « JouéClub » remonte par exemple une association du même nom. On annonce donc au
+  // mieux une confiance MOYENNE, jamais « haute », pour que l'utilisateur vérifie avant de s'y fier.
+  const confFree = g.sources.length ? "moyenne" : "?";
+  const base = { siren: g.siren, siret: g.siret, raisonSociale: g.raisonSociale, formeJuridique: g.formeJuridique, ville: g.ville || ville || "", adresse: g.adresse, telephone: g.telephone, email: g.email, horaires: g.horaires, site: g.site, typeEtablissement: "", note: "", confiance: confFree, source: g.sources.join(" + "), usage: null };
+  if (!manque.length) return base; // tout couvert gratuitement
+  const sys = "Tu identifies des informations factuelles et vérifiables sur une entreprise française ou l'un de ses établissements, à partir des registres officiels (annuaire-entreprises.data.gouv.fr / RNE / INSEE, pappers.fr, societe.com, infogreffe.fr, data.inpi.fr) et de sources fiables. Des sources officielles gratuites ont DÉJÀ été consultées : leurs résultats te sont donnés comme faits établis — appuie-toi dessus, ne les recherche pas. Tu n'inventes JAMAIS un numéro d'identification, une adresse ou une raison sociale : en cas de doute, tu laisses le champ vide (chaîne vide).";
+  const cible = [enseigne, g.adresse || adresse, g.ville || ville].filter(Boolean).join(", ");
+  const acquis = [g.raisonSociale && "Raison sociale : " + g.raisonSociale, g.siren && "SIREN : " + g.siren, g.siret && "SIRET : " + g.siret, g.adresse && "Adresse : " + [g.adresse, g.cp, g.ville].filter(Boolean).join(" "), g.site && "Site officiel : " + g.site, g.telephone && "Téléphone : " + g.telephone].filter(Boolean).join(" ; ");
   let user, schema;
   if (kind === "établissement") {
     user = `Pour cet établissement précis : ${cible}.\nTrouve dans les sources officielles ou la fiche Google de l'établissement :\n- siret : SIRET (14 chiffres) de l'établissement situé EXACTEMENT à cette adresse et cette ville (ni le siège social, ni un autre établissement, et JAMAIS le SIRET d'un magasin d'une autre enseigne de la même zone). Si tu n'es pas certain qu'il corresponde à cette adresse, laisse vide.\n- adresse : adresse postale complète et exacte de l'établissement (numéro, voie, code postal, ville).\n- telephone : numéro de téléphone fixe (standard / accueil) de CE magasin à cette adresse précise, au format français (ex. « 05 63 12 34 56 »). Vérifie qu'il correspond bien à cet établissement et pas au siège ou à un autre point de vente ; en cas de doute, laisse vide.\n- email : adresse e-mail générique de contact de CE magasin (accueil, commande), publiée sur le site officiel ou la fiche Google de l'établissement. Pas l'e-mail d'une personne. En cas de doute, laisse vide.\n- horaires : horaires d'ouverture habituels de l'établissement, en une ligne courte et lisible (ex. « Lun-Sam 10h-19h, Dim fermé »), depuis la fiche Google ou le site officiel. En cas de doute, laisse vide.\n- site : URL du site internet officiel de l'établissement ou de son enseigne (ex. « https://www.cultura.com »), trouvée sur le web. Privilégie le site officiel de la marque ; pas d'annuaire ni de page Google. En cas de doute, laisse vide.\n- typeEtablissement : choisis la valeur la plus juste UNIQUEMENT parmi cette liste : ${(typesEtab || []).join(" | ")}. Si aucune ne convient avec certitude, laisse vide.\n- note : une phrase factuelle décrivant l'établissement (univers de produits, implantation centre-ville ou périphérie). Aucun superlatif commercial.\nSi l'établissement appartient à une enseigne ou un réseau, consulte AUSSI le site officiel de l'enseigne et sa page « trouver un magasin » (store locator), comme le ferait une recherche Google : la fiche magasin de l'enseigne (ex. la fiche du magasin sur joueclub.fr pour un JouéClub) donne souvent l'adresse exacte, le téléphone, les horaires et le courriel du point de vente.\nAttention aux homonymes : ne retiens que l'établissement de la ville indiquée.`;
@@ -6688,7 +6790,9 @@ async function aiAutofill({ kind, enseigne, ville, adresse, typesEtab }) {
     user = `Pour l'entreprise qui exploite l'enseigne : ${cible}.\nTrouve dans les sources officielles :\n- siren : SIREN (9 chiffres) de la personne morale, ou numéro RNA (W + 9 chiffres) si c'est une association. NE METS PAS de SIRET ici.\n- raisonSociale, formeJuridique.\n- ville : ville du siège social ou de rattachement.\n- adresse : adresse postale complète du siège ou de l'établissement principal.\nAttention aux homonymes : si une ville est fournie, ne retiens que l'entité qui lui correspond.`;
     schema = '{"siren":"","raisonSociale":"","formeJuridique":"","ville":"","adresse":"","confiance":"haute/moyenne/faible","source":""}';
   }
-  user += `\n\nRenvoie UNIQUEMENT un objet JSON valide, sans aucun texte ni balise autour, avec EXACTEMENT ces clés :\n${schema}\n"source" = nom de la source officielle utilisée. Tout champ non trouvé reste une chaîne vide.`;
+  user += (acquis ? `\n\nFAITS DÉJÀ ÉTABLIS par les sources officielles gratuites (fiables — sers-t'en pour identifier la bonne entité, ne les recherche pas) : ${acquis}.` : "")
+    + `\n\nNe recherche QUE : ${manque.join(", ")}.`
+    + `\n\nRenvoie UNIQUEMENT un objet JSON valide, sans aucun texte ni balise autour, avec EXACTEMENT ces clés :\n${schema}\n"source" = nom de la source officielle utilisée. Tout champ non trouvé reste une chaîne vide.`;
   const res = await fetch(CLAUDE_URL, {
     method: "POST", headers: await claudeHeaders(),
     body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1200, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }] }),
@@ -6698,8 +6802,19 @@ async function aiAutofill({ kind, enseigne, ville, adresse, typesEtab }) {
   const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
   const m = text.match(/\{[\s\S]*\}/); if (!m) throw new Error("réponse illisible");
   const o = JSON.parse(m[0]);
-  const onlyNum = (v) => (typeof v === "string" ? v.replace(/\s/g, "") : "");
-  return { siren: onlyNum(o.siren), siret: onlyNum(o.siret), raisonSociale: (o.raisonSociale || "").trim(), formeJuridique: (o.formeJuridique || "").trim(), ville: (o.ville || "").trim(), adresse: (o.adresse || "").trim(), telephone: (o.telephone || "").trim(), email: (o.email || "").trim(), horaires: (o.horaires || "").trim(), site: (o.site || "").trim(), typeEtablissement: (o.typeEtablissement || "").trim(), note: (o.note || "").trim(), confiance: o.confiance || "?", source: (o.source || "").trim(), usage: data.usage || null };
+  // Les valeurs obtenues gratuitement (registre officiel, OSM, site du magasin) priment toujours
+  // sur celles de l'IA : elles viennent de sources vérifiables.
+  const pick = (libre, ia) => has(libre) ? libre : String(ia || "").trim();
+  const src = [g.sources.join(" + "), (o.source || "").trim()].filter(Boolean).join(" + ");
+  return {
+    siren: pick(g.siren, onlyNumF(o.siren)), siret: pick(g.siret, onlyNumF(o.siret)),
+    raisonSociale: pick(g.raisonSociale, o.raisonSociale), formeJuridique: pick(g.formeJuridique, o.formeJuridique),
+    ville: pick(g.ville, o.ville), adresse: pick(g.adresse, o.adresse),
+    telephone: pick(g.telephone, o.telephone), email: pick(g.email, o.email),
+    horaires: pick(g.horaires, o.horaires), site: pick(g.site, o.site),
+    typeEtablissement: (o.typeEtablissement || "").trim(), note: (o.note || "").trim(),
+    confiance: o.confiance || confFree, source: src, usage: data.usage || null,
+  };
 }
 // Extraction robuste d'un objet JSON dans une réponse IA (tolère le Markdown et le texte autour),
 // par équilibrage des accolades — plus fiable qu'une regex gloutonne, pour un meilleur taux de réussite.
@@ -6934,7 +7049,12 @@ const REGIONS_DEPTS = {
   "Guadeloupe": ["971"], "Martinique": ["972"], "Guyane": ["973"], "La Réunion": ["974"], "Mayotte": ["976"],
 };
 const DEPT_REGION = {}; Object.entries(REGIONS_DEPTS).forEach(([r, ds]) => ds.forEach((d) => { DEPT_REGION[d] = r; }));
-async function aiEnrichProspect(p, persistUsage, instruction) {
+// Phase 1 : tout ce qui est GRATUIT (registres, OSM, BAN, site officiel), puis préparation de la
+// requête IA pour les seuls champs encore manquants. Renvoie { out, body } — body vaut null quand
+// les sources gratuites ont tout couvert (aucun appel payant à faire).
+// Ce découpage permet d'envoyer la phase IA soit immédiatement (fiche unique), soit en LOT via
+// l'API Batch d'Anthropic (enrichissement de masse, 50 % moins cher sur les tokens).
+async function enrichProspectPreparer(p, instruction) {
   // Enrichissement ÉCONOME en trois temps :
   // 1) SIRENE / annuaire-entreprises (GRATUIT) pour toute l'identité légale (SIREN, SIRET, raison
   //    sociale, forme juridique, dirigeant, adresse si société mono-établissement) ;
@@ -7038,7 +7158,7 @@ async function aiEnrichProspect(p, persistUsage, instruction) {
   need(!has(p.contactNom) && !has(out.contactNom), "contact", "dirigeant ou responsable identifié (prénom, nom, fonction, e-mail, téléphone, source de l'info)");
   need(!has(p.notes) && !has(out.notes), "notes", "une phrase factuelle (univers produits, implantation)");
   const consigne = (instruction || "").trim();
-  if (!misses.length && !consigne) return out; // tout est couvert par les sources gratuites : zéro appel IA
+  if (!misses.length && !consigne) return { out, body: null }; // tout est couvert par les sources gratuites : zéro appel payant
   const schemaObj = {};
   misses.forEach((m) => { if (m.key === "contact") schemaObj.contact = { prenom: "", nom: "", fonction: "", email: "", telephone: "", source: "" }; else schemaObj[m.key] = ""; });
   if (consigne) schemaObj.notes = schemaObj.notes || "";
@@ -7071,31 +7191,57 @@ Renvoie UNIQUEMENT un objet JSON valide (aucun texte ni balise autour) avec EXAC
 ${JSON.stringify(schemaObj)}
 "source" = registre / source principale utilisée. Tout champ non trouvé reste une chaîne vide.${consigne ? "\n\nPRIORITÉ DEMANDÉE PAR L'UTILISATEUR (concentre ta recherche là-dessus, sans rien inventer, et résume les trouvailles dans \"notes\") :\n" + consigne : ""}`;
   const body = { model: "claude-haiku-4-5", max_tokens: 1000, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }] };
+  return { out, body };
+}
+// Phase 2 : fusion de la réponse IA dans le résultat des sources gratuites. Les valeurs déjà
+// obtenues gratuitement priment toujours (elles viennent de registres officiels).
+function enrichProspectAppliquer(p, out, text) {
+  const has = (v) => Boolean(String(v || "").trim());
   const onlyNum = (v) => (typeof v === "string" ? v.replace(/[^0-9A-Za-z]/g, "") : "");
+  const o = parseJsonObject(text); const c = o.contact || {};
+  const take = (k, v) => { if (has(v) && !has(out[k])) out[k] = v; };
+  take("nom", (o.nom || "").trim());
+  take("site", (o.site || "").trim()); take("facebook", (o.facebook || "").trim()); take("instagram", (o.instagram || "").trim());
+  take("siren", onlyNum(o.siren)); take("siret", onlyNum(o.siret)); take("raisonSociale", (o.raisonSociale || "").trim()); take("formeJuridique", (o.formeJuridique || "").trim());
+  take("adresse", (o.adresse || "").trim()); take("cp", onlyNum(o.cp)); take("ville", (o.ville || "").trim());
+  take("telephone", (o.telephone || "").trim()); take("email", (o.email || "").trim());
+  take("contactPrenom", (c.prenom || "").trim()); take("contactNom", (c.nom || "").trim()); take("contactFonction", (c.fonction || "").trim()); take("contactEmail", (c.email || "").trim()); take("contactTel", (c.telephone || "").trim()); take("contactSource", (c.source || "").trim());
+  take("notes", (o.notes || "").trim());
+  if (o.confiance) out.confiance = out.confiance === "haute" ? "haute" : o.confiance;
+  if (o.source) out.source = out.source ? out.source + " + " + String(o.source).trim() : String(o.source).trim();
+  // Le code postal a pu arriver via l'IA : re-déduire département / région localement si besoin.
+  const dep2 = cpToDepartement(p.cp || out.cp);
+  if (dep2 && !has(out.departement) && !has(p.departement)) { out.departement = dep2; if (!has(p.region)) out.region = DEPT_REGION[dep2] || ""; }
+  return out;
+}
+// Extrait le texte d'une réponse Claude (blocs « text » uniquement, hors blocs d'outil).
+const claudeText = (data) => (data && data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+// ===== Client de l'API Batch (traitement par lot, 50 % moins cher sur les tokens) =====
+const BATCH_URL = "/api/claude-batch";
+async function batchCall(action, payload) {
+  const res = await fetch(BATCH_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action, ...payload }) });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((j && j.error) || ("API " + res.status));
+  return j;
+}
+// Identifiant de requête dans un lot : l'API exige [a-zA-Z0-9_-] et l'unicité. On utilise la
+// POSITION dans le lot plutôt que l'id de la fiche : unique par construction, et aucun risque de
+// collision par troncature qui appliquerait le résultat d'un magasin à un autre.
+const batchId = (i) => "f" + i;
+// Enrichissement d'UNE fiche, en direct (fiche ouverte, bouton « Approfondir ») : phase gratuite
+// puis appel IA immédiat. C'est le chemin à privilégier pour l'unitaire, où l'attente compte.
+async function aiEnrichProspect(p, persistUsage, instruction) {
+  const { out, body } = await enrichProspectPreparer(p, instruction);
+  if (!body) return out; // les sources gratuites ont tout couvert
   try {
     const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify(body) });
     if (!res.ok) throw new Error("API " + res.status);
     const data = await res.json();
     if (data.usage && persistUsage) persistUsage(data.usage);
     out.usage = data.usage || null;
-    const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
-    const o = parseJsonObject(text); const c = o.contact || {};
-    const take = (k, v) => { if (has(v) && !has(out[k])) out[k] = v; };
-    take("nom", (o.nom || "").trim());
-    take("site", (o.site || "").trim()); take("facebook", (o.facebook || "").trim()); take("instagram", (o.instagram || "").trim());
-    take("siren", onlyNum(o.siren)); take("siret", onlyNum(o.siret)); take("raisonSociale", (o.raisonSociale || "").trim()); take("formeJuridique", (o.formeJuridique || "").trim());
-    take("adresse", (o.adresse || "").trim()); take("cp", onlyNum(o.cp)); take("ville", (o.ville || "").trim());
-    take("telephone", (o.telephone || "").trim()); take("email", (o.email || "").trim());
-    take("contactPrenom", (c.prenom || "").trim()); take("contactNom", (c.nom || "").trim()); take("contactFonction", (c.fonction || "").trim()); take("contactEmail", (c.email || "").trim()); take("contactTel", (c.telephone || "").trim()); take("contactSource", (c.source || "").trim());
-    take("notes", (o.notes || "").trim());
-    if (o.confiance) out.confiance = out.confiance === "haute" ? "haute" : o.confiance;
-    if (o.source) out.source = out.source ? out.source + " + " + String(o.source).trim() : String(o.source).trim();
-    // Le code postal a pu arriver via l'IA : re-déduire département / région localement si besoin.
-    const dep2 = cpToDepartement(p.cp || out.cp);
-    if (dep2 && !has(out.departement) && !has(p.departement)) { out.departement = dep2; if (!has(p.region)) out.region = DEPT_REGION[dep2] || ""; }
-    return out;
+    return enrichProspectAppliquer(p, out, claudeText(data));
   } catch (e) {
-    // Si le registre gratuit a déjà apporté quelque chose, on le conserve plutôt que de tout perdre.
+    // Si les sources gratuites ont déjà apporté quelque chose, on le conserve plutôt que tout perdre.
     if (out.source) return out;
     throw e;
   }
@@ -7239,6 +7385,9 @@ function EnrichSelectModal({ prospects, onClose, onLaunch }) {
   const [sel, setSel] = useState(() => new Set(typeKeys));
   const [limit, setLimit] = useState("");
   const [instruction, setInstruction] = useState("");
+  // Mode strictement GRATUIT : registres officiels, OpenStreetMap, base adresse et lecture du site
+  // du magasin uniquement. Aucune recherche web IA, donc aucun coût.
+  const [gratuitSeul, setGratuitSeul] = useState(false);
   const toggle = (t) => setSel((s) => { const n = new Set(s); n.has(t) ? n.delete(t) : n.add(t); return n; });
   const allOn = typeKeys.length > 0 && typeKeys.every((t) => sel.has(t));
   const selTypes = typeKeys.filter((t) => sel.has(t));
@@ -7246,7 +7395,7 @@ function EnrichSelectModal({ prospects, onClose, onLaunch }) {
   const lim = parseInt(limit, 10); const capped = lim > 0 ? lim : 0;
   const finalCount = capped ? Math.min(capped, selCount) : selCount;
   return (<Modal title="Enrichir les fiches" onClose={onClose}>
-    <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5, marginBottom: 10 }}>Choisissez les <strong>catégories</strong> à enrichir par recherche web IA (e-mails et téléphones manquants en priorité). Vous pouvez aussi <strong>limiter le nombre</strong> de fiches traitées. Rien n'est inventé, à vérifier ensuite.</div>
+    <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5, marginBottom: 10 }}>Choisissez les <strong>catégories</strong> à enrichir (e-mails et téléphones manquants en priorité). Les sources officielles gratuites sont toujours interrogées en premier ; l'IA ne complète ensuite que ce qui manque — sauf si vous cochez le mode gratuit ci-dessous. Vous pouvez aussi <strong>limiter le nombre</strong> de fiches traitées. Rien n'est inventé, à vérifier ensuite.</div>
     {typeKeys.length === 0 ? <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Aucune fiche prospect à enrichir.</div> : <>
       <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 700, paddingBottom: 8, marginBottom: 8, borderBottom: "1px solid var(--line)" }}><input type="checkbox" checked={allOn} onChange={() => setSel(allOn ? new Set() : new Set(typeKeys))} style={{ width: 15, height: 15 }} /> Toutes les catégories <span style={{ color: "var(--muted)", fontWeight: 600 }}>· {targets.length}</span></label>
       <div style={{ display: "grid", gap: 6, marginBottom: 12 }}>
@@ -7256,12 +7405,18 @@ function EnrichSelectModal({ prospects, onClose, onLaunch }) {
           {PROSPECT_TYPES[t].label} <span style={{ color: "var(--muted)", fontWeight: 500 }}>· {counts[t]}</span>
         </label>))}
       </div>
+      <label style={{ display: "flex", alignItems: "flex-start", gap: 9, fontSize: 12.5, fontWeight: 600, padding: "11px 12px", borderRadius: 11, background: gratuitSeul ? "#eef6ee" : "var(--bg)", border: "1px solid " + (gratuitSeul ? "#bfe0c0" : "var(--line)"), marginBottom: 12, cursor: "pointer" }}>
+        <input type="checkbox" checked={gratuitSeul} onChange={(e) => setGratuitSeul(e.target.checked)} style={{ width: 15, height: 15, marginTop: 2, flexShrink: 0 }} />
+        <span>Sources gratuites uniquement — <span style={{ color: "var(--green)", fontWeight: 800 }}>aucun coût</span>
+          <span style={{ display: "block", fontWeight: 500, color: "var(--muted)", marginTop: 3, lineHeight: 1.5 }}>Registre des entreprises, OpenStreetMap, base adresse nationale et lecture du site officiel du magasin. Aucune recherche web IA n'est lancée : la complétion est moins large, mais la dépense est nulle.</span>
+        </span>
+      </label>
       <div className="fld"><label>Limiter le nombre de fiches (optionnel)</label><input type="number" min="1" value={limit} onChange={(e) => setLimit(e.target.value)} placeholder={"Toutes (" + selCount + ")"} style={{ width: 200 }} /></div>
-      <div className="fld"><label>Que voulez-vous enrichir en priorité ? (optionnel)</label><textarea rows={3} value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder={"Ex. : trouver l'e-mail du responsable achats et les horaires d'ouverture ; vérifier le SIRET et la surface de vente ; récupérer les réseaux sociaux…"} style={{ width: "100%", fontSize: 12.5 }} /><span style={{ fontSize: 11, color: "var(--muted)" }}>Laissez vide pour la recherche standard (e-mails et téléphones manquants en priorité).</span></div>
+      {!gratuitSeul && <div className="fld"><label>Que voulez-vous enrichir en priorité ? (optionnel)</label><textarea rows={3} value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder={"Ex. : trouver l'e-mail du responsable achats et les horaires d'ouverture ; vérifier le SIRET et la surface de vente ; récupérer les réseaux sociaux…"} style={{ width: "100%", fontSize: 12.5 }} /><span style={{ fontSize: 11, color: "var(--muted)" }}>Laissez vide pour la recherche standard (e-mails et téléphones manquants en priorité).</span></div>}
     </>}
     <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
       <button className="btn btn-g" onClick={onClose}>Annuler</button>
-      <button className="btn btn-ai" disabled={!finalCount} onClick={() => onLaunch(new Set(selTypes), capped, instruction)}><Sparkles size={15} /> Enrichir {finalCount || ""}</button>
+      <button className={cx("btn", gratuitSeul ? "btn-p" : "btn-ai")} disabled={!finalCount} onClick={() => onLaunch(new Set(selTypes), capped, gratuitSeul ? "" : instruction, gratuitSeul)}>{gratuitSeul ? <Globe size={15} /> : <Sparkles size={15} />} Enrichir {finalCount || ""}{gratuitSeul ? " (gratuit)" : ""}</button>
     </div>
   </Modal>);
 }
@@ -7291,31 +7446,57 @@ function Prospection({ data, persist, go }) {
   // `instruction` : consigne libre décrivant ce que l'utilisateur veut enrichir en priorité.
   // Lance l'enrichissement IA sur une file de fiches déjà constituée (utilisé par « Enrichir les fiches »
   // ET par les actions groupées « Enrichir la sélection »).
-  const runEnrichQueue = (queue, instruction) => {
+  // Exécution commune (sans confirmation) : phase gratuite appliquée au fil de l'eau, puis envoi en
+  // LOT de ce qui reste. Partagée par l'enrichissement en masse et la recherche post-import.
+  const lancerEnrich = (queue, consigne, libelle, gratuitSeul) => {
+    if (aiJobs.has("prospects:enrich")) { setEnrichMsg({ ok: false, t: "Un enrichissement est déjà en cours." }); return; }
+    if (data.claudeBatch && data.claudeBatch.id) { setEnrichMsg({ ok: false, t: "Un lot d'enrichissement est déjà en cours de traitement. Attendez sa fin (ou abandonnez-le) avant d'en lancer un autre." }); return; }
+    setEnrichMsg(null);
+    aiJobs.run("prospects:enrich", libelle, async (prog) => {
+      // --- Phase 1 : sources gratuites, appliquées au fil de l'eau (aucun coût) ---
+      let done = 0; prog(0, queue.length);
+      const aFaire = []; let nGratuit = 0;
+      for (const p of queue) {
+        try {
+          const { out, body } = await enrichProspectPreparer(p, consigne);
+          if (out.source) { persist((d) => ({ ...d, prospects: d.prospects.map((x) => x.id === p.id ? applyProspectEnrich(x, out) : x) })); nGratuit++; }
+          if (body && !gratuitSeul) aFaire.push({ id: p.id, out, body });
+        } catch (e) {}
+        done++; prog(done, queue.length);
+      }
+      if (!aFaire.length) {
+        setEnrichMsg({ ok: true, t: gratuitSeul
+          ? ("Mode gratuit : " + nGratuit + " fiche(s) sur " + queue.length + " complétée(s) par les sources officielles, sans aucune dépense. Relancez sans le mode gratuit pour que l'IA cherche ce qui manque encore.")
+          : ("Terminé sans aucun appel payant : " + nGratuit + " fiche(s) complétée(s) par les seules sources gratuites.") });
+        return;
+      }
+      // --- Phase 2 : ce qui reste part en lot chez Anthropic (50 % moins cher sur les tokens) ---
+      try {
+        const requests = aFaire.map((r, i) => ({ custom_id: batchId(i), params: r.body }));
+        const lot = await batchCall("create", { requests });
+        if (!lot || !lot.id) throw new Error("lot non créé");
+        persist((d) => ({ ...d, claudeBatch: { id: lot.id, at: new Date().toISOString(), count: aFaire.length, gratuit: nGratuit, outs: aFaire.reduce((m, r, i) => { m[batchId(i)] = { id: r.id, out: r.out }; return m; }, {}) } }));
+        setEnrichMsg({ ok: true, t: nGratuit + " fiche(s) complétée(s) gratuitement. " + aFaire.length + " fiche(s) envoyée(s) à l'IA en lot (50 % moins cher) — résultats appliqués automatiquement dès qu'ils arrivent, généralement en moins d'une heure. Vous pouvez fermer l'application." });
+      } catch (e) {
+        setEnrichMsg({ ok: false, t: "Sources gratuites appliquées sur " + nGratuit + " fiche(s), mais l'envoi du lot IA a échoué (" + ((e && e.message) || e) + "). Réessayez plus tard." });
+      }
+    });
+  };
+  const runEnrichQueue = (queue, instruction, gratuitSeul) => {
     if (aiJobs.has("prospects:enrich")) { setEnrichMsg({ ok: false, t: "Un enrichissement est déjà en cours." }); return; }
     if (!queue || !queue.length) { setEnrichMsg({ ok: false, t: "Aucune fiche enrichissable." }); return; }
     const consigne = (instruction || "").trim();
-    appConfirm("Enrichir " + queue.length + " fiche(s) prospect via recherche web IA" + (consigne ? ", selon votre consigne" : ", en priorité les e-mails et téléphones manquants") + " ? L'identité légale est d'abord cherchée GRATUITEMENT dans le registre SIRENE ; l'IA ne complète que les champs restants. Coût estimé : ~" + (queue.length * 0.05).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " € maximum. Cela peut prendre plusieurs minutes. Rien n'est inventé, à vérifier ensuite.", { title: "Enrichir les fiches", confirmLabel: "Lancer" }).then((ok) => {
-      if (!ok) return;
-      let nMail = 0, nTel = 0;
-      setEnrichMsg(null);
-      aiJobs.run("prospects:enrich", "Enrichir les prospects", async (prog) => {
-        let done = 0; prog(0, queue.length);
-        for (const p of queue) {
-          try {
-            const r = await aiEnrichProspect(p, (u) => persist((d) => ({ ...d, claudeUsage: addUsage(d.claudeUsage, u) })), consigne);
-            if ((r.email || r.contactEmail) && !(p.email || "").trim()) nMail++;
-            if ((r.telephone || r.contactTel) && !(p.telephone || "").trim()) nTel++;
-            persist((d) => ({ ...d, prospects: d.prospects.map((x) => x.id === p.id ? applyProspectEnrich(x, r) : x) }));
-          } catch (e) {}
-          done++; prog(done, queue.length);
-          await new Promise((res) => setTimeout(res, 200));
-        }
-        setEnrichMsg({ ok: true, t: "Enrichissement terminé : " + nMail + " e-mail(s) et " + nTel + " téléphone(s) ajoutés sur " + queue.length + " fiche(s). À vérifier (rien d'inventé)." });
+    if (gratuitSeul) {
+      appConfirm("Enrichir " + queue.length + " fiche(s) en MODE GRATUIT ? Seules les sources officielles sans frais sont interrogées : registre des entreprises, OpenStreetMap, base adresse nationale et site officiel du magasin. Aucune recherche web IA n'est lancée, la dépense est donc nulle. La complétion sera moins large qu'avec l'IA.", { title: "Enrichir sans frais", confirmLabel: "Lancer (gratuit)" }).then((ok) => {
+        if (ok) lancerEnrich(queue, "", "Enrichir (sources gratuites)", true);
       });
+      return;
+    }
+    appConfirm("Enrichir " + queue.length + " fiche(s) prospect ? Déroulé : les sources officielles GRATUITES (SIRENE, OpenStreetMap, base adresse, site du magasin) sont interrogées d'abord et appliquées immédiatement ; seuls les champs encore manquants partent ensuite à l'IA, groupés en un LOT facturé 50 % moins cher sur les tokens. Le lot met généralement moins d'une heure (24 h au maximum) : vous pouvez fermer l'application, les résultats seront appliqués au retour. Coût estimé : ~" + (queue.length * 0.03).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " € maximum. Rien n'est inventé, à vérifier ensuite.", { title: "Enrichir les fiches", confirmLabel: "Lancer" }).then((ok) => {
+      if (ok) lancerEnrich(queue, consigne, "Enrichir les prospects", false);
     });
   };
-  const enrichAll = (types, limit, instruction) => {
+  const enrichAll = (types, limit, instruction, gratuitSeul) => {
     let targets = prospects.filter((p) => !p.accountId && hasProspectIdentity(p));
     if (types && types.size) targets = targets.filter((p) => types.has(p.type || "autre"));
     if (!targets.length) { setEnrichMsg({ ok: false, t: "Aucun prospect à enrichir." }); return; }
@@ -7323,20 +7504,13 @@ function Prospection({ data, persist, go }) {
     const rest = targets.filter((p) => (p.email || "").trim() && (p.telephone || "").trim());
     let queue = [...missing, ...rest]; // priorité aux fiches sans e-mail / téléphone
     if (limit && limit > 0) queue = queue.slice(0, limit);
-    runEnrichQueue(queue, instruction);
+    runEnrichQueue(queue, instruction, gratuitSeul);
   };
-  // Recherche web IA lancée sur les prospects fraîchement importés (tâche de fond).
+  // Recherche lancée sur les prospects fraîchement importés (option cochée à l'import) : même
+  // déroulé que l'enrichissement en masse — sources gratuites d'abord, puis lot IA.
   const enrichCreated = (created) => {
-    if (aiJobs.has("prospects:enrich") || !created.length) return;
-    aiJobs.run("prospects:enrich", "Rechercher les prospects importés", async (prog) => {
-      let done = 0; prog(0, created.length);
-      for (const p of created) {
-        try { const r = await aiEnrichProspect(p, (u) => persist((d) => ({ ...d, claudeUsage: addUsage(d.claudeUsage, u) }))); persist((d) => ({ ...d, prospects: d.prospects.map((x) => x.id === p.id ? applyProspectEnrich(x, r) : x) })); } catch (e) { }
-        done++; prog(done, created.length);
-        await new Promise((res) => setTimeout(res, 200));
-      }
-      setEnrichMsg({ ok: true, t: "Recherche terminée sur " + created.length + " prospect(s) importé(s). À vérifier (rien d'inventé)." });
-    });
+    if (!created.length) return;
+    lancerEnrich(created, "", "Rechercher les prospects importés");
   };
   // Création des prospects importés, puis recherche IA optionnelle. Dédoublonnage renforcé : on écarte
   // toute fiche qui correspond à un prospect DÉJÀ enregistré OU à un établissement / groupe / point de
@@ -7762,6 +7936,14 @@ function Prospection({ data, persist, go }) {
     </div>
     {dupMsg && <div className="card" style={{ borderLeft: "4px solid " + (dupMsg.ok ? "var(--green)" : "#9aa6bd"), marginBottom: 12, fontSize: 12.5 }}>{dupMsg.t}</div>}
     {enrichMsg && <div className="card" style={{ borderLeft: "4px solid " + (enrichMsg.ok ? "var(--green)" : "var(--red)"), marginBottom: 12, fontSize: 12.5 }}>{enrichMsg.t}</div>}
+    {/* Lot IA en cours : il tourne côté Anthropic, l'application peut être fermée entre-temps. */}
+    {data.claudeBatch && data.claudeBatch.id && (() => { const b = data.claudeBatch; const depuis = Math.max(0, Math.round((Date.now() - new Date(b.at).getTime()) / 60000)); return (
+      <div className="card" style={{ borderLeft: "4px solid var(--blue)", marginBottom: 12, fontSize: 12.5, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <Sparkles size={15} className="spin" style={{ color: "var(--blue)", flexShrink: 0 }} />
+        <span style={{ flex: 1, minWidth: 220 }}><strong>{b.count} fiche(s)</strong> en cours d'enrichissement par l'IA en lot (50 % moins cher) — lancé il y a {depuis < 1 ? "moins d'une minute" : depuis + " min"}. Les résultats s'appliqueront automatiquement, même si vous fermez l'application.</span>
+        <button className="btn btn-g btn-s" onClick={() => appConfirm("Abandonner le lot d'enrichissement en cours ? Les fiches déjà complétées par les sources gratuites sont conservées ; les résultats IA de ce lot seront perdus.", { title: "Abandonner le lot ?", confirmLabel: "Abandonner" }).then((ok) => { if (!ok) return; batchCall("cancel", { id: b.id }).catch(() => {}); persist((d) => ({ ...d, claudeBatch: null, claudeBatchMsg: { ok: false, t: "Lot d'enrichissement abandonné." } })); })}>Abandonner</button>
+      </div>); })()}
+    {data.claudeBatchMsg && <div className="card" style={{ borderLeft: "4px solid " + (data.claudeBatchMsg.ok ? "var(--green)" : "var(--red)"), marginBottom: 12, fontSize: 12.5, display: "flex", alignItems: "center", gap: 10 }}><span style={{ flex: 1 }}>{data.claudeBatchMsg.t}</span><button className="btn btn-g btn-s" onClick={() => persist((d) => ({ ...d, claudeBatchMsg: null }))}>Fermer</button></div>}
     <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}><span>{list.length} prospect(s){list.length !== activeCount ? " sur " + activeCount : ""} · groupés par {gd.label.toLowerCase()}</span>{selMode && <><button className="btn btn-ghost btn-s" onClick={selectAllVisible}><CheckSquare size={13} /> Tout sélectionner ({list.length})</button>{selCount > 0 && <button className="btn btn-ghost btn-s" onClick={clearSel}><X size={13} /> Désélectionner ({selCount})</button>}</>}</div>
     {list.length === 0 ? <div className="card empty">Aucun prospect ne correspond.</div> : groups.map((g) => { const m = gd.meta ? gd.meta(g.key) : null; const lbl = m ? m.label : g.key; const col = m ? m.color : "#9aa6bd"; return (
       <div key={g.key} style={{ marginBottom: 20 }}>
@@ -7790,7 +7972,7 @@ function Prospection({ data, persist, go }) {
       </div>
     )}
     {importOpen && <ProspectImportModal onClose={() => setImportOpen(false)} onImport={(drafts, enrich, mode, opts) => mode === "update" ? doUpdateImport(drafts, opts) : doImport(drafts, enrich)} />}
-    {enrichOpen && <EnrichSelectModal prospects={prospects} onClose={() => setEnrichOpen(false)} onLaunch={(types, limit, instruction) => { setEnrichOpen(false); enrichAll(types, limit, instruction); }} />}
+    {enrichOpen && <EnrichSelectModal prospects={prospects} onClose={() => setEnrichOpen(false)} onLaunch={(types, limit, instruction, gratuitSeul) => { setEnrichOpen(false); enrichAll(types, limit, instruction, gratuitSeul); }} />}
     {edit && <Modal title={edit.nom ? edit.nom : "Nouveau prospect"} onClose={() => { setEdit(null); setPfMsg(null); setSirMsg(null); }} wide>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
         <button type="button" className="btn btn-ai btn-s" onClick={enrichProspect} disabled={pfBusy || !hasProspectIdentity(edit)} title="Recherche « produit en croix » : à partir de n'importe quelle info connue (nom, SIRET, adresse, téléphone…), retrouver et compléter les champs vides, y compris le nom"><Sparkles size={14} className={pfBusy ? "spin" : ""} /> {pfBusy ? ("Recherche… " + fmtElapsed(pfElapsed)) : "Approfondir la recherche IA"}</button>
@@ -10533,6 +10715,83 @@ function ConfirmHost() {
     </div>
   </div>);
 }
+// ===== Alerte de dépense IA =====
+// À chaque palier de 5 € atteint DANS LA JOURNÉE, une fenêtre s'impose à l'écran avec le montant du
+// jour. Ce n'est PAS un blocage : rien n'est coupé, on informe pour que la dépense ne file jamais
+// à l'insu de l'utilisateur (c'est ce qui avait produit la facture de 84 $).
+const CLAUDE_ALERTE_PAS_EUR = 5;
+// Palier déjà signalé aujourd'hui (0 si l'acquittement date d'un autre jour : remise à zéro chaque jour).
+function paliersSignales(u) { const a = u && u.alerte; return a && a.date === TODAY() ? (a.palier || 0) : 0; }
+function ClaudeSpendAlert({ usage, onAck }) {
+  const u = usage || {};
+  const jour = (u.days && u.days[TODAY()]) || null;
+  const eur = jour ? usageDayEur(jour) : 0;
+  const palier = Math.floor(eur / CLAUDE_ALERTE_PAS_EUR); // 1 = 5 € franchis, 2 = 10 €, etc.
+  const vu = paliersSignales(u);
+  // Un seul affichage même si plusieurs paliers sont franchis d'un coup (gros lot d'enrichissement).
+  if (palier <= vu) return null;
+  const fmt = (x) => x.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const tokensEur = claudeEur(jour), webEur = webSearchUsd(jour.webSearches || 0) * CLAUDE_USD_EUR;
+  return (<div role="alertdialog" aria-modal="true" aria-label="Alerte de dépense IA" style={{ position: "fixed", inset: 0, background: "rgba(20,22,30,.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 18, zIndex: 100000 }}>
+    <div style={{ background: "var(--card)", borderRadius: 16, padding: "24px 24px 20px", maxWidth: 460, width: "100%", boxShadow: "0 24px 70px rgba(0,0,0,.3)", borderTop: "5px solid var(--orange)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 14 }}>
+        <div style={{ width: 40, height: 40, borderRadius: 11, background: "#fdf0e2", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><AlertTriangle size={21} color="var(--orange)" /></div>
+        <div><div className="pu-display" style={{ fontWeight: 800, fontSize: 17 }}>Dépense IA : {fmt(palier * CLAUDE_ALERTE_PAS_EUR)} € franchis aujourd'hui</div>
+        <div style={{ fontSize: 12, color: "var(--muted)" }}>Alerte à chaque tranche de {CLAUDE_ALERTE_PAS_EUR} €</div></div>
+      </div>
+      <div style={{ background: "var(--bg)", borderRadius: 12, padding: "14px 16px", marginBottom: 14 }}>
+        <div style={{ fontSize: 12, color: "var(--muted)" }}>Total estimé de la journée</div>
+        <div style={{ fontSize: 32, fontWeight: 800, color: "var(--orange)" }} className="tnum">{fmt(eur)} €</div>
+        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4 }}>dont <span className="tnum">{fmt(tokensEur)} €</span> de tokens · <span className="tnum">{fmt(webEur)} €</span> de recherche web ({num(jour.webSearches || 0)} recherche{(jour.webSearches || 0) > 1 ? "s" : ""}) · {num(jour.calls || 0)} appel{(jour.calls || 0) > 1 ? "s" : ""}</div>
+      </div>
+      <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55, marginBottom: 18 }}>Rien n'est bloqué : l'IA reste utilisable. Si le montant vous surprend, la cause la plus fréquente est un enrichissement de masse en cours — vous pouvez le laisser finir ou le suspendre. Le détail jour par jour est dans <strong>Intégrations</strong>.</div>
+      <div style={{ display: "flex", justifyContent: "flex-end" }}><button className="btn btn-p" onClick={() => onAck(palier)}>Compris</button></div>
+    </div>
+  </div>);
+}
+// ===== Surveillance du lot d'enrichissement IA =====
+// Un lot Anthropic est asynchrone (moins d'une heure en général, 24 h au maximum). Le lot en cours
+// est enregistré dans les données : ce veilleur le reprend donc aussi après un rechargement ou une
+// fermeture de l'application, et applique les résultats dès qu'ils sont disponibles.
+function ClaudeBatchWatcher({ batch, persist }) {
+  const id = batch && batch.id;
+  useEffect(() => {
+    if (!id) return;
+    let stop = false;
+    const tick = async () => {
+      let r;
+      try { r = await batchCall("results", { id }); }
+      catch (e) {
+        // Lot introuvable (supprimé, ou expiré au-delà de 29 jours) : on cesse de le surveiller.
+        if (/404|not_found|introuvable/i.test(String((e && e.message) || e))) { persist((d) => ({ ...d, claudeBatch: null, claudeBatchMsg: { ok: false, t: "Le lot d'enrichissement n'est plus disponible côté Anthropic — il a été abandonné." } })); }
+        return;
+      }
+      if (stop || !r || r.pending) return; // toujours en traitement : on repassera
+      const outs = (batch && batch.outs) || {};
+      let nOk = 0, nEchec = 0;
+      persist((d) => {
+        let prospects = d.prospects || []; let usage = d.claudeUsage;
+        for (const line of (r.results || [])) {
+          const ent = outs[line.custom_id]; if (!ent) continue;
+          const resu = line.result || {};
+          if (resu.type !== "succeeded" || !resu.message) { nEchec++; continue; }
+          if (resu.message.usage) usage = addUsage(usage, resu.message.usage);
+          try {
+            const fiche = prospects.find((x) => x.id === ent.id) || {};
+            const out = enrichProspectAppliquer(fiche, { ...ent.out }, claudeText(resu.message));
+            prospects = prospects.map((x) => x.id === ent.id ? applyProspectEnrich(x, out) : x);
+            nOk++;
+          } catch (e) { nEchec++; }
+        }
+        return { ...d, prospects, claudeUsage: usage, claudeBatch: null, claudeBatchMsg: { ok: true, t: "Lot d'enrichissement terminé : " + nOk + " fiche(s) complétée(s) par l'IA" + (nEchec ? " (" + nEchec + " sans résultat exploitable)" : "") + ". À vérifier (rien d'inventé)." } };
+      });
+    };
+    tick(); // vérification immédiate (utile juste après un rechargement)
+    const iv = setInterval(tick, 30000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [id]);
+  return null;
+}
 // Code météo WMO (Open-Meteo) → emoji + libellé court FR.
 function wmoMeta(code) {
   if (code === 0) return { e: "☀️", l: "Ensoleillé" };
@@ -11015,7 +11274,7 @@ export default function App() {
     return { accounts: data.accounts.length, repertoire: data.contacts.length, prospection: data.prospects.filter((p) => p.statut === "a_contacter").length, deals: data.deals.length, pipeline: data.deals.filter((d) => d.statut !== "livre" && d.statut !== "refuse").length, agenda: agendaAl, stock: stockAl, reassort: reAl, sav: savAl, presto: prestoAl };
   }, [data]);
   const meta = TABS.find((t) => t.id === tab);
-  return (<div className={cx("pu-root", navOpen && "nav-open", theme === "dark" && "dark", "color-" + bgColor, "pat-" + bgPattern, "acc-" + accent)}><style>{CSS}</style><ConfirmHost /><FilamentConfetti />
+  return (<div className={cx("pu-root", navOpen && "nav-open", theme === "dark" && "dark", "color-" + bgColor, "pat-" + bgPattern, "acc-" + accent)}><style>{CSS}</style><ConfirmHost /><ClaudeBatchWatcher batch={data.claudeBatch} persist={persist} /><ClaudeSpendAlert usage={data.claudeUsage} onAck={(palier) => persist((p2) => ({ ...p2, claudeUsage: { ...(p2.claudeUsage || {}), alerte: { date: TODAY(), palier } } }))} /><FilamentConfetti />
     <div className="sb-scrim no-print" onClick={() => setNavOpen(false)} aria-hidden="true" />
     <aside className="sb">
       <div className="brand"><img src="/logo-mitmit.png" alt="MITMIT" style={{ width: 88, height: 88, maxWidth: 88, borderRadius: 20, alignSelf: "center" }} /><div className="brand-accent" /><div style={{ display: "flex", flexDirection: "column", gap: 2 }}><small style={{ letterSpacing: ".12em" }}>MITMIT · Poste de pilotage B2B</small><span style={{ fontSize: 9.5, color: "var(--muted)", fontWeight: 600, lineHeight: 1.3, textTransform: "none", letterSpacing: 0 }} title="Le petit nom du cockpit">Module Intégré de Traitement, Marges, Inventaire &amp; Tarification</span></div></div>
