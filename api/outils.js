@@ -158,7 +158,10 @@ function etatDepuisCode(code) {
 // ===== Points d'entree tiers =====
 const API_BATCH = "https://api.anthropic.com/v1/messages/batches";
 const MAX_REQUESTS = 500;
-const MAX_MINUTES = 120;
+// Plafonds imposes par OpenRouteService sur la duree d'une isochrone, et qui different selon le
+// mode de deplacement (openrouteservice.org/restrictions). Au-dela, l'API refuse la requete : on
+// borne donc ici plutot que de laisser remonter une erreur incomprehensible cote carte.
+const MAX_MINUTES = { "driving-car": 60, "cycling-regular": 300, "foot-walking": 1200 };
 const NUM_VALIDE = /^[A-Z0-9]{8,20}$/i;
 
 export default async function handler(req, res) {
@@ -234,8 +237,8 @@ async function actionIsochrone(body, res) {
   const key = process.env.ORS_API_KEY;
   if (!key) { res.status(500).json({ error: "ORS_API_KEY manquante cote serveur. Creez une cle gratuite sur openrouteservice.org, puis ajoutez-la dans les variables d'environnement Vercel." }); return; }
   const lat = Number(body.lat), lng = Number(body.lng);
-  const minutes = Math.min(Math.max(Number(body.minutes) || 30, 1), MAX_MINUTES);
   const profil = ["driving-car", "cycling-regular", "foot-walking"].includes(body.profil) ? body.profil : "driving-car";
+  const minutes = Math.min(Math.max(Number(body.minutes) || 30, 1), MAX_MINUTES[profil]);
   if (isNaN(lat) || isNaN(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) { res.status(400).json({ error: "Coordonnees invalides." }); return; }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25000);
