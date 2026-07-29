@@ -1331,6 +1331,18 @@ Le destinataire est une personne externe, jamais un collègue. Vouvoiement.
 Mentionne systématiquement, avec naturel, que PEN'UP 3D est une jeune marque française basée à Montauban.
 </identite>
 
+<connaissance_marque>
+Faits vérifiés sur la marque et la gamme, seuls faits produit utilisables (n'en invente aucun autre) :
+- PEN'UP 3D est une jeune marque française de loisirs créatifs, à taille humaine, basée à Montauban (Tarn-et-Garonne), en Occitanie. Site : penup3d.com.
+- Produit phare : le stylo Pen'Up 3D, un stylo 3D à filament basse température, ludique et pédagogique, pour les enfants dès 6 ans. Le dessin prend du volume : l'enfant crée de vrais objets en trois dimensions.
+- Le filament Fil'Up est un filament PCL basse température, biocompatible (dire « biocompatible », JAMAIS « biodégradable »), décliné en de nombreux coloris et effets (unis, pastel, phosphorescent, magique, galaxie, nature…).
+- La gamme se construit autour du stylo : Pack Découverte et Pack Complet (coffrets prêts à offrir), recharges de bobines Fil'Up en lots de 3, 4 ou 12, pochoirs Pad'Up, livrets pédagogiques (Découverte, Expert 3D). Prix publics conseillés TTC : stylo seul 49,99 €, Pack Découverte 69,99 €, Pack Complet 99,99 €, recharges dès 9,99 €.
+- Intérêt pour le point de vente : un produit qui se vend par la démonstration (animation du rayon, ateliers), et des recharges Fil'Up qui ramènent le client en magasin (réachat régulier de consommables).
+- Les supports pédagogiques ont été développés avec l'appui du Réseau Canopé (formulation exacte, voir interdits).
+- Livraison depuis la France ; franco de port en France métropolitaine à partir de 300 € HT de commande.
+Usage : mobilise AU PLUS un ou deux de ces faits par mail, ceux qui servent le mieux l'angle et le type de magasin. Les prix sont des prix publics conseillés, à ne citer que s'ils apportent quelque chose, jamais comme promotion. N'invente aucun autre chiffre (effectif, ancienneté, nombre de clients, délais, remises).
+</connaissance_marque>
+
 <mission>
 Rédiger un mail court, personnalisé pour CE magasin précis, qui donne une raison crédible et VRAIE de le contacter, et se termine par une seule action simple.
 Un mail générique, réutilisable tel quel pour un autre magasin, est un échec.
@@ -1362,7 +1374,7 @@ Cette action concrète prime pour conclure ; la consigne globale (catalogue, cof
 Rends chaque mail personnel et chaleureux, sans jamais rien inventer :
 - Fais référence à l'ACTIVITÉ du magasin (son type de commerce, son univers jouets / loisirs créatifs).
 - Glisse un clin d'oeil SOBRE et juste à sa ville, seulement s'il est naturel ; n'invente aucun fait sur la ville.
-- Registre humain et affectif : une jeune marque française à taille humaine, basée à Montauban, un stylo 3D à filament basse température, ludique et pédagogique, pour les enfants dès 6 ans. N'invente aucun chiffre précis (effectif, ancienneté) qui ne serait pas fourni.
+- Registre humain et affectif : une jeune marque française à taille humaine, basée à Montauban, un stylo 3D à filament basse température, ludique et pédagogique, pour les enfants dès 6 ans. Appuie-toi sur <connaissance_marque> pour parler du produit avec précision et concret (un fait bien choisi vaut mieux qu'un adjectif). N'invente aucun chiffre précis (effectif, ancienneté) qui ne serait pas fourni.
 - Trouve un LIEN D'ACCROCHE crédible et VRAI, choisi selon les angles fournis :
   · boutique indépendante ou concept store : "je privilégie le travail avec des boutiques indépendantes comme la vôtre".
   · enseigne avec angle reseau_enseigne : la collaboration déjà existante avec d'autres magasins de l'enseigne, en agrégat (jamais un nom précis).
@@ -1399,8 +1411,9 @@ Tu ne cites JAMAIS le nom d'un autre magasin, d'un autre client ou d'un autre co
 Ne les écris jamais, même suggérés par les données.
 - "Made in France", "fabriqué en France", ou toute allégation d'origine française du PRODUIT. La production est en Chine.
 - En revanche "marque française" est autorisé : il décrit l'entreprise, dont le siège est à Montauban, ce qui est vrai.
-- "Agrément Éducation Nationale" ou allégation d'agrément public.
+- "Agrément Éducation Nationale" ou allégation d'agrément public. Formulation admise : "supports pédagogiques développés avec l'appui du Réseau Canopé".
 - "Biodégradable" pour le filament. Employer "biocompatible".
+- Tout prix, remise, condition commerciale ou délai absent de <connaissance_marque> : seuls les prix publics conseillés et le franco listés y sont utilisables.
 - Toute présentation du Kit Mécanique comme disponible : sa certification n'est pas obtenue.
 - Toute mention d'un mode haute température du stylo : il n'existe plus.
 </interdits_absolus>
@@ -3556,7 +3569,7 @@ function Accounts({ data, persist, go, focus }) {
     {logosOpen && <LogosBulk data={data} persist={persist} onClose={() => setLogosOpen(false)} />}
     {horairesOpen && <HorairesBulk data={data} persist={persist} onClose={() => setHorairesOpen(false)} />}
     {dupOpen && <DoublonsModal data={data} persist={persist} onClose={() => setDupOpen(false)} />}
-    {(() => { const groupList = accounts.filter((a) => isMulti(a) && !a.archived).slice().sort((a, b) => (a.enseigne || "").localeCompare(b.enseigne || "")); return groupList.length === 0 ? <div className="empty">Aucun groupe. Créez un groupe (Cultura, King Jouet…) pour y rattacher des établissements.</div> : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(238px, 1fr))", gap: 10 }}>{groupList.map((a) => { const pc = principal(a.id); const sm = stageMeta(a.stage); const seg = networkSeg(a.magasins); return (<button key={a.id} className="tile" onClick={() => go("accounts", a.id)} style={{ textAlign: "left", border: "1px solid var(--line)", borderLeft: "3px solid #3F60AA", borderRadius: 12, padding: "11px 13px", display: "flex", flexDirection: "column", gap: 5, fontFamily: "inherit" }}><div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>{a.logo ? <img src={a.logo} alt="" style={{ width: 24, height: 24, borderRadius: 6, objectFit: "contain", background: "#fff", border: "1px solid var(--line)", flexShrink: 0 }} /> : <Building2 size={16} color="#3F60AA" style={{ flexShrink: 0 }} />}<span style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.2 }}>{a.enseigne || "Sans nom"}</span>{a.code && <span style={{ fontWeight: 800, fontSize: 10.5, letterSpacing: ".03em", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 6, padding: "1px 6px", color: "var(--muted)" }} className="tnum">{a.code}</span>}</div>{pc && <div className="meta"><User size={12} />{pc}</div>}<div className="meta"><Store size={12} />{magasinLabel(a.magasins)}</div><div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 5, marginTop: 2 }}><Badge color={seg.color}>{seg.label}</Badge><StageTag stage={sm} /></div>{(() => { const att = sumMontant((data.deals || []).filter((d) => d.accountId === a.id && isDevisEnAttente(d))); return att > 0 ? <div style={{ marginTop: 4, fontWeight: 700, color: "var(--blue)", fontSize: 13 }} className="tnum" title="CA HT en attente (devis)">{eur(att)}</div> : null; })()}</button>); })}</div>; })()}
+    {(() => { const groupList = accounts.filter((a) => isMulti(a) && !a.archived).slice().sort((a, b) => (a.enseigne || "").localeCompare(b.enseigne || "")); return groupList.length === 0 ? <div className="empty">Aucun groupe. Créez un groupe (Cultura, King Jouet…) pour y rattacher des établissements.</div> : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(238px, 1fr))", gap: 10 }}>{groupList.map((a) => { const pc = principal(a.id); const sm = stageMeta(a.stage); const seg = networkSeg(a.magasins); return (<button key={a.id} className="tile" onClick={() => go("accounts", a.id)} style={{ textAlign: "left", border: "1px solid var(--line)", borderLeft: "3px solid #3F60AA", borderRadius: 12, padding: "11px 13px", display: "flex", flexDirection: "column", gap: 5, fontFamily: "inherit" }}><div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>{a.logo ? <img src={a.logo} alt="" style={{ width: 24, height: 24, borderRadius: 6, objectFit: "contain", background: "#fff", border: "1px solid var(--line)", flexShrink: 0 }} /> : <Building2 size={16} color="#3F60AA" style={{ flexShrink: 0 }} />}<span style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.2 }}>{a.enseigne || "Sans nom"}</span>{a.code && <span style={{ fontWeight: 800, fontSize: 10.5, letterSpacing: ".03em", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 6, padding: "1px 6px", color: "var(--muted)" }} className="tnum">{a.code}</span>}</div>{pc && <div className="meta"><User size={12} />{pc}</div>}<div className="meta"><Store size={12} />{magasinLabel(a.magasins)}</div><div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 5, marginTop: 2 }}><Badge color={seg.color}>{seg.label}</Badge><StageTag stage={sm} /></div>{(() => { const att = sumMontant((data.deals || []).filter((d) => d.accountId === a.id && isDevisEnAttente(d))); const ca = sumMontant((data.deals || []).filter((d) => d.accountId === a.id && isCaSigne(d))); return (<div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>{att > 0 && <div style={{ fontWeight: 700, color: "var(--blue)", fontSize: 13 }} className="tnum" title="CA HT en attente (devis)">{eur(att)}</div>}<div style={{ fontWeight: 700, color: ca > 0 ? "var(--green)" : "var(--muted)", fontSize: 13 }} className="tnum" title="Chiffre d'affaires HT généré (factures validées)">CA : {eur(ca)}</div></div>); })()}</button>); })}</div>; })()}
     <div style={{ marginTop: 22 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
         <h3 className="pu-display" style={{ margin: 0, fontSize: 16 }}>Tous les établissements <span style={{ color: "var(--muted)", fontWeight: 600 }}>({visibleRows.length}{nq && visibleRows.length !== pdvRows.length ? " / " + pdvRows.length : ""})</span></h3>
@@ -3573,6 +3586,7 @@ function Accounts({ data, persist, go, focus }) {
           {ens && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{ens}</div>}
           {adr && <div style={{ fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{adr}</div>}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 5, marginTop: 2 }}>{surf && <Badge color="#3F60AA">{surf}</Badge>}{r.kind === "acc" && <Badge color="#9aa6bd">point de vente unique</Badge>}{st && <StageTag stage={st} />}</div>
+          {(() => { const ca = sumMontant((data.deals || []).filter((d) => isCaSigne(d) && (r.kind === "site" ? d.livraisonSiteId === r.site.id : (acc && d.accountId === acc.id)))); return <div style={{ marginTop: 3, fontWeight: 700, color: ca > 0 ? "var(--green)" : "var(--muted)", fontSize: 12.5 }} className="tnum" title="Chiffre d'affaires HT généré (factures validées)">CA : {eur(ca)}</div>; })()}
         </button>); })}</div>}
     </div>
     </>)}
@@ -7118,6 +7132,10 @@ function ProspectMailing({ data, persist, onClose }) {
   const prospects = data.prospects || [];
   const DEFAULT_TYPES = ["cooperative", "chaine", "franchise", "independant", "specialiste"];
   const [types, setTypes] = useState(() => new Set(DEFAULT_TYPES));
+  // « Autre » : recherche libre par nom / enseigne (ex. « JouéClub » sélectionne tous les JouéClub,
+  // tous types confondus). Active seulement quand la puce « Autre » est cochée et le champ rempli.
+  const [nameQuery, setNameQuery] = useState("");
+  const nameQ = types.has("autre") ? normStr(nameQuery) : "";
   const regions = useMemo(() => [...new Set(prospects.map((p) => p.region).filter(Boolean))].sort(), [prospects]);
   const [region, setRegion] = useState("tous");
   const [statuts, setStatuts] = useState(() => new Set(["a_contacter"]));
@@ -7143,14 +7161,15 @@ function ProspectMailing({ data, persist, onClose }) {
     if (p.accountId) return false;
     if (listFilter !== "tous") { const L = mailLists.find((l) => l.id === listFilter); if (!L || !(L.ids || []).includes(p.id)) return false; }
     if (tagFilter !== "tous" && !(p.tags || []).includes(tagFilter)) return false;
-    if (!types.has(p.type || "autre")) return false;
+    if (nameQ) { if (normStr((p.nom || "") + " " + (p.enseigne || "")).indexOf(nameQ) === -1) return false; }
+    else if (!types.has(p.type || "autre")) return false;
     if (region !== "tous" && (p.region || "") !== region) return false;
     const st = p.statut || "a_qualifier";
     if (statuts.size && !statuts.has(st)) return false;
     if (!showTreated && (st === "brouillon_cree" || st === "contacte")) return false;
     return true;
-  }).map((p) => ({ p, a: anglesOf(p) })), [prospects, types, region, statuts, showTreated, listFilter, tagFilter, data.accounts, data.sites, data.interactions]);
-  const filterSig = [...types].sort().join(",") + "|" + region + "|" + [...statuts].sort().join(",") + "|" + showTreated + "|" + listFilter + "|" + tagFilter;
+  }).map((p) => ({ p, a: anglesOf(p) })), [prospects, types, region, statuts, showTreated, listFilter, tagFilter, nameQ, data.accounts, data.sites, data.interactions]);
+  const filterSig = [...types].sort().join(",") + "|" + region + "|" + [...statuts].sort().join(",") + "|" + showTreated + "|" + listFilter + "|" + tagFilter + "|" + nameQ;
   useEffect(() => { setSel(new Set(filtered.map((x) => x.p.id))); }, [filterSig]);
   const toggleType = (k) => setTypes((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const toggleStatut = (k) => setStatuts((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
@@ -7213,7 +7232,9 @@ function ProspectMailing({ data, persist, onClose }) {
   const ANGLE_LBL = { proximite: "proximité", reseau_enseigne: "réseau enseigne", reseau_region: "réseau régional", adequation_produit: "adéquation produit" };
   return (<Modal title="Mailing de prospection" onClose={onClose} xl guard={false}>
     <p style={{ fontSize: 12.5, color: "var(--muted)", marginTop: -2 }}>Génère des mails de premier contact, personnalisés et adossés à des angles vrais (proximité, réseau d'enseigne, adéquation). La vague crée des <strong>brouillons Gmail</strong>, jamais d'envoi. Envoyez ensuite par petits paquets espacés depuis Gmail : un envoi massif et rapproché dégrade la délivrabilité.</p>
-    <div className="fld"><label>Types de commerce ciblés</label><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{Object.entries(PROSPECT_TYPES).map(([k, v]) => { const on = types.has(k); return (<button key={k} type="button" className={cx("btn", "btn-s", on ? "btn-p" : "btn-g")} onClick={() => toggleType(k)} title={k === "chaine" ? "Les mails de cette catégorie ne proposent PAS un référencement : ils cherchent le bon interlocuteur en centrale." : undefined}>{v.label}{k === "chaine" ? " ⓘ" : ""}</button>); })}</div><div style={{ fontSize: 11, color: "var(--muted)", marginTop: 5 }}>« Chaîne / réseau (via centrale) » : ces mails cherchent le bon interlocuteur en centrale, ils ne proposent pas de référencement. GSS et Autre décochés par défaut (circuits via acheteurs nationaux).</div></div>
+    <div className="fld"><label>Types de commerce ciblés</label><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{Object.entries(PROSPECT_TYPES).map(([k, v]) => { const on = types.has(k); return (<button key={k} type="button" className={cx("btn", "btn-s", on ? "btn-p" : "btn-g")} onClick={() => toggleType(k)} title={k === "chaine" ? "Les mails de cette catégorie ne proposent PAS un référencement : ils cherchent le bon interlocuteur en centrale." : (k === "autre" ? "Ouvre un champ de recherche par nom : tapez une partie du nom ou de l'enseigne pour cibler ces magasins, tous types confondus." : undefined)}>{v.label}{k === "chaine" ? " ⓘ" : ""}{k === "autre" ? " 🔎" : ""}</button>); })}</div>
+    {types.has("autre") && <div style={{ marginTop: 7 }}><input value={nameQuery} onChange={(e) => setNameQuery(e.target.value)} placeholder="Ex : JouéClub — tapez une partie du nom ou de l'enseigne…" /><div style={{ fontSize: 11, color: nameQ ? "var(--blue)" : "var(--muted)", marginTop: 4, fontWeight: nameQ ? 700 : 400 }}>{nameQ ? "Recherche par nom active : « " + nameQuery.trim() + " » remplace les types cochés (tous types confondus, accents et majuscules ignorés)." : "Tapez une partie du nom (ex : « JouéClub ») pour sélectionner tous les magasins dont le nom ou l'enseigne correspond, quel que soit leur type. Champ vide : « Autre » filtre le type Autre, comme avant."}</div></div>}
+    <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 5 }}>« Chaîne / réseau (via centrale) » : ces mails cherchent le bon interlocuteur en centrale, ils ne proposent pas de référencement. GSS et Autre décochés par défaut (circuits via acheteurs nationaux).</div></div>
     <div className="row2">
       <div className="fld"><label>Région</label><select value={region} onChange={(e) => setRegion(e.target.value)}><option value="tous">Toutes</option>{regions.map((r) => <option key={r} value={r}>{r}</option>)}</select></div>
       {(mailLists.length > 0 || mailTags.length > 0) && <div className="fld"><label>Cibler une liste / étiquette</label><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{mailLists.length > 0 && <select value={listFilter} onChange={(e) => setListFilter(e.target.value)} style={{ flex: 1, minWidth: 130 }} title="Liste enregistrée"><option value="tous">Toutes les listes</option>{mailLists.map((l) => <option key={l.id} value={l.id}>{l.name} ({(l.ids || []).length})</option>)}</select>}{mailTags.length > 0 && <select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} style={{ flex: 1, minWidth: 130 }} title="Étiquette"><option value="tous">Toutes les étiquettes</option>{mailTags.map((t) => <option key={t} value={t}>#{t}</option>)}</select>}</div></div>}
