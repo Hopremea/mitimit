@@ -491,7 +491,7 @@ function gmailAddressMap(data) {
 async function gmailSyncAll(data, persist) {
   const addrMap = gmailAddressMap(data);
   const addresses = Object.keys(addrMap);
-  if (!addresses.length) return { added: 0, total: 0, skipped: true };
+  if (!addresses.length) { const conv0 = await gmailAutoConvertProspects(data, persist); return { added: 0, total: 0, skipped: !conv0, converted: conv0 }; }
   const res = await fetch("/api/gmail-sync", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ addresses, max: 200 }) });
   const dt = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(dt.error || ("Erreur " + res.status));
@@ -517,7 +517,57 @@ async function gmailSyncAll(data, persist) {
     if (fresh.length) interactions = [...interactions, ...fresh];
     return { ...p, interactions, settings: { ...p.settings, lastGmailSync: new Date().toISOString() } };
   }, { snapshot: false });
-  return { added, updated, total: msgs.length };
+  const converted = await gmailAutoConvertProspects(data, persist);
+  return { added, updated, total: msgs.length, converted };
+}
+// Conversion automatique des prospects contactés : dès que l'API Gmail confirme qu'un mail SORTANT
+// (libellé SENT, un brouillon ne compte pas) a été envoyé à l'adresse d'un prospect, sa fiche quitte
+// « Prospection » et passe en « Groupes & établissements » (même logique que le bouton « Convertir »),
+// avec journalisation du courriel envoyé sur la nouvelle fiche. Idempotent (gmailId, prospect déjà converti).
+async function gmailAutoConvertProspects(data, persist) {
+  const prosMap = {};
+  (data.prospects || []).forEach((p) => {
+    if (p.archived || p.accountId || p.statut === "converti" || p.statut === "ecarte") return;
+    [p.email, p.contactEmail].forEach((e0) => { const e = (e0 || "").trim().toLowerCase(); if (e.includes("@") && !prosMap[e]) prosMap[e] = p; });
+  });
+  const pAddrs = Object.keys(prosMap);
+  if (!pAddrs.length) return 0;
+  const sentByProspect = new Map(); // prospect.id -> messages sortants confirmés envoyés
+  for (let i = 0; i < pAddrs.length && i < 320; i += 80) {
+    const batch = pAddrs.slice(i, i + 80);
+    try {
+      const res = await fetch("/api/gmail-sync", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ addresses: batch, max: 120, newerThan: "1y" }) });
+      const dt = await res.json().catch(() => ({}));
+      if (!res.ok) continue;
+      (dt.messages || []).forEach((m) => {
+        if (!m || !m.id || m.direction !== "sortant" || m.draft || m.sent !== true) return;
+        const pr = prosMap[(m.address || "").toLowerCase()]; if (!pr) return;
+        // Garde-fou : on ne convertit que sur un envoi postérieur à la fiche (un vieux mail d'archive
+        // envoyé à la même adresse ne doit pas basculer une fiche fraîchement créée).
+        const ref = pr.brouillonDate || pr.createdAt || "";
+        if (ref && m.date && m.date < ref) return;
+        if (!sentByProspect.has(pr.id)) sentByProspect.set(pr.id, []);
+        sentByProspect.get(pr.id).push(m);
+      });
+    } catch (e) {}
+  }
+  if (!sentByProspect.size) return 0;
+  const converted = sentByProspect.size;
+  persist((pv) => {
+    let out = pv;
+    sentByProspect.forEach((msgs, pid) => {
+      const pr = (out.prospects || []).find((x) => x.id === pid);
+      if (!pr || pr.accountId || pr.statut === "converti") return;
+      const first = msgs.slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""))[0];
+      const conv = convertProspectData(out, pr, { extraNote: "Converti automatiquement : envoi du mail de prospection confirmé par Gmail le " + (first.date || TODAY()) + "." });
+      out = conv.data;
+      const have = new Set((out.interactions || []).filter((i) => i.gmailId).map((i) => i.gmailId));
+      const adds = msgs.filter((m) => !have.has(m.id)).map((m) => ({ id: "gm_" + m.id, gmailId: m.id, accountId: conv.accountId, contactId: conv.contactId || "", siteId: conv.siteId, type: "email", direction: "sortant", date: m.date || TODAY(), heure: m.heure || "", sujet: m.subject || "(sans objet)", resume: m.body || m.snippet || "", email: m.address || "", source: "gmail", sourced: true }));
+      if (adds.length) out = { ...out, interactions: [...(out.interactions || []), ...adds] };
+    });
+    return out;
+  });
+  return converted;
 }
 // Une enseigne est "centrale/chaîne" (donc pas d'auto-établissement) si nature CA ou plus d'un établissement déclaré.
 function isCentraleOuChaine(a) { return (a && a.nature === "CA") || ((Number(a && a.magasins) || 0) > 1); }
@@ -1526,6 +1576,44 @@ function findGroupForProspect(accounts, p) {
   const ens = normStr(p.enseigne || ""); const nom = normStr(p.nom || "");
   if (ens) { const exact = groups.find((a) => normStr(a.enseigne) === ens); if (exact) return exact; }
   return groups.find((a) => { const gn = normStr(a.enseigne); return gn && gn.length >= 4 && ((ens && (ens.includes(gn) || gn.includes(ens))) || (nom && nom.includes(gn))); }) || null;
+}
+// Conversion d'un prospect en compte / établissement (« Groupes & établissements »). Logique partagée
+// entre la conversion manuelle (bouton « Convertir ») et la conversion automatique déclenchée quand
+// l'API Gmail confirme l'ENVOI d'un mail de prospection. Retourne le nouvel état et les ids créés.
+const PROSPECT_NATURE_FROM_TYPE = { cooperative: "CA", chaine: "CA", franchise: "FC", independant: "MI", specialiste: "MI", gss: "CA", autre: "DV" };
+function convertProspectData(d, p, opts = {}) {
+  const grp = findGroupForProspect(d.accounts, p);
+  const nature = PROSPECT_NATURE_FROM_TYPE[p.type] || "DV";
+  const contactRole = (fon) => /acheteur|achat/.test(fon) ? "acheteur" : /g[ée]rant|dirigeant|pr[ée]sident|fondat|propri[ée]taire/.test(fon) ? "decideur" : "autre";
+  const adr = [p.adresse, ((p.cp || "") + " " + (p.ville || "")).trim()].filter(Boolean).join(", ");
+  const hasContact = (p.contactNom || "").trim();
+  const extra = opts.extraNote ? " " + opts.extraNote : "";
+  const mkContact = (accountId, sid, cid, principal) => ({ id: cid, accountId, siteId: sid, prenom: p.contactPrenom || "", nom: (p.contactNom || "").toUpperCase(), fonction: p.contactFonction || "", role: contactRole((p.contactFonction || "").toLowerCase()), email: p.contactEmail || p.email || "", mobile: p.contactTel || "", fixe: "", linkedin: "", ville: p.ville || "", departement: p.departement || "", adresse: p.adresse || "", principal, notes: p.contactSource ? ("Identité issue de : " + p.contactSource + " · à vérifier") : "", createdAt: TODAY() });
+  // Cas 1 : un groupe correspondant existe → fiche établissement rattachée à ce groupe.
+  if (grp) {
+    const sid = uid("s_"); const cid = uid("c_");
+    const site = { id: sid, accountId: grp.id, label: p.nom, type: "pdv", typeSurface: p.format || "", siret: p.siret || "", adresse: adr, adresseLivraison: "", livraisonIdentique: true, lat: null, lng: null, contactId: hasContact ? cid : "", notes: "Établissement issu de la prospection, rattaché au groupe " + (grp.enseigne || "") + "." + extra };
+    const out = { ...d, sites: [...(d.sites || []), site], prospects: d.prospects.map((x) => x.id === p.id ? { ...x, statut: "converti", accountId: grp.id } : x) };
+    const cnt = (out.sites || []).filter((s) => s.accountId === grp.id && (s.type === "pdv" || s.type === "decision")).length;
+    out.accounts = out.accounts.map((a) => a.id === grp.id ? { ...a, magasins: Math.max(Number(a.magasins) || 0, cnt) } : a);
+    if (hasContact) out.contacts = [...d.contacts, mkContact(grp.id, sid, cid, false)];
+    return { data: out, accountId: grp.id, siteId: sid, contactId: hasContact ? cid : "" };
+  }
+  // Cas 2 : aucun groupe correspondant → nouveau compte (groupe ou établissement selon la nature).
+  const accId = uid("acc_"); const kind = isCentraleOuChaine({ nature, magasins: 1 }) ? "groupe" : "établissement";
+  const code = buildClientCode(d.accounts, nature);
+  const notesParts = [p.nom, p.adresse, ((p.cp || "") + " " + (p.ville || "")).trim(), p.region, p.telephone, p.site].filter(Boolean);
+  if (p.raisonSociale || p.siren || p.siret) notesParts.push("Société : " + [p.raisonSociale, p.formeJuridique, p.siren && ("SIREN " + p.siren), p.siret && ("SIRET " + p.siret)].filter(Boolean).join(", "));
+  if (p.potentiel && POTENTIEL_META[p.potentiel]) notesParts.push("Potentiel : " + POTENTIEL_META[p.potentiel].label);
+  if (p.email) notesParts.push("Courriel : " + p.email);
+  if (p.notes) notesParts.push(p.notes);
+  if (opts.extraNote) notesParts.push(opts.extraNote);
+  const cid = uid("c_"); const sid = "s_" + accId;
+  const acc = { id: accId, enseigne: p.enseigne || p.nom, kind, stage: "prospect", magasins: 1, nature, code, siren: p.siren || "", formeJuridique: p.formeJuridique || "", typeSurface: p.format || "", ville: p.ville, lat: null, lng: null, pipeline: 0, prochaineAction: "Prise de contact", dateAction: "", notes: notesParts.join(" · "), adressePostale: adr, adresseLivraison: "", livraisonIdentique: true, stageLog: [{ stage: "prospect", date: TODAY() }] };
+  const site = { id: sid, accountId: accId, label: p.nom, type: "pdv", typeSurface: p.format || "", siret: p.siret || "", adresse: adr, adresseLivraison: "", livraisonIdentique: true, lat: null, lng: null, contactId: hasContact ? cid : "", notes: "Point de vente issu de la prospection." + extra };
+  const out = { ...d, accounts: [...d.accounts, acc], sites: [...(d.sites || []), site], prospects: d.prospects.map((x) => x.id === p.id ? { ...x, statut: "converti", accountId: accId } : x) };
+  if (hasContact) out.contacts = [...d.contacts, mkContact(accId, sid, cid, true)];
+  return { data: out, accountId: accId, siteId: sid, contactId: hasContact ? cid : "" };
 }
 function findDuplicateContact(contacts, prenom, nom, email, excludeId) {
   const ne = normStr(email);
@@ -6227,8 +6315,9 @@ Cette requête peut être SOIT une zone géographique (ville, département, rég
 - Si c'est une ZONE géographique : recherche des établissements de jouets, jeux et loisirs créatifs situés dans cette zone.
 - Si c'est le NOM d'un établissement ou d'une enseigne précis (ex. « L'Atelier chez soi ») : identifie CET établissement précis et, si l'enseigne possède plusieurs points de vente, ses différentes adresses ; renvoie uniquement la ou les fiches qui y correspondent, sans inventer d'autres établissements sans rapport.
 
-Pour CHAQUE établissement, procède en deux temps :
+Pour CHAQUE établissement, procède en trois temps :
 1) Identifie l'établissement physique (nom, enseigne, adresse réelle) via le web et les annuaires.
+1bis) Si l'établissement appartient à une enseigne ou un réseau (JouéClub, King Jouet, Cultura, La Grande Récré…), consulte AUSSI le site officiel de l'enseigne et sa page « trouver un magasin » (store locator), comme le ferait une recherche Google : la fiche magasin de l'enseigne est souvent la source la plus fiable pour l'adresse exacte, le téléphone, les horaires et parfois le courriel du point de vente (ex. pour « JouéClub Aix-en-Provence », la fiche du magasin sur le site joueclub.fr). Fais de même avec le site propre de l'établissement s'il en a un.
 2) Recherche l'identité légale de la société qui l'exploite dans les sources officielles : annuaire-entreprises.data.gouv.fr (Répertoire National des Entreprises / INSEE), pappers.fr, societe.com, infogreffe.fr, data.inpi.fr. Récupère si disponible : SIREN (9 chiffres, niveau société), SIRET de l'établissement (14 chiffres, propre à CET établissement précis, à l'adresse identifiée), raison sociale, forme juridique, et le représentant légal (dirigeant / gérant) avec sa fonction. Le SIRET doit correspondre à l'établissement situé à l'adresse de l'établissement trouvé, pas au siège social ni à un autre établissement ; si tu n'es pas certain de l'établissement exact, laisse le SIRET vide et ne garde que le SIREN.
 
 Coordonnées du contact : cherche d'abord un courriel et un téléphone de l'interlocuteur dans les registres. Si absents (c'est fréquent), cherche ailleurs : site officiel de l'établissement, page contact, réseaux sociaux professionnels. En tout dernier recours, utilise les coordonnées publiques de la fiche Google Business de l'établissement (téléphone, et courriel s'il y figure). Indique toujours dans "contact.source" d'où vient l'information (ex. "RNE/INSEE", "site officiel", "Fiche Google"). N'invente jamais : si rien n'est trouvé, laisse vide.
@@ -6259,7 +6348,7 @@ async function aiAutofill({ kind, enseigne, ville, adresse, typesEtab }) {
   const cible = [enseigne, adresse, ville].filter(Boolean).join(", ");
   let user, schema;
   if (kind === "établissement") {
-    user = `Pour cet établissement précis : ${cible}.\nTrouve dans les sources officielles ou la fiche Google de l'établissement :\n- siret : SIRET (14 chiffres) de l'établissement situé EXACTEMENT à cette adresse et cette ville (ni le siège social, ni un autre établissement). Si tu n'es pas certain qu'il corresponde à cette adresse, laisse vide.\n- adresse : adresse postale complète et exacte de l'établissement (numéro, voie, code postal, ville).\n- telephone : numéro de téléphone fixe (standard / accueil) de CE magasin à cette adresse précise, au format français (ex. « 05 63 12 34 56 »). Vérifie qu'il correspond bien à cet établissement et pas au siège ou à un autre point de vente ; en cas de doute, laisse vide.\n- email : adresse e-mail générique de contact de CE magasin (accueil, commande), publiée sur le site officiel ou la fiche Google de l'établissement. Pas l'e-mail d'une personne. En cas de doute, laisse vide.\n- horaires : horaires d'ouverture habituels de l'établissement, en une ligne courte et lisible (ex. « Lun-Sam 10h-19h, Dim fermé »), depuis la fiche Google ou le site officiel. En cas de doute, laisse vide.\n- site : URL du site internet officiel de l'établissement ou de son enseigne (ex. « https://www.cultura.com »), trouvée sur le web. Privilégie le site officiel de la marque ; pas d'annuaire ni de page Google. En cas de doute, laisse vide.\n- typeEtablissement : choisis la valeur la plus juste UNIQUEMENT parmi cette liste : ${(typesEtab || []).join(" | ")}. Si aucune ne convient avec certitude, laisse vide.\n- note : une phrase factuelle décrivant l'établissement (univers de produits, implantation centre-ville ou périphérie). Aucun superlatif commercial.\nAttention aux homonymes : ne retiens que l'établissement de la ville indiquée.`;
+    user = `Pour cet établissement précis : ${cible}.\nTrouve dans les sources officielles ou la fiche Google de l'établissement :\n- siret : SIRET (14 chiffres) de l'établissement situé EXACTEMENT à cette adresse et cette ville (ni le siège social, ni un autre établissement). Si tu n'es pas certain qu'il corresponde à cette adresse, laisse vide.\n- adresse : adresse postale complète et exacte de l'établissement (numéro, voie, code postal, ville).\n- telephone : numéro de téléphone fixe (standard / accueil) de CE magasin à cette adresse précise, au format français (ex. « 05 63 12 34 56 »). Vérifie qu'il correspond bien à cet établissement et pas au siège ou à un autre point de vente ; en cas de doute, laisse vide.\n- email : adresse e-mail générique de contact de CE magasin (accueil, commande), publiée sur le site officiel ou la fiche Google de l'établissement. Pas l'e-mail d'une personne. En cas de doute, laisse vide.\n- horaires : horaires d'ouverture habituels de l'établissement, en une ligne courte et lisible (ex. « Lun-Sam 10h-19h, Dim fermé »), depuis la fiche Google ou le site officiel. En cas de doute, laisse vide.\n- site : URL du site internet officiel de l'établissement ou de son enseigne (ex. « https://www.cultura.com »), trouvée sur le web. Privilégie le site officiel de la marque ; pas d'annuaire ni de page Google. En cas de doute, laisse vide.\n- typeEtablissement : choisis la valeur la plus juste UNIQUEMENT parmi cette liste : ${(typesEtab || []).join(" | ")}. Si aucune ne convient avec certitude, laisse vide.\n- note : une phrase factuelle décrivant l'établissement (univers de produits, implantation centre-ville ou périphérie). Aucun superlatif commercial.\nSi l'établissement appartient à une enseigne ou un réseau, consulte AUSSI le site officiel de l'enseigne et sa page « trouver un magasin » (store locator), comme le ferait une recherche Google : la fiche magasin de l'enseigne (ex. la fiche du magasin sur joueclub.fr pour un JouéClub) donne souvent l'adresse exacte, le téléphone, les horaires et le courriel du point de vente.\nAttention aux homonymes : ne retiens que l'établissement de la ville indiquée.`;
     schema = '{"siret":"","adresse":"","telephone":"","email":"","horaires":"","site":"","typeEtablissement":"","note":"","confiance":"haute/moyenne/faible","source":""}';
   } else {
     user = `Pour l'entreprise qui exploite l'enseigne : ${cible}.\nTrouve dans les sources officielles :\n- siren : SIREN (9 chiffres) de la personne morale, ou numéro RNA (W + 9 chiffres) si c'est une association. NE METS PAS de SIRET ici.\n- raisonSociale, formeJuridique.\n- ville : ville du siège social ou de rattachement.\n- adresse : adresse postale complète du siège ou de l'établissement principal.\nAttention aux homonymes : si une ville est fournie, ne retiens que l'entité qui lui correspond.`;
@@ -6340,9 +6429,10 @@ async function aiEnrichProspect(p, persistUsage, instruction) {
   // complète les champs manquants — Y COMPRIS le nom, qui peut être reconstitué depuis les autres infos.
   const cible = [p.nom, p.enseigne && p.enseigne !== p.nom ? p.enseigne : "", p.adresse, [p.cp, p.ville].filter(Boolean).join(" ")].filter(Boolean).join(" · ") || "(nom non renseigné — à identifier depuis les données ci-dessous)";
   const sys = "Tu enrichis la fiche d'un point de vente français (jouets / loisirs créatifs) à partir du web et des registres officiels (annuaire-entreprises.data.gouv.fr / RNE / INSEE, pappers.fr, societe.com, infogreffe.fr, data.inpi.fr), du site officiel et de la fiche Google. Tu fonctionnes comme un produit en croix : à partir de N'IMPORTE quelle donnée déjà connue (nom, SIRET, SIREN, adresse, téléphone, e-mail, site web…), tu retrouves et complètes TOUTES les autres, y compris le nom commercial de l'établissement s'il manque. Tu n'inventes JAMAIS une donnée (identifiant, adresse, courriel, nom) : en cas de doute, tu laisses le champ vide. Tu réponds UNIQUEMENT par du JSON valide.";
-  const known = [p.siret ? "SIRET : " + p.siret : "", p.siren ? "SIREN : " + p.siren : "", p.raisonSociale ? "Raison sociale : " + p.raisonSociale : "", p.adresse ? "Adresse : " + p.adresse : "", [p.cp, p.ville].filter(Boolean).join(" ") ? "Ville : " + [p.cp, p.ville].filter(Boolean).join(" ") : "", (p.telephone || p.contactTel) ? "Téléphone : " + (p.telephone || p.contactTel) : "", (p.email || p.contactEmail) ? "E-mail : " + (p.email || p.contactEmail) : "", p.site ? "Site : " + p.site : ""].filter(Boolean).join(" ; ");
+  const known = [p.siret ? "SIRET : " + p.siret : "", p.siren ? "SIREN : " + p.siren : "", p.raisonSociale ? "Raison sociale : " + p.raisonSociale : "", p.adresse ? "Adresse : " + p.adresse : "", [p.cp, p.ville].filter(Boolean).join(" ") ? "Ville : " + [p.cp, p.ville].filter(Boolean).join(" ") : "", (p.telephone || p.contactTel) ? "Téléphone : " + (p.telephone || p.contactTel) : "", (p.email || p.contactEmail) ? "E-mail : " + (p.email || p.contactEmail) : "", p.site ? "Site : " + p.site : "", p.facebook ? "Facebook : " + p.facebook : "", p.instagram ? "Instagram : " + p.instagram : ""].filter(Boolean).join(" ; ");
   const user = `Établissement à enrichir : ${cible}.${known ? "\nDonnées déjà connues (sers-t'en comme point de départ du produit en croix) : " + known + "." : ""}
 Recherche ses informations vérifiables. Attention aux homonymes : ne retiens que l'établissement correspondant aux données connues (même SIRET/SIREN, même adresse, même téléphone…).
+Sonde systématiquement les sites liés à la fiche, comme le ferait une recherche Google : le site web déjà renseigné, les pages Facebook/Instagram connues, et surtout, si l'établissement appartient à une enseigne ou un réseau (JouéClub, King Jouet, Cultura…), le site officiel de l'enseigne et sa page « trouver un magasin » (store locator) : la fiche magasin de l'enseigne (ex. pour « JouéClub Aix-en-Provence », la fiche du magasin sur joueclub.fr) donne souvent l'adresse exacte, le téléphone, les horaires et le courriel du point de vente.
 Si le nom n'est pas renseigné, reconstitue-le (enseigne + ville, ou raison sociale) à partir des autres données ; sinon laisse "nom" vide.
 Renvoie UNIQUEMENT un objet JSON valide (aucun texte ni balise autour) avec EXACTEMENT ces clés :
 {"nom":"","site":"","facebook":"","instagram":"","siren":"","siret":"","raisonSociale":"","formeJuridique":"","adresse":"","cp":"","ville":"","departement":"","region":"","telephone":"","contact":{"prenom":"","nom":"","fonction":"","email":"","telephone":"","source":""},"notes":"","confiance":"haute/moyenne/faible","source":""}
@@ -6890,41 +6980,8 @@ function Prospection({ data, persist, go }) {
     if (nX) parts.push(nX + " prospect(s) rattaché(s) à un établissement existant et supprimé(s)");
     setDupMsg({ ok: !!parts.length, t: parts.length ? parts.join(" · ") + "." : "Aucune fusion appliquée." }); setTimeout(() => setDupMsg(null), 6000);
   };
-  const NATURE_FROM_TYPE = { cooperative: "CA", chaine: "CA", franchise: "FC", independant: "MI", specialiste: "MI", gss: "CA", autre: "DV" };
-  const convert = (p) => {
-    const grp = findGroupForProspect(data.accounts, p);
-    const nature = NATURE_FROM_TYPE[p.type] || "DV";
-    const contactRole = (fon) => /acheteur|achat/.test(fon) ? "acheteur" : /g[ée]rant|dirigeant|pr[ée]sident|fondat|propri[ée]taire/.test(fon) ? "decideur" : "autre";
-    persist((d) => {
-      const adr = [p.adresse, ((p.cp || "") + " " + (p.ville || "")).trim()].filter(Boolean).join(", ");
-      const hasContact = (p.contactNom || "").trim();
-      // Cas 1 : un groupe correspondant existe → on crée une fiche établissement rattachée à ce groupe.
-      if (grp) {
-        const sid = uid("s_"); const cid = uid("c_");
-        const site = { id: sid, accountId: grp.id, label: p.nom, type: "pdv", typeSurface: p.format || "", siret: p.siret || "", adresse: adr, adresseLivraison: "", livraisonIdentique: true, lat: null, lng: null, contactId: hasContact ? cid : "", notes: "Établissement issu de la prospection, rattaché au groupe " + (grp.enseigne || "") + "." };
-        const out = { ...d, sites: [...(d.sites || []), site], prospects: d.prospects.map((x) => x.id === p.id ? { ...x, statut: "converti", accountId: grp.id } : x) };
-        const cnt = (out.sites || []).filter((s) => s.accountId === grp.id && (s.type === "pdv" || s.type === "decision")).length;
-        out.accounts = out.accounts.map((a) => a.id === grp.id ? { ...a, magasins: Math.max(Number(a.magasins) || 0, cnt) } : a);
-        if (hasContact) out.contacts = [...d.contacts, { id: cid, accountId: grp.id, siteId: sid, prenom: p.contactPrenom || "", nom: (p.contactNom || "").toUpperCase(), fonction: p.contactFonction || "", role: contactRole((p.contactFonction || "").toLowerCase()), email: p.contactEmail || p.email || "", mobile: p.contactTel || "", fixe: "", linkedin: "", ville: p.ville || "", departement: p.departement || "", adresse: p.adresse || "", principal: false, notes: p.contactSource ? ("Identité issue de : " + p.contactSource + " · à vérifier") : "", createdAt: TODAY() }];
-        return out;
-      }
-      // Cas 2 : aucun groupe correspondant → on crée un nouveau compte (groupe ou établissement selon la nature).
-      const accId = uid("acc_"); const kind = isCentraleOuChaine({ nature, magasins: 1 }) ? "groupe" : "établissement";
-      const code = buildClientCode(d.accounts, nature);
-      const notesParts = [p.nom, p.adresse, ((p.cp || "") + " " + (p.ville || "")).trim(), p.region, p.telephone, p.site].filter(Boolean);
-      if (p.raisonSociale || p.siren || p.siret) notesParts.push("Société : " + [p.raisonSociale, p.formeJuridique, p.siren && ("SIREN " + p.siren), p.siret && ("SIRET " + p.siret)].filter(Boolean).join(", "));
-      if (p.potentiel && POTENTIEL_META[p.potentiel]) notesParts.push("Potentiel : " + POTENTIEL_META[p.potentiel].label);
-      if (p.email) notesParts.push("Courriel : " + p.email);
-      if (p.notes) notesParts.push(p.notes);
-      const cid = uid("c_"); const sid = "s_" + accId;
-      const acc = { id: accId, enseigne: p.enseigne || p.nom, kind, stage: "prospect", magasins: 1, nature, code, siren: p.siren || "", formeJuridique: p.formeJuridique || "", typeSurface: p.format || "", ville: p.ville, lat: null, lng: null, pipeline: 0, prochaineAction: "Prise de contact", dateAction: "", notes: notesParts.join(" · "), adressePostale: adr, adresseLivraison: "", livraisonIdentique: true, stageLog: [{ stage: "prospect", date: TODAY() }] };
-      const site = { id: sid, accountId: accId, label: p.nom, type: "pdv", typeSurface: p.format || "", siret: p.siret || "", adresse: adr, adresseLivraison: "", livraisonIdentique: true, lat: null, lng: null, contactId: hasContact ? cid : "", notes: "Point de vente issu de la prospection." };
-      const out = { ...d, accounts: [...d.accounts, acc], sites: [...(d.sites || []), site], prospects: d.prospects.map((x) => x.id === p.id ? { ...x, statut: "converti", accountId: accId } : x) };
-      if (hasContact) out.contacts = [...d.contacts, { id: cid, accountId: accId, siteId: sid, prenom: p.contactPrenom || "", nom: (p.contactNom || "").toUpperCase(), fonction: p.contactFonction || "", role: contactRole((p.contactFonction || "").toLowerCase()), email: p.contactEmail || p.email || "", mobile: p.contactTel || "", fixe: "", linkedin: "", ville: p.ville || "", departement: p.departement || "", adresse: p.adresse || "", principal: true, notes: p.contactSource ? ("Identité issue de : " + p.contactSource + " · à vérifier") : "", createdAt: TODAY() }];
-      return out;
-    });
-    setEdit(null);
-  };
+  // Conversion manuelle : logique partagée avec la conversion automatique après envoi Gmail confirmé.
+  const convert = (p) => { persist((d) => convertProspectData(d, p).data); setEdit(null); };
   const mapsUrl = (p) => "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent([p.nom, p.adresse, p.cp, p.ville].filter(Boolean).join(" "));
   const runAI = () => {
     if (aiJobs.has("prospects:search")) return;
@@ -7231,7 +7288,7 @@ function ProspectMailing({ data, persist, onClose }) {
   const CONF = { haute: { label: "haute", color: "#2bb673" }, standard: { label: "standard", color: "#F8B133" }, a_revoir: { label: "à revoir", color: "#FF5A45" } };
   const ANGLE_LBL = { proximite: "proximité", reseau_enseigne: "réseau enseigne", reseau_region: "réseau régional", adequation_produit: "adéquation produit" };
   return (<Modal title="Mailing de prospection" onClose={onClose} xl guard={false}>
-    <p style={{ fontSize: 12.5, color: "var(--muted)", marginTop: -2 }}>Génère des mails de premier contact, personnalisés et adossés à des angles vrais (proximité, réseau d'enseigne, adéquation). La vague crée des <strong>brouillons Gmail</strong>, jamais d'envoi. Envoyez ensuite par petits paquets espacés depuis Gmail : un envoi massif et rapproché dégrade la délivrabilité.</p>
+    <p style={{ fontSize: 12.5, color: "var(--muted)", marginTop: -2 }}>Génère des mails de premier contact, personnalisés et adossés à des angles vrais (proximité, réseau d'enseigne, adéquation). La vague crée des <strong>brouillons Gmail</strong>, jamais d'envoi. Envoyez ensuite par petits paquets espacés depuis Gmail : un envoi massif et rapproché dégrade la délivrabilité. Dès que Gmail confirme l'<strong>envoi</strong> d'un mail (à la synchronisation des courriels, automatique ou manuelle), la fiche du prospect passe d'elle-même de Prospection à <strong>Groupes &amp; établissements</strong>.</p>
     <div className="fld"><label>Types de commerce ciblés</label><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{Object.entries(PROSPECT_TYPES).map(([k, v]) => { const on = types.has(k); return (<button key={k} type="button" className={cx("btn", "btn-s", on ? "btn-p" : "btn-g")} onClick={() => toggleType(k)} title={k === "chaine" ? "Les mails de cette catégorie ne proposent PAS un référencement : ils cherchent le bon interlocuteur en centrale." : (k === "autre" ? "Ouvre un champ de recherche par nom : tapez une partie du nom ou de l'enseigne pour cibler ces magasins, tous types confondus." : undefined)}>{v.label}{k === "chaine" ? " ⓘ" : ""}{k === "autre" ? " 🔎" : ""}</button>); })}</div>
     {types.has("autre") && <div style={{ marginTop: 7 }}><input value={nameQuery} onChange={(e) => setNameQuery(e.target.value)} placeholder="Ex : JouéClub — tapez une partie du nom ou de l'enseigne…" /><div style={{ fontSize: 11, color: nameQ ? "var(--blue)" : "var(--muted)", marginTop: 4, fontWeight: nameQ ? 700 : 400 }}>{nameQ ? "Recherche par nom active : « " + nameQuery.trim() + " » remplace les types cochés (tous types confondus, accents et majuscules ignorés)." : "Tapez une partie du nom (ex : « JouéClub ») pour sélectionner tous les magasins dont le nom ou l'enseigne correspond, quel que soit leur type. Champ vide : « Autre » filtre le type Autre, comme avant."}</div></div>}
     <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 5 }}>« Chaîne / réseau (via centrale) » : ces mails cherchent le bon interlocuteur en centrale, ils ne proposent pas de référencement. GSS et Autre décochés par défaut (circuits via acheteurs nationaux).</div></div>
@@ -7776,7 +7833,7 @@ function Connexions({ data, persist, autoBackup }) {
   const lastSync = settings.lastGmailSync ? new Date(settings.lastGmailSync) : null;
   const doGmailSync = async () => {
     setGmSync({ busy: true, msg: "" });
-    try { const r = await gmailSyncAll(data, persist); setGmSync({ busy: false, msg: r.skipped ? "Aucune adresse e-mail renseignée à associer." : ("✅ " + r.added + " courriel(s) ajouté(s)" + (r.updated ? ", " + r.updated + " complété(s)" : "") + " (sur " + r.total + " trouvé(s)).") }); }
+    try { const r = await gmailSyncAll(data, persist); setGmSync({ busy: false, msg: r.skipped ? "Aucune adresse e-mail renseignée à associer." : ("✅ " + r.added + " courriel(s) ajouté(s)" + (r.updated ? ", " + r.updated + " complété(s)" : "") + " (sur " + r.total + " trouvé(s))." + (r.converted ? " " + r.converted + " prospect(s) converti(s) en établissement (envoi confirmé par Gmail)." : "")) }); }
     catch (e) { setGmSync({ busy: false, msg: "❌ " + ((e && e.message) || String(e)) }); }
   };
   // Envoi d'un e-mail de test vers sa propre adresse, pour vérifier le rendu à la réception (mise en
@@ -9998,7 +10055,10 @@ export default function App() {
       const d = dataRef.current;
       const last = (d.settings && d.settings.lastGmailSync) ? new Date(d.settings.lastGmailSync).getTime() : 0;
       if (Date.now() - last < 55 * 60 * 1000) return;
-      if (!Object.keys(gmailAddressMap(d)).length) return;
+      // Adresses à synchroniser : celles des comptes/contacts/sites, mais aussi celles des prospects
+      // en attente d'envoi (la synchro convertit automatiquement les fiches dont l'envoi est confirmé).
+      const hasProspectAddr = (d.prospects || []).some((p) => !p.archived && !p.accountId && p.statut !== "converti" && p.statut !== "ecarte" && ((p.email || "").includes("@") || (p.contactEmail || "").includes("@")));
+      if (!Object.keys(gmailAddressMap(d)).length && !hasProspectAddr) return;
       g.running = true;
       gmailSyncAll(d, persist).catch(() => { g.failed = true; }).finally(() => { g.running = false; });
     };
