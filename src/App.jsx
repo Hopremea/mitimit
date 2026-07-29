@@ -1433,6 +1433,47 @@ function computeIdentityAnomalies(data) {
   });
   return out;
 }
+// Doublons d'ÉVÉNEMENTS en attente : une même relance recréée plusieurs fois pour le même interlocuteur
+// finit par saturer la file « En retard ». On regroupe les événements non faits qui visent le même
+// compte / contact et dont les intitulés se recouvrent largement (mêmes mots significatifs), même
+// formulés différemment (« Sylvie SOURZAC – King Jouet Cahors » vs « Sylvie SOURZAC (King Jouet) »).
+// Aucun regroupement automatique n'est appliqué : la liste est soumise à validation.
+const EV_STOP = new Set(["le", "la", "les", "de", "du", "des", "au", "aux", "un", "une", "et", "a", "en", "sur", "pour", "avec", "suite", "par", "dans", "son", "sa", "ses", "chez", "vers", "apres", "avant", "3d", "d"]);
+const eventTitleTokens = (t) => new Set(String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/).filter((w) => w.length > 1 && !EV_STOP.has(w)));
+function eventTitleSimilarity(a, b) {
+  const A = eventTitleTokens(a), B = eventTitleTokens(b);
+  if (!A.size || !B.size) return 0;
+  let inter = 0; A.forEach((w) => { if (B.has(w)) inter++; });
+  return inter / (A.size + B.size - inter); // indice de Jaccard
+}
+function computeEventDuplicates(events, opts = {}) {
+  const seuil = opts.seuil != null ? opts.seuil : 0.62;
+  const pend = (events || []).filter((e) => e && !e.done && (e.titre || "").trim());
+  // Cloisonnement strict par interlocuteur (compte + contact + établissement) : deux relances visant
+  // des personnes différentes ne sont jamais rapprochées, même au sein d'un même compte — deux
+  // intitulés ne différant que par le nom du contact dépassent le seuil de similarité. Ce choix est
+  // volontairement prudent : il peut laisser passer un doublon (contact renseigné d'un côté seulement),
+  // ce qui se règle d'un clic sur la croix de la ligne, alors qu'un faux positif supprimerait une
+  // relance légitime.
+  const buckets = {};
+  pend.forEach((e) => { const k = (e.accountId || "") + "|" + (e.contactId || "") + "|" + (e.siteId || ""); (buckets[k] = buckets[k] || []).push(e); });
+  const groups = [];
+  Object.values(buckets).forEach((list) => {
+    if (list.length < 2) return;
+    const used = new Set();
+    list.forEach((e, i) => {
+      if (used.has(e.id)) return;
+      const g = [e]; used.add(e.id);
+      for (let j = i + 1; j < list.length; j++) {
+        const o = list[j]; if (used.has(o.id)) continue;
+        if (e.type === o.type && eventTitleSimilarity(e.titre, o.titre) >= seuil) { g.push(o); used.add(o.id); }
+      }
+      // La fiche conservée est la PLUS RÉCENTE : c'est la relance encore d'actualité.
+      if (g.length > 1) groups.push(g.sort((x, y) => (y.date || "").localeCompare(x.date || "")));
+    });
+  });
+  return groups.sort((a, b) => b.length - a.length);
+}
 // Petit triangle d'alerte jaune ; au survol, un paragraphe explicatif sur fond blanc (pop-up).
 // Le pop-up est rendu en portail (document.body) et positionné en fixe, borné à l'écran : il passe
 // AU-DESSUS des cartes voisines (chaque tuile crée son propre contexte d'empilement) et n'est jamais
@@ -8457,6 +8498,36 @@ function dealAutomationEvents(prev, next, accounts) {
   if (next.type === "Devis" && next.statut === "envoye" && was !== "envoye") out.push(mk("relancedevis:" + next.id, 7, "Relancer le devis " + (next.ref || "") + (ens ? " · " + ens : "")));
   return out;
 }
+// Revue des doublons d'événements avant suppression : chaque groupe conserve la relance la PLUS
+// RÉCENTE (celle encore d'actualité) et supprime les répétitions plus anciennes. Rien n'est supprimé
+// sans validation, groupe par groupe.
+function EventDupModal({ groups, accName, evMeta, onConfirm, onClose }) {
+  const [sel, setSel] = useState(() => groups.map(() => true));
+  const toggle = (i) => setSel((s) => s.map((v, j) => j === i ? !v : v));
+  const allOn = sel.every(Boolean);
+  const nbSuppr = groups.reduce((n, g, i) => n + (sel[i] ? g.length - 1 : 0), 0);
+  return (<Modal title="Doublons d'événements" onClose={onClose} xl guard={false}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+      <p style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 0, flex: 1, minWidth: 240, lineHeight: 1.55 }}>Ces relances visent le même interlocuteur avec un intitulé quasi identique : elles ont été recréées plusieurs fois. Pour chaque groupe coché, la <strong style={{ color: "var(--green)" }}>plus récente est conservée</strong> et les répétitions plus anciennes sont supprimées. Décochez un groupe si ce sont en réalité des actions distinctes.</p>
+      <button className="btn btn-ghost btn-s" onClick={() => setSel(groups.map(() => !allOn))}>{allOn ? "Tout décocher" : "Tout cocher"}</button>
+    </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: "55vh", overflowY: "auto", paddingRight: 4 }}>
+      {groups.map((g, i) => (
+        <div key={i} className="card" style={{ borderLeft: "3px solid " + (sel[i] ? "var(--blue)" : "var(--line)"), background: sel[i] ? "var(--blue-l)" : "var(--bg)" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 800, fontSize: 13.5, cursor: "pointer", marginBottom: 8 }}><input type="checkbox" checked={sel[i]} onChange={() => toggle(i)} style={{ width: "auto" }} /> Dédoublonner <span style={{ fontWeight: 600, color: "var(--muted)" }}>({g.length} événements{accName(g[0].accountId) ? " · " + accName(g[0].accountId) : ""})</span></label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{g.map((e, k) => { const keep = k === 0; return (
+            <div key={e.id} style={{ fontSize: 12.5, padding: "6px 9px", borderRadius: 8, background: keep ? "rgba(43,182,115,.10)" : "var(--card)", border: "1px solid " + (keep ? "rgba(43,182,115,.35)" : "var(--line)") }}>
+              <div style={{ fontWeight: 700 }}>{(evMeta(e) || {}).icon} {e.titre || "Événement"}<span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 800, color: keep ? "var(--green)" : "#b4261e" }}>{keep ? "● conservé (le plus récent)" : "● supprimé"}</span></div>
+              <div style={{ color: "var(--muted)" }} className="tnum">{(evMeta(e) || {}).label}{e.date ? " · " + e.date : ""}{e.heure ? " " + e.heure : ""}</div>
+            </div>); })}</div>
+        </div>))}
+    </div>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+      <span style={{ fontSize: 12, color: "var(--muted)" }}>{groups.filter((g, i) => sel[i]).length} groupe(s) · {nbSuppr} événement(s) supprimé(s)</span>
+      <div style={{ display: "flex", gap: 8 }}><button className="btn btn-g" onClick={onClose}>Annuler</button><button className="btn btn-p" disabled={!nbSuppr} onClick={() => onConfirm(groups.filter((g, i) => sel[i]))}><Trash2 size={15} /> Supprimer les doublons ({nbSuppr})</button></div>
+    </div>
+  </Modal>);
+}
 // Command Center « Aujourd'hui » (inspiré de la home HubSpot) : agrège en une file d'attente priorisée
 // tout ce qui demande une action — RDV/relances en retard et du jour, devis à relancer, factures à
 // encaisser, anniversaires — avec accès direct à la fiche concernée et actions rapides.
@@ -8487,6 +8558,18 @@ function CommandCenter({ data, persist, go }) {
   const priAccounts = accounts.filter((a) => !a.archived).map((a) => ({ a, ...priorityScore(a, data) })).filter((x) => x.score >= 35).sort((x, y) => y.score - x.score).slice(0, 6);
   const markDone = (id) => persist((p) => ({ ...p, events: (p.events || []).map((e) => e.id === id ? { ...e, done: true } : e) }));
   const snooze = (id) => persist((p) => ({ ...p, events: (p.events || []).map((e) => e.id === id ? { ...e, date: isoLocal(new Date(Date.now() + 86400000)) } : e) }));
+  // Doublons de relances : mêmes interlocuteur et intitulé, recréés plusieurs fois. Revue puis
+  // suppression des répétitions, la plus récente étant conservée.
+  const [dupOpen, setDupOpen] = useState(false);
+  const [dupMsg, setDupMsg] = useState(null);
+  const evDups = useMemo(() => computeEventDuplicates(data.events), [data.events]);
+  const applyEvDups = (groups) => {
+    const drop = new Set(groups.flatMap((g) => g.slice(1).map((e) => e.id)));
+    persist((p) => ({ ...p, events: (p.events || []).filter((e) => !drop.has(e.id)) }));
+    setDupOpen(false);
+    setDupMsg(drop.size + " doublon(s) supprimé(s) · la relance la plus récente a été conservée dans chaque groupe.");
+    setTimeout(() => setDupMsg(null), 6000);
+  };
   // Suppression définitive d'un événement depuis la liste. Confirmation obligatoire : contrairement à
   // « Marquer fait », l'événement disparaît de l'agenda et de l'historique, sans retour possible.
   const delEventRow = async (e) => {
@@ -8509,12 +8592,13 @@ function CommandCenter({ data, persist, go }) {
       {actions && <span style={{ display: "flex", gap: 5, flexShrink: 0 }}>{actions}</span>}
     </div>
   );
-  const Section = ({ title, color, icon, count, children }) => count === 0 ? null : (
+  const Section = ({ title, color, icon, count, children, action }) => count === 0 ? null : (
     <div className="card" style={{ marginBottom: 14, borderLeft: "4px solid " + color, padding: "12px 16px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 9 }}>
         <span style={{ fontSize: 16 }}>{icon}</span>
         <h3 className="pu-display" style={{ margin: 0, fontSize: 14.5 }}>{title}</h3>
         <span style={{ fontSize: 11.5, color: onColor(color), background: color, borderRadius: 20, padding: "1px 9px", fontWeight: 800 }}>{count}</span>
+        {action && <span style={{ marginLeft: "auto" }}>{action}</span>}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>{children}</div>
     </div>
@@ -8537,8 +8621,10 @@ function CommandCenter({ data, persist, go }) {
       {objCa > 0 && <div style={{ fontSize: 11.5, color: objPct >= 100 ? "var(--green)" : "var(--muted)", fontWeight: 700, marginTop: 5 }}>{objPct}% de l'objectif{objPct >= 100 ? " — atteint 🎉" : " · reste " + eur(Math.max(0, objCa - caMois))}</div>}
       {objCa === 0 && <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4 }}>Aucun objectif défini. Cliquez sur ✏️ pour fixer votre cible de CA mensuel.</div>}
     </div>
+    {dupMsg && <div className="card" style={{ borderLeft: "4px solid var(--green)", marginBottom: 12, fontSize: 12.5 }}>{dupMsg}</div>}
+    {dupOpen && <EventDupModal groups={evDups} accName={accName} evMeta={evMeta} onConfirm={applyEvDups} onClose={() => setDupOpen(false)} />}
     {total === 0 && <div className="card" style={{ textAlign: "center", padding: "34px 16px", color: "var(--muted)" }}><CheckCircle2 size={34} style={{ color: "var(--green)" }} /><div className="pu-display" style={{ fontSize: 16, marginTop: 8, color: "var(--ink)" }}>Tout est à jour</div><div style={{ fontSize: 12.5, marginTop: 4 }}>Aucune relance en retard, aucun RDV du jour, aucune facture échue. Planifie une action depuis le calendrier ou la prospection.</div></div>}
-    <Section title="En retard" color="#FF5A45" icon="⚠️" count={overdue.length}>
+    <Section title="En retard" color="#FF5A45" icon="⚠️" count={overdue.length} action={evDups.length > 0 ? <button className="btn btn-g btn-s" onClick={() => setDupOpen(true)} title="Regrouper les relances recréées plusieurs fois pour le même interlocuteur et supprimer les répétitions"><GitBranch size={14} /> Doublons ({evDups.reduce((n, g) => n + g.length - 1, 0)})</button> : null}>
       {overdue.map((e) => <Row key={e.id} onClick={() => evGo(e)} icon={evMeta(e).icon} title={evLabel(e)} sub={evSub(e)} right={<span style={{ color: "var(--red)" }}>{relDate(e.date)}</span>} actions={<><button className="iconbtn" title="Reporter à demain" onClick={() => snooze(e.id)}><ChevronRight size={15} /></button><button className="iconbtn" title="Marquer fait" onClick={() => markDone(e.id)}><CheckCircle2 size={15} /></button><button className="iconbtn" title="Supprimer l'événement" onClick={() => delEventRow(e)} style={{ color: "var(--red)" }}><X size={15} /></button></>} />)}
     </Section>
     <Section title="Aujourd'hui" color="#3F60AA" icon="📅" count={todayEv.length}>
