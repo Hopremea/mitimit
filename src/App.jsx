@@ -8176,7 +8176,39 @@ function ProspectMailing({ data, persist, onClose }) {
   const isReseauClaim = (c) => c.angle_utilise === "reseau_enseigne" || c.angle_utilise === "reseau_region";
   // Traitement groupé : jamais un prospect déjà contacté (il reste traitable un par un, avec confirmation).
   const batchEligible = cards.filter((c) => !c.done && !c.blocked && !c.deja && c.confiance !== "a_revoir" && (!c.alertes || c.alertes.length === 0) && (!isReseauClaim(c) || confirmReseau) && prospectMailAddress(c.prospect));
-  const createAllSafe = async () => { for (const c of batchEligible) { if (!cards.find((x) => x.id === c.id && x.done)) await createDraftFor(c); } };
+  // Création en série des brouillons, pilotée par le registre global : l'avancement reste juste même
+  // si le volet est fermé en cours de route, et le bouton ne peut pas rester bloqué sur « en cours ».
+  const draftJob = jobs.get("mailing:drafts");
+  const draftsRunning = jobs.has("mailing:drafts");
+  const createBatch = (list) => jobs.run("mailing:drafts", "Brouillons Gmail", async (prog) => {
+    let n = 0; prog(0, list.length);
+    for (const c of list) {
+      const cur = mailingWave.cards.find((x) => x.id === c.id) || c;
+      if (!cur.done) await createDraftFor(cur, { force: true });
+      n++; prog(n, list.length);
+    }
+  });
+  const createAllSafe = () => createBatch(batchEligible);
+  // « Valider tous les brouillons » : toutes les cartes exploitables, alertes comprises. Le détail de
+  // ce qui est embarqué (alertes, réseau non vérifié, prospects déjà contactés) est annoncé avant.
+  const allEligible = cards.filter((c) => !c.done && !c.blocked && prospectMailAddress(c.prospect));
+  const validateAll = async () => {
+    if (!allEligible.length || draftsRunning) return;
+    const nAlert = allEligible.filter((c) => c.confiance === "a_revoir" || (c.alertes && c.alertes.length)).length;
+    const nReseau = allEligible.filter((c) => isReseauClaim(c) && !confirmReseau).length;
+    const nDeja = allEligible.filter((c) => c.deja).length;
+    const parts = [];
+    if (nAlert) parts.push(nAlert + " portant une alerte ou marqué « à revoir »");
+    if (nReseau) parts.push(nReseau + " affirmant une relation de réseau non vérifiée");
+    if (nDeja) parts.push(nDeja + " adressé à un prospect déjà contacté");
+    const nSansMail = cards.filter((c) => !c.done && !c.blocked && !prospectMailAddress(c.prospect)).length;
+    const ok = await appConfirm("Créer " + allEligible.length + " brouillon(s) Gmail d'un coup, sans écarter les alertes"
+      + (parts.length ? " — dont " + parts.join(", ") + "." : ".")
+      + (nSansMail ? " " + nSansMail + " carte(s) sans adresse e-mail seront ignorées." : "")
+      + " Rien n'est envoyé : les brouillons restent dans Gmail, à relire avant envoi.",
+      { title: "Valider tous les brouillons", confirmLabel: "Créer les " + allEligible.length + " brouillons" });
+    if (ok) createBatch(allEligible);
+  };
   const nbNoMail = selectedRows.filter((x) => !prospectMailAddress(x.p)).length;
   const nbDeja = selectedRows.filter((x) => x.deja).length;
   const nbIdent = selectedRows.filter((x) => x.a.objectif_type === "identifier_contact").length;
@@ -8215,7 +8247,8 @@ function ProspectMailing({ data, persist, onClose }) {
         <label style={{ fontSize: 12, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}><input type="checkbox" checked={confirmReseau} onChange={(e) => setConfirmReseau(e.target.checked)} style={{ width: "auto" }} /> j'ai vérifié les affirmations de réseau</label>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button className="btn btn-ghost btn-s" disabled={running} onClick={async () => { const ok = await appConfirm("Effacer les " + cards.length + " mail(s) de cette vague ? Les brouillons déjà créés dans Gmail sont conservés.", { title: "Effacer la vague", confirmLabel: "Effacer" }); if (ok) setCards([]); }} title="Repartir d'une vague vierge (les brouillons Gmail déjà créés ne sont pas touchés)"><X size={14} /> Effacer la vague</button>
-          <button className="btn btn-g" onClick={createAllSafe} disabled={!batchEligible.length} title="Ne traite que les cartes sans alerte et non « à revoir »"><Check size={15} /> Créer tous les brouillons sans alerte ({batchEligible.length})</button>
+          <button className="btn btn-g" onClick={createAllSafe} disabled={!batchEligible.length || draftsRunning} title="Ne traite que les cartes sans alerte et non « à revoir »"><Check size={15} /> Créer tous les brouillons sans alerte ({batchEligible.length})</button>
+          <button className="btn btn-p" onClick={validateAll} disabled={!allEligible.length || draftsRunning} title="Crée les brouillons Gmail de TOUTES les cartes exploitables, alertes comprises. Rien n'est envoyé."><Mail size={15} className={draftsRunning ? "spin" : ""} /> {draftsRunning ? ("Création… " + ((draftJob && draftJob.total) ? draftJob.done + "/" + draftJob.total : "")) : "Valider tous les brouillons (" + allEligible.length + ")"}</button>
         </div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: "50vh", overflowY: "auto", paddingRight: 4 }}>
