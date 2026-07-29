@@ -1322,6 +1322,9 @@ function enseigneNorm(name) {
 // Calculateur d'angles VRAIS d'un prospect (fonction pure, aucun appel réseau). Ce qui n'est pas
 // calculé ici ne pourra pas être affirmé dans le mail : proximité, réseau d'enseigne, réseau régional,
 // adéquation produit, objectif et registre selon le type, et niveau de risque.
+// Adresse de destination d'un mail de prospection : l'e-mail du MAGASIN en priorité (adresse générique
+// du point de vente), à défaut celui du contact identifié.
+const prospectMailAddress = (p) => (((p || {}).email) || "").trim() || (((p || {}).contactEmail) || "").trim();
 function computeProspectAngles({ prospect, accounts, sites, interactions, hq, now }) {
   const p = prospect || {};
   hq = hq || SIEGE;
@@ -1357,7 +1360,7 @@ function computeProspectAngles({ prospect, accounts, sites, interactions, hq, no
   else if (t === "cooperative") registre_type = "Coopérative : liberté d'assortiment de l'adhérent, produit local.";
   else registre_type = "Chaîne via centrale ou grande surface : sobriété, on cherche le bon interlocuteur, pas la vente immédiate.";
   // Risque.
-  const hasEmail = !!(p.email && /[^@\s]+@[^@\s]+\.[^@\s]+/.test(String(p.email)));
+  const hasEmail = /[^@\s]+@[^@\s]+\.[^@\s]+/.test(prospectMailAddress(p));
   const hasName = !!(p.nom && p.nom.trim().length >= 2);
   const hasEnseigne = !!(p.enseigne && p.enseigne.trim());
   const realType = !!(t && PROSPECT_TYPES[t] && t !== "autre");
@@ -6325,7 +6328,7 @@ Coordonnées du contact : cherche d'abord un courriel et un téléphone de l'int
 Distinction de type importante : "chaine" = point de vente d'un réseau qui commande via sa centrale d'achat ; "franchise" = franchisé qui passe ses commandes en propre, séparément de la centrale ; "cooperative" = adhérent d'une coopérative ; "independant" = établissement sans réseau ; "specialiste" = concept store ; "gss" = grande surface spécialisée ; "autre".
 
 Renvoie UNIQUEMENT un tableau JSON valide (aucun texte ni balise autour). Chaque objet a EXACTEMENT ces clés :
-- nom, enseigne, type, adresse, ville, cp, departement, region, telephone, site, notes (chaînes ; vide si inconnu)
+- nom, enseigne, type, adresse, ville, cp, departement, region, telephone, email, site, notes (chaînes ; vide si inconnu ; email = adresse GÉNÉRIQUE du magasin publiée sur le site officiel, la fiche magasin de l'enseigne ou la fiche Google, jamais celle d'une personne)
 - type vaut : cooperative, chaine, franchise, independant, specialiste, gss, autre
 - siren, siret, raisonSociale, formeJuridique (chaînes ; depuis les registres officiels ; vide si non trouvé ; siret = établissement de l'établissement, 14 chiffres)
 - contact : objet { prenom, nom, fonction, email, telephone, source } ; le contact est le dirigeant ou le responsable identifié, avec ses coordonnées issues de la meilleure source publique disponible (registre, site, ou fiche Google en dernier recours).
@@ -6435,11 +6438,12 @@ Recherche ses informations vérifiables. Attention aux homonymes : ne retiens qu
 Sonde systématiquement les sites liés à la fiche, comme le ferait une recherche Google : le site web déjà renseigné, les pages Facebook/Instagram connues, et surtout, si l'établissement appartient à une enseigne ou un réseau (JouéClub, King Jouet, Cultura…), le site officiel de l'enseigne et sa page « trouver un magasin » (store locator) : la fiche magasin de l'enseigne (ex. pour « JouéClub Aix-en-Provence », la fiche du magasin sur joueclub.fr) donne souvent l'adresse exacte, le téléphone, les horaires et le courriel du point de vente.
 Si le nom n'est pas renseigné, reconstitue-le (enseigne + ville, ou raison sociale) à partir des autres données ; sinon laisse "nom" vide.
 Renvoie UNIQUEMENT un objet JSON valide (aucun texte ni balise autour) avec EXACTEMENT ces clés :
-{"nom":"","site":"","facebook":"","instagram":"","siren":"","siret":"","raisonSociale":"","formeJuridique":"","adresse":"","cp":"","ville":"","departement":"","region":"","telephone":"","contact":{"prenom":"","nom":"","fonction":"","email":"","telephone":"","source":""},"notes":"","confiance":"haute/moyenne/faible","source":""}
+{"nom":"","site":"","facebook":"","instagram":"","siren":"","siret":"","raisonSociale":"","formeJuridique":"","adresse":"","cp":"","ville":"","departement":"","region":"","telephone":"","email":"","contact":{"prenom":"","nom":"","fonction":"","email":"","telephone":"","source":""},"notes":"","confiance":"haute/moyenne/faible","source":""}
 - nom : nom commercial / enseigne de CE point de vente (ex. « King Jouet Cahors »), reconstitué depuis les autres données si absent.
 - site / facebook / instagram : URLs officielles (sinon vide).
 - siren : 9 chiffres de la société (ou RNA « W… » pour une association) ; siret : 14 chiffres de CET établissement à cette adresse (sinon vide).
 - adresse : complète ; telephone : du magasin, format français.
+- email : adresse e-mail GÉNÉRIQUE du magasin (accueil, contact), publiée sur le site officiel, la fiche magasin de l'enseigne ou la fiche Google — PAS celle d'une personne (celle-là va dans contact.email). Vide en cas de doute.
 - contact : dirigeant ou responsable identifié, coordonnées issues de la meilleure source publique ; "source" = d'où vient l'info.
 - notes : une phrase factuelle (univers produits, implantation) ; "source" = registre / source principale.${instruction && instruction.trim() ? "\n\nPRIORITÉ DEMANDÉE PAR L'UTILISATEUR (concentre ta recherche là-dessus, sans rien inventer, et résume les trouvailles dans \"notes\") :\n" + instruction.trim() : ""}`;
   const body = { model: "claude-haiku-4-5", max_tokens: 1500, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search" }] };
@@ -6458,7 +6462,7 @@ Renvoie UNIQUEMENT un objet JSON valide (aucun texte ni balise autour) avec EXAC
         site: (o.site || "").trim(), facebook: (o.facebook || "").trim(), instagram: (o.instagram || "").trim(),
         siren: onlyNum(o.siren), siret: onlyNum(o.siret), raisonSociale: (o.raisonSociale || "").trim(), formeJuridique: (o.formeJuridique || "").trim(),
         adresse: (o.adresse || "").trim(), cp: onlyNum(o.cp), ville: (o.ville || "").trim(), departement: (o.departement || "").trim(), region: (o.region || "").trim(),
-        telephone: (o.telephone || "").trim(),
+        telephone: (o.telephone || "").trim(), email: (o.email || "").trim(),
         contactPrenom: (c.prenom || "").trim(), contactNom: (c.nom || "").trim(), contactFonction: (c.fonction || "").trim(), contactEmail: (c.email || "").trim(), contactTel: (c.telephone || "").trim(), contactSource: (c.source || "").trim(),
         notes: (o.notes || "").trim(), confiance: o.confiance || "?", source: (o.source || "").trim(), usage: data.usage || null,
       };
@@ -6582,7 +6586,7 @@ function ProspectImportModal({ onClose, onImport }) {
 function applyProspectEnrich(x, r) {
   const patch = {}; const setIf = (k, v) => { if (v && !String(x[k] || "").trim()) patch[k] = v; };
   setIf("nom", r.nom); // nom reconstitué par l'IA depuis les autres infos, si la fiche n'en a pas
-  if (r.contactEmail && !(x.email || "").trim()) patch.email = r.contactEmail;
+  const mail = r.email || r.contactEmail || ""; if (mail && !(x.email || "").trim()) patch.email = mail; // e-mail générique du magasin en priorité
   const tel = r.telephone || r.contactTel || ""; if (tel && !(x.telephone || "").trim()) patch.telephone = tel;
   setIf("contactEmail", r.contactEmail); setIf("contactTel", r.contactTel);
   setIf("site", r.site); setIf("facebook", r.facebook); setIf("instagram", r.instagram);
@@ -6668,7 +6672,7 @@ function Prospection({ data, persist, go }) {
         for (const p of queue) {
           try {
             const r = await aiEnrichProspect(p, (u) => persist((d) => ({ ...d, claudeUsage: addUsage(d.claudeUsage, u) })), consigne);
-            if (r.contactEmail && !(p.email || "").trim()) nMail++;
+            if ((r.email || r.contactEmail) && !(p.email || "").trim()) nMail++;
             if ((r.telephone || r.contactTel) && !(p.telephone || "").trim()) nTel++;
             persist((d) => ({ ...d, prospects: d.prospects.map((x) => x.id === p.id ? applyProspectEnrich(x, r) : x) }));
           } catch (e) {}
@@ -6992,7 +6996,7 @@ function Prospection({ data, persist, go }) {
         const { stores: arr, usage } = await aiSearchStores(zone.trim() || "France", kind);
         const seen = new Set(data.prospects.map((p) => (p.nom + "|" + p.ville).toLowerCase())); const today = TODAY(); const add = [];
         arr.forEach((r) => { const nom = (r.nom || r.enseigne || "").trim(); if (!nom) return; const key = (nom + "|" + (r.ville || "")).toLowerCase(); if (seen.has(key)) return; seen.add(key); const ct = r.contact || {};
-          add.push({ id: "p_" + Date.now() + "_" + add.length, nom, enseigne: r.enseigne || "", type: ["cooperative", "chaine", "franchise", "independant", "specialiste", "gss", "autre"].includes(r.type) ? r.type : "autre", format: "", adresse: r.adresse || "", ville: r.ville || "", cp: r.cp || "", departement: r.departement || "", region: r.region || "", telephone: r.telephone || "", site: r.site || "", email: "", statut: "a_qualifier", potentiel: "", notes: r.notes || "", source: "Recherche IA · " + today, accountId: null, createdAt: today, siren: r.siren || "", siret: r.siret || "", raisonSociale: r.raisonSociale || "", formeJuridique: r.formeJuridique || "", contactPrenom: ct.prenom || "", contactNom: ct.nom || "", contactFonction: ct.fonction || "", contactEmail: ct.email || "", contactTel: ct.telephone || "", contactSource: ct.source || "" }); });
+          add.push({ id: "p_" + Date.now() + "_" + add.length, nom, enseigne: r.enseigne || "", type: ["cooperative", "chaine", "franchise", "independant", "specialiste", "gss", "autre"].includes(r.type) ? r.type : "autre", format: "", adresse: r.adresse || "", ville: r.ville || "", cp: r.cp || "", departement: r.departement || "", region: r.region || "", telephone: r.telephone || "", site: r.site || "", email: r.email || "", statut: "a_qualifier", potentiel: "", notes: r.notes || "", source: "Recherche IA · " + today, accountId: null, createdAt: today, siren: r.siren || "", siret: r.siret || "", raisonSociale: r.raisonSociale || "", formeJuridique: r.formeJuridique || "", contactPrenom: ct.prenom || "", contactNom: ct.nom || "", contactFonction: ct.fonction || "", contactEmail: ct.email || "", contactTel: ct.telephone || "", contactSource: ct.source || "" }); });
         persist((d) => ({ ...d, prospects: add.length ? [...add, ...d.prospects] : d.prospects, claudeUsage: addUsage(d.claudeUsage, usage) }));
         if (add.length) { setQ(""); setFType("tous"); setFRegion("tous"); setFlashIds(new Set(add.map((a) => a.id))); }
         setAiMsg(add.length ? add.length + " prospect(s) ajouté(s) au listing, statut « À qualifier ». À vérifier avant action." : "Aucun nouveau prospect (déjà présents ou aucun résultat exploitable).");
@@ -7139,7 +7143,8 @@ function Prospection({ data, persist, go }) {
       <div className="fld"><label>Adresse postale</label><AddrInput value={edit.adresse} onChange={(v) => upE("adresse", v)} known={collectKnownAddresses(data)} rows={2} placeholder="Tapez une adresse et choisissez une suggestion" /></div>
       <div className="row2"><div className="fld"><label>Code postal</label><input value={edit.cp} onChange={(e) => upE("cp", e.target.value)} /></div><div className="fld"><label>Ville</label><input value={edit.ville} onChange={(e) => upE("ville", e.target.value)} /></div></div>
       <div className="row2"><div className="fld"><label>Département</label><input value={edit.departement} onChange={(e) => upE("departement", e.target.value)} placeholder="82 Tarn-et-Garonne" /></div><div className="fld"><label>Région</label><input value={edit.region} onChange={(e) => upE("region", e.target.value)} placeholder="Occitanie" /></div></div>
-      <div className="row2"><div className="fld"><label>Téléphone</label><input value={edit.telephone} onChange={(e) => upE("telephone", e.target.value)} /></div><div className="fld"><label>Site web</label><input value={edit.site} onChange={(e) => upE("site", e.target.value)} placeholder="https://…" />{edit.site && edit.site.trim() && <a className="lnk" href={ensureHttp(edit.site)} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, marginTop: 4, display: "inline-flex", alignItems: "center", gap: 4 }}><ExternalLink size={12} /> Ouvrir {cleanDomain(edit.site) || "le site"}</a>}</div></div>
+      <div className="row2"><div className="fld"><label>Téléphone</label><input value={edit.telephone} onChange={(e) => upE("telephone", e.target.value)} /></div><div className="fld"><label>E-mail du magasin</label><input type="email" value={edit.email || ""} onChange={(e) => upE("email", e.target.value)} placeholder="contact@magasin.fr" /><span style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>Adresse générique du point de vente — utilisée en priorité pour le mailing de prospection.</span></div></div>
+      <div className="fld"><label>Site web</label><input value={edit.site} onChange={(e) => upE("site", e.target.value)} placeholder="https://…" />{edit.site && edit.site.trim() && <a className="lnk" href={ensureHttp(edit.site)} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, marginTop: 4, display: "inline-flex", alignItems: "center", gap: 4 }}><ExternalLink size={12} /> Ouvrir {cleanDomain(edit.site) || "le site"}</a>}</div>
       <div className="row2"><div className="fld"><label>Statut de prospection</label><select value={edit.statut} onChange={(e) => upE("statut", e.target.value)}>{Object.entries(PROSPECT_STATUT).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div><div className="fld"><label>Potentiel</label><select value={edit.potentiel} onChange={(e) => upE("potentiel", e.target.value)}><option value="">— à évaluer —</option>{Object.entries(POTENTIEL_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div></div>
       <div className="fld"><label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>Notes <MicDictate title="Dicter une note au micro" onText={(t) => upE("notes", ((edit.notes || "").trim() + (edit.notes && edit.notes.trim() ? " " : "") + t))} /></label><textarea rows={3} value={edit.notes} onChange={(e) => upE("notes", e.target.value)} /></div>
       <div className="fld"><label>Étiquettes <span style={{ color: "var(--muted)", fontWeight: 400 }}>(catégorisation libre — ex. « Salon 2026 », « Prioritaire Q3 »)</span></label>
@@ -7260,7 +7265,7 @@ function ProspectMailing({ data, persist, onClose }) {
     });
   };
   const createDraftFor = async (c) => {
-    const to = (c.prospect.email || "").trim();
+    const to = prospectMailAddress(c.prospect);
     if (!to) { updateCard(c.id, { sendMsg: "❌ Pas d'adresse e-mail." }); return false; }
     updateCard(c.id, { sending: true, sendMsg: "" });
     try {
@@ -7281,9 +7286,9 @@ function ProspectMailing({ data, persist, onClose }) {
   };
   const regenCard = async (c) => { if (c.edited) { const ok = await appConfirm("Régénérer va écraser vos modifications sur ce mail. Continuer ?", { title: "Régénérer", confirmLabel: "Régénérer" }); if (!ok) return; } runGen(c); };
   const isReseauClaim = (c) => c.angle_utilise === "reseau_enseigne" || c.angle_utilise === "reseau_region";
-  const batchEligible = cards.filter((c) => !c.done && !c.blocked && c.confiance !== "a_revoir" && (!c.alertes || c.alertes.length === 0) && (!isReseauClaim(c) || confirmReseau) && (c.prospect.email || "").trim());
+  const batchEligible = cards.filter((c) => !c.done && !c.blocked && c.confiance !== "a_revoir" && (!c.alertes || c.alertes.length === 0) && (!isReseauClaim(c) || confirmReseau) && prospectMailAddress(c.prospect));
   const createAllSafe = async () => { for (const c of batchEligible) { if (!cards.find((x) => x.id === c.id && x.done)) await createDraftFor(c); } };
-  const nbNoMail = selectedRows.filter((x) => !(x.p.email || "").trim()).length;
+  const nbNoMail = selectedRows.filter((x) => !prospectMailAddress(x.p)).length;
   const nbIdent = selectedRows.filter((x) => x.a.objectif_type === "identifier_contact").length;
   const CONF = { haute: { label: "haute", color: "#2bb673" }, standard: { label: "standard", color: "#F8B133" }, a_revoir: { label: "à revoir", color: "#FF5A45" } };
   const ANGLE_LBL = { proximite: "proximité", reseau_enseigne: "réseau enseigne", reseau_region: "réseau régional", adequation_produit: "adéquation produit" };
@@ -7300,10 +7305,10 @@ function ProspectMailing({ data, persist, onClose }) {
     <div className="fld"><label>Consigne de vague (action visée, pour les mails de référencement)</label><input value={consigne} onChange={(e) => setConsigne(e.target.value)} placeholder="Ex : proposer un échange en visio, envoyer le catalogue, un coffret d'essai…" /><span style={{ fontSize: 11, color: "var(--muted)" }}>Ignorée pour les prospects en objectif « identifier le contact » (chaîne, GSS…), où l'action est imposée.</span></div>
     <div className="fld"><label>Ton (cumulable)</label><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{MSG_TONES.map((t) => { const on = tones.has(t.key); return (<button key={t.key} type="button" className={cx("btn", "btn-s", on ? "btn-p" : "btn-g")} onClick={() => toggleTone(t.key)} title={t.hint}>{t.label}</button>); })}</div><span style={{ fontSize: 11, color: "var(--muted)" }}>Cochez un ou plusieurs tons ; ils se combinent. Aucun ton coché : registre neutre. Le ton n'autorise jamais d'affirmation fausse.</span></div>
     <div style={{ border: "1px solid var(--line)", borderRadius: 12, maxHeight: 240, overflowY: "auto", margin: "6px 0 10px" }}>
-      {filtered.length === 0 ? <div className="empty" style={{ padding: 16 }}>Aucun prospect ne correspond aux filtres.</div> : filtered.map(({ p, a }) => { const on = sel.has(p.id); const noMail = !(p.email || "").trim(); return (
+      {filtered.length === 0 ? <div className="empty" style={{ padding: 16 }}>Aucun prospect ne correspond aux filtres.</div> : filtered.map(({ p, a }) => { const on = sel.has(p.id); const mailTo = prospectMailAddress(p); const noMail = !mailTo; return (
         <label key={p.id} className="hrow" style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 11px", borderBottom: "1px solid var(--line)", cursor: "pointer", opacity: a.risque === "bloquant" ? 0.6 : 1 }}>
           <input type="checkbox" checked={on} onChange={() => toggleSel(p.id)} style={{ width: "auto" }} />
-          <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{p.nom || p.enseigne || "Sans nom"} <span style={{ fontWeight: 500, color: "var(--muted)" }}>· {p.ville || "—"} · {(PROSPECT_TYPES[p.type] || {}).label || "—"}</span></div><div style={{ fontSize: 11.5, color: "var(--muted)", display: "flex", gap: 8, flexWrap: "wrap" }}><span style={{ color: a.objectif_type === "referencement" ? "var(--green)" : "#7c5cf0", fontWeight: 700 }}>{a.objectif_type === "referencement" ? "→ référencement" : "→ trouver le contact centrale"}</span><span>angle : {ANGLE_LBL[a.bestAngle]}</span><span style={{ color: noMail ? "var(--red)" : "var(--muted)" }}>{noMail ? "✉ aucune adresse" : "✉ " + p.email}</span>{a.risque === "bloquant" && <span style={{ color: "var(--red)", fontWeight: 700 }}>⚠ à revoir</span>}</div></div>
+          <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{p.nom || p.enseigne || "Sans nom"} <span style={{ fontWeight: 500, color: "var(--muted)" }}>· {p.ville || "—"} · {(PROSPECT_TYPES[p.type] || {}).label || "—"}</span></div><div style={{ fontSize: 11.5, color: "var(--muted)", display: "flex", gap: 8, flexWrap: "wrap" }}><span style={{ color: a.objectif_type === "referencement" ? "var(--green)" : "#7c5cf0", fontWeight: 700 }}>{a.objectif_type === "referencement" ? "→ référencement" : "→ trouver le contact centrale"}</span><span>angle : {ANGLE_LBL[a.bestAngle]}</span><span style={{ color: noMail ? "var(--red)" : "var(--muted)" }} title={!noMail && !(p.email || "").trim() ? "Adresse du contact identifié (pas d'e-mail magasin renseigné)" : "E-mail du magasin"}>{noMail ? "✉ aucune adresse" : "✉ " + mailTo}</span>{a.risque === "bloquant" && <span style={{ color: "var(--red)", fontWeight: 700 }}>⚠ à revoir</span>}</div></div>
         </label>); })}
     </div>
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
@@ -7324,7 +7329,7 @@ function ProspectMailing({ data, persist, onClose }) {
               <Badge color={conf.color}>{conf.label}</Badge>
               <Badge color={c.objectif === "referencement" ? "#2bb673" : "#7c5cf0"}>{c.objectif === "referencement" ? "référencement" : "contact centrale"}</Badge>
               {!c.blocked && c.angle_utilise && <span style={{ fontSize: 11, color: "var(--muted)" }}>angle : {ANGLE_LBL[c.angle_utilise] || c.angle_utilise}</span>}
-              <span style={{ fontSize: 11.5, color: (c.prospect.email || "").trim() ? "var(--muted)" : "var(--red)", marginLeft: "auto" }}>{(c.prospect.email || "").trim() || "aucune adresse"}</span>
+              <span style={{ fontSize: 11.5, color: prospectMailAddress(c.prospect) ? "var(--muted)" : "var(--red)", marginLeft: "auto" }} title={!(c.prospect.email || "").trim() && prospectMailAddress(c.prospect) ? "Adresse du contact identifié (pas d'e-mail magasin renseigné)" : "E-mail du magasin"}>{prospectMailAddress(c.prospect) || "aucune adresse"}</span>
             </div>
             {c.blocked ? <div className="empty" style={{ padding: 12 }}>{(c.alertes && c.alertes[0]) || "À revoir à la main."}</div> : <>
               <div className="fld" style={{ marginBottom: 8 }}><label>Objet</label><input value={c.objet} onChange={(e) => updateCard(c.id, { objet: e.target.value, edited: true })} /></div>
@@ -7335,7 +7340,7 @@ function ProspectMailing({ data, persist, onClose }) {
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
                 <button className="btn btn-g btn-s" onClick={() => updateCard(c.id, { refineOpen: !c.refineOpen })} disabled={c.busy}><Wand2 size={14} /> Suggérer une modification</button>
                 <button className="btn btn-g btn-s" onClick={() => regenCard(c)} disabled={c.busy}><Sparkles size={14} className={c.busy ? "spin" : ""} /> Régénérer</button>
-                <button className="btn btn-p btn-s" onClick={() => createDraftFor(c)} disabled={c.sending || c.done || !(c.prospect.email || "").trim()}><Mail size={14} className={c.sending ? "spin" : ""} /> {c.done ? "Brouillon créé" : (c.sending ? "Création…" : "Créer le brouillon")}</button>
+                <button className="btn btn-p btn-s" onClick={() => createDraftFor(c)} disabled={c.sending || c.done || !prospectMailAddress(c.prospect)}><Mail size={14} className={c.sending ? "spin" : ""} /> {c.done ? "Brouillon créé" : (c.sending ? "Création…" : "Créer le brouillon")}</button>
               </div>
             </>}
             {c.sendMsg && <div style={{ fontSize: 12, fontWeight: 600, marginTop: 6, textAlign: "right", color: c.sendMsg.startsWith("❌") ? "var(--red)" : "var(--green)" }}>{c.sendMsg}</div>}
