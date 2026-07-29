@@ -1699,10 +1699,12 @@ function prospectContactHistory(p, data) {
   const sent = (data.interactions || []).filter((i) => i.type === "email" && i.direction !== "entrant" && addrs.has(String(i.email || "").trim().toLowerCase()));
   if (sent.length) {
     const last = sent.slice().sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0];
-    return { date: last.date || "", quoi: last.sujet || "courriel envoyé", source: last.source === "gmail" ? "échange Gmail journalisé" : "échange enregistré dans MITMIT" };
+    return { envoye: true, date: last.date || "", quoi: last.sujet || "courriel envoyé", source: last.source === "gmail" ? "échange Gmail journalisé" : "échange enregistré dans MITMIT" };
   }
-  if (p.statut === "contacte") return { date: p.dateContact || p.brouillonDate || "", quoi: p.brouillonObjet || "prospect marqué « contacté »", source: "statut de la fiche" };
-  if (p.statut === "brouillon_cree" || p.brouillonDate) return { date: p.brouillonDate || "", quoi: p.brouillonObjet || "brouillon de prospection créé", source: "brouillon déjà créé depuis MITMIT" };
+  if (p.statut === "contacte") return { envoye: true, date: p.dateContact || p.brouillonDate || "", quoi: p.brouillonObjet || "prospect marqué « contacté »", source: "statut de la fiche" };
+  // Un brouillon n'est PAS un contact : il peut être relu, modifié, supprimé sans jamais partir.
+  // On le signale (envoye: false) pour information, mais il n'écarte jamais le prospect d'une vague.
+  if (p.statut === "brouillon_cree" || p.brouillonDate) return { envoye: false, date: p.brouillonDate || "", quoi: p.brouillonObjet || "brouillon de prospection créé", source: "brouillon créé depuis MITMIT" };
   return null;
 }
 function computeProspectAngles({ prospect, accounts, sites, interactions, hq, now }) {
@@ -8875,9 +8877,10 @@ function ProspectMailing({ data, persist, onClose }) {
   const onUsage = (u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }));
   const anglesOf = (p) => computeProspectAngles({ prospect: p, accounts: data.accounts, sites: data.sites, interactions: data.interactions, hq: SIEGE });
   // « Déjà contacté » : croisement de l'API Gmail (mail réellement ENVOYÉ, libellé SENT — vérification
-  // lancée à l'ouverture du volet) et des données MITMIT (statut, brouillon créé, échanges journalisés).
+  // lancée à l'ouverture du volet) et des données MITMIT (statut « contacté », échanges journalisés).
   // Ces prospects sont masqués par défaut et jamais présélectionnés : on ne redémarche pas quelqu'un
-  // déjà contacté.
+  // déjà contacté. Un BROUILLON n'en fait pas partie : tant que rien n'est parti, le prospect reste
+  // entièrement disponible.
   const [gmSent, setGmSent] = useWaveState("gmSent", () => new Map());
   const [gmCheck, setGmCheck] = useWaveState("gmCheck", { busy: false, msg: "", done: false });
   const runGmailCheck = async () => {
@@ -8898,9 +8901,14 @@ function ProspectMailing({ data, persist, onClose }) {
   // Antécédent de contact, toutes sources confondues (Gmail d'abord, sinon les données MITMIT).
   const contactedInfo = (p) => {
     const g = gmSent.get(p.id);
-    if (g) return { date: g.date || "", quoi: g.sujet || "courriel envoyé", source: "envoi confirmé par Gmail" + (g.nb > 1 ? " · " + g.nb + " messages" : "") };
+    if (g) return { envoye: true, date: g.date || "", quoi: g.sujet || "courriel envoyé", source: "envoi confirmé par Gmail" + (g.nb > 1 ? " · " + g.nb + " messages" : "") };
     return prospectContactHistory(p, data);
   };
+  // Seul un envoi AVÉRÉ écarte un prospect. Un brouillon ne prouve rien : il peut avoir été relu,
+  // corrigé ou supprimé sans jamais partir. La source qui fait foi est le libellé SENT de Gmail
+  // (gmailCheckAlreadySent écarte déjà explicitement les brouillons), à défaut un échange journalisé
+  // ou le statut « contacté » posé à la main.
+  const dejaEnvoye = (p) => { const d = contactedInfo(p); return d && d.envoye ? d : null; };
   const filtered = useMemo(() => prospects.filter((p) => {
     if (p.accountId) return false;
     if (listFilter !== "tous") { const L = mailLists.find((l) => l.id === listFilter); if (!L || !(L.ids || []).includes(p.id)) return false; }
@@ -8908,9 +8916,13 @@ function ProspectMailing({ data, persist, onClose }) {
     if (nameQ) { if (normStr((p.nom || "") + " " + (p.enseigne || "")).indexOf(nameQ) === -1) return false; }
     else if (!types.has(p.type || "autre")) return false;
     if (region !== "tous" && (p.region || "") !== region) return false;
-    const st = p.statut || "a_qualifier";
+    // Créer un brouillon fait passer la fiche au statut « brouillon créé ». Comme ce statut ne figure
+    // pas parmi les puces (« À qualifier » / « À contacter »), il excluait le prospect du ciblage
+    // alors que rien n'était parti. On le ramène donc à « à contacter », son état réel.
+    const stBrut = p.statut || "a_qualifier";
+    const st = stBrut === "brouillon_cree" ? "a_contacter" : stBrut;
     if (statuts.size && !statuts.has(st)) return false;
-    if (!showTreated && (st === "brouillon_cree" || st === "contacte" || contactedInfo(p))) return false;
+    if (!showTreated && (stBrut === "contacte" || dejaEnvoye(p))) return false;
     return true;
   }).map((p) => ({ p, a: anglesOf(p), deja: contactedInfo(p) })), [prospects, types, region, statuts, showTreated, listFilter, tagFilter, nameQ, gmSent, data.accounts, data.sites, data.interactions]);
   const filterSig = [...types].sort().join(",") + "|" + region + "|" + [...statuts].sort().join(",") + "|" + showTreated + "|" + listFilter + "|" + tagFilter + "|" + nameQ + "|G" + gmSent.size;
@@ -8933,7 +8945,7 @@ function ProspectMailing({ data, persist, onClose }) {
   const generate = async () => {
     if (running || !selectedRows.length) return;
     // Garde-fou : un prospect déjà démarché ne peut être relancé qu'après confirmation explicite.
-    const dejas = selectedRows.filter((x) => x.deja);
+    const dejas = selectedRows.filter((x) => x.deja && x.deja.envoye);
     if (dejas.length) {
       const ok = await appConfirm(dejas.length + " prospect(s) sélectionné(s) ont DÉJÀ reçu un mail (" + (dejas[0].deja.source || "antécédent") + (dejas[0].deja.date ? ", le " + dejas[0].deja.date : "") + "). Générer quand même un nouveau mail pour eux ?", { title: "Prospects déjà contactés", confirmLabel: "Générer quand même" });
       if (!ok) return;
@@ -8944,7 +8956,8 @@ function ProspectMailing({ data, persist, onClose }) {
     jobs.run("mailing:wave", "Mailing prospection", async (prog) => {
       let done = 0; prog(0, rows.length); const acc = [];
       for (const { p, a, deja } of rows) {
-        const relance = deja ? ["Ce prospect a déjà reçu un mail (" + deja.source + (deja.date ? ", le " + deja.date : "") + ") : ce message est une relance, à relire avant envoi."] : [];
+        // Un envoi avéré déclenche une alerte (c'est une relance) ; un simple brouillon, non.
+        const relance = (deja && deja.envoye) ? ["Ce prospect a déjà reçu un mail (" + deja.source + (deja.date ? ", le " + deja.date : "") + ") : ce message est une relance, à relire avant envoi."] : [];
         if (a.risque === "bloquant") {
           acc.push({ id: p.id, prospect: p, angles: a, deja, objet: "", corps: "", objectif: a.objectif_type, angle_utilise: "", confiance: "a_revoir", alertes: ["À revoir à la main : " + (a.risqueMotif || "identification incertaine") + "."].concat(relance), edited: false, done: false, blocked: true });
         } else {
@@ -8963,8 +8976,9 @@ function ProspectMailing({ data, persist, onClose }) {
   const createDraftFor = async (c, opts) => {
     const to = prospectMailAddress(c.prospect);
     if (!to) { updateCard(c.id, { sendMsg: "❌ Pas d'adresse e-mail." }); return false; }
-    // Un prospect déjà démarché n'est jamais recontacté sans validation explicite.
-    if (c.deja && !(opts && opts.force)) {
+    // Un prospect à qui l'on a réellement ENVOYÉ un mail n'est jamais redémarché sans validation
+    // explicite. Un brouillon antérieur, lui, ne bloque rien : il a pu être supprimé sans partir.
+    if (c.deja && c.deja.envoye && !(opts && opts.force)) {
       const ok = await appConfirm("« " + (c.prospect.nom || "Ce prospect") + " » a déjà reçu un mail (" + c.deja.source + (c.deja.date ? ", le " + c.deja.date : "") + (c.deja.quoi ? " — " + c.deja.quoi : "") + "). Créer tout de même un nouveau brouillon ?", { title: "Prospect déjà contacté", confirmLabel: "Créer le brouillon" });
       if (!ok) return false;
     }
@@ -8990,7 +9004,7 @@ function ProspectMailing({ data, persist, onClose }) {
   const regenCard = async (c) => { if (c.edited) { const ok = await appConfirm("Régénérer va écraser vos modifications sur ce mail. Continuer ?", { title: "Régénérer", confirmLabel: "Régénérer" }); if (!ok) return; } runGen(c); };
   const isReseauClaim = (c) => c.angle_utilise === "reseau_enseigne" || c.angle_utilise === "reseau_region";
   // Traitement groupé : jamais un prospect déjà contacté (il reste traitable un par un, avec confirmation).
-  const batchEligible = cards.filter((c) => !c.done && !c.blocked && !c.deja && c.confiance !== "a_revoir" && (!c.alertes || c.alertes.length === 0) && (!isReseauClaim(c) || confirmReseau) && prospectMailAddress(c.prospect));
+  const batchEligible = cards.filter((c) => !c.done && !c.blocked && !(c.deja && c.deja.envoye) && c.confiance !== "a_revoir" && (!c.alertes || c.alertes.length === 0) && (!isReseauClaim(c) || confirmReseau) && prospectMailAddress(c.prospect));
   // Création en série des brouillons, pilotée par le registre global : l'avancement reste juste même
   // si le volet est fermé en cours de route, et le bouton ne peut pas rester bloqué sur « en cours ».
   const draftJob = jobs.get("mailing:drafts");
@@ -9011,7 +9025,7 @@ function ProspectMailing({ data, persist, onClose }) {
     if (!allEligible.length || draftsRunning) return;
     const nAlert = allEligible.filter((c) => c.confiance === "a_revoir" || (c.alertes && c.alertes.length)).length;
     const nReseau = allEligible.filter((c) => isReseauClaim(c) && !confirmReseau).length;
-    const nDeja = allEligible.filter((c) => c.deja).length;
+    const nDeja = allEligible.filter((c) => c.deja && c.deja.envoye).length;
     const parts = [];
     if (nAlert) parts.push(nAlert + " portant une alerte ou marqué « à revoir »");
     if (nReseau) parts.push(nReseau + " affirmant une relation de réseau non vérifiée");
@@ -9041,7 +9055,7 @@ function ProspectMailing({ data, persist, onClose }) {
     </div>
     <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", fontSize: 11.5, color: "var(--muted)", margin: "2px 0 8px", padding: "7px 10px", border: "1px solid var(--line)", borderRadius: 10, background: "var(--bg)" }}>
       <Mail size={13} className={gmCheck.busy ? "spin" : ""} style={{ flexShrink: 0, color: "var(--blue)" }} />
-      <span style={{ flex: 1, minWidth: 180, lineHeight: 1.45 }}>{gmCheck.busy ? "Vérification dans Gmail des mails déjà envoyés à ces prospects…" : (gmCheck.msg || "Les prospects déjà contactés (envoi confirmé par Gmail, brouillon ou échange déjà enregistré dans MITMIT) sont masqués et jamais présélectionnés.")}</span>
+      <span style={{ flex: 1, minWidth: 180, lineHeight: 1.45 }}>{gmCheck.busy ? "Vérification dans Gmail des mails déjà envoyés à ces prospects…" : (gmCheck.msg || "Seuls les prospects à qui un mail a réellement été ENVOYÉ (libellé « Envoyés » de Gmail, échange journalisé, ou statut « contacté ») sont masqués. Un brouillon créé n'écarte jamais un prospect : il a pu être supprimé sans partir.")}</span>
       <button type="button" className="btn btn-g btn-s" onClick={runGmailCheck} disabled={gmCheck.busy}><RefreshCw size={13} className={gmCheck.busy ? "spin" : ""} /> Revérifier</button>
     </div>
     <div className="fld"><label>Consigne de vague (action visée, pour les mails de référencement)</label><input value={consigne} onChange={(e) => setConsigne(e.target.value)} placeholder="Ex : proposer un échange en visio, envoyer le catalogue, un coffret d'essai…" /><span style={{ fontSize: 11, color: "var(--muted)" }}>Ignorée pour les prospects en objectif « identifier le contact » (chaîne, GSS…), où l'action est imposée.</span></div>
@@ -9058,9 +9072,9 @@ function ProspectMailing({ data, persist, onClose }) {
     </div>
     <div style={{ border: "1px solid var(--line)", borderRadius: 12, maxHeight: 240, overflowY: "auto", margin: "6px 0 10px" }}>
       {filtered.length === 0 ? <div className="empty" style={{ padding: 16 }}>{(!types.size && !nameQ) ? "Choisissez un ou plusieurs types de commerce ci-dessus pour afficher les prospects à cibler." : "Aucun prospect ne correspond aux filtres."}</div> : filtered.map(({ p, a, deja }) => { const on = sel.has(p.id); const mailTo = prospectMailAddress(p); const noMail = !mailTo; return (
-        <label key={p.id} className="hrow" style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 11px", borderBottom: "1px solid var(--line)", cursor: "pointer", opacity: (a.risque === "bloquant" || deja) ? 0.6 : 1 }}>
+        <label key={p.id} className="hrow" style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 11px", borderBottom: "1px solid var(--line)", cursor: "pointer", opacity: (a.risque === "bloquant" || (deja && deja.envoye)) ? 0.6 : 1 }}>
           <input type="checkbox" checked={on} onChange={() => toggleSel(p.id)} style={{ width: "auto" }} />
-          <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{p.nom || p.enseigne || "Sans nom"} <span style={{ fontWeight: 500, color: "var(--muted)" }}>· {p.ville || "—"} · {(PROSPECT_TYPES[p.type] || {}).label || "—"}</span></div><div style={{ fontSize: 11.5, color: "var(--muted)", display: "flex", gap: 8, flexWrap: "wrap" }}><span style={{ color: a.objectif_type === "referencement" ? "var(--green)" : "#7c5cf0", fontWeight: 700 }}>{a.objectif_type === "referencement" ? "→ référencement" : "→ trouver le contact centrale"}</span><span>angle : {ANGLE_LBL[a.bestAngle]}</span><span style={{ color: noMail ? "var(--red)" : "var(--muted)" }} title={!noMail && !(p.email || "").trim() ? "Adresse du contact identifié (pas d'e-mail magasin renseigné)" : "E-mail du magasin"}>{noMail ? "✉ aucune adresse" : "✉ " + mailTo}</span>{a.risque === "bloquant" && <span style={{ color: "var(--red)", fontWeight: 700 }}>⚠ à revoir</span>}{deja && <span style={{ color: "#b45309", fontWeight: 800 }} title={deja.source + (deja.quoi ? " — " + deja.quoi : "")}>✔ déjà contacté{deja.date ? " le " + deja.date : ""}</span>}</div></div>
+          <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{p.nom || p.enseigne || "Sans nom"} <span style={{ fontWeight: 500, color: "var(--muted)" }}>· {p.ville || "—"} · {(PROSPECT_TYPES[p.type] || {}).label || "—"}</span></div><div style={{ fontSize: 11.5, color: "var(--muted)", display: "flex", gap: 8, flexWrap: "wrap" }}><span style={{ color: a.objectif_type === "referencement" ? "var(--green)" : "#7c5cf0", fontWeight: 700 }}>{a.objectif_type === "referencement" ? "→ référencement" : "→ trouver le contact centrale"}</span><span>angle : {ANGLE_LBL[a.bestAngle]}</span><span style={{ color: noMail ? "var(--red)" : "var(--muted)" }} title={!noMail && !(p.email || "").trim() ? "Adresse du contact identifié (pas d'e-mail magasin renseigné)" : "E-mail du magasin"}>{noMail ? "✉ aucune adresse" : "✉ " + mailTo}</span>{a.risque === "bloquant" && <span style={{ color: "var(--red)", fontWeight: 700 }}>⚠ à revoir</span>}{deja && (deja.envoye ? <span style={{ color: "#b45309", fontWeight: 800 }} title={deja.source + (deja.quoi ? " — " + deja.quoi : "")}>✔ déjà contacté{deja.date ? " le " + deja.date : ""}</span> : <span style={{ color: "var(--muted)", fontWeight: 700 }} title={deja.source + (deja.quoi ? " — " + deja.quoi : "") + " — un brouillon n'écarte pas le prospect : rien n'a été envoyé."}>✎ brouillon{deja.date ? " du " + deja.date : ""}</span>)}</div></div>
         </label>); })}
     </div>
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
