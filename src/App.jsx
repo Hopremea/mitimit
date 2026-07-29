@@ -3778,6 +3778,11 @@ function ArchiveModal({ account, existing, onUsage, onArchive, onClose, noun = "
 function Accounts({ data, persist, go, focus }) {
   const { accounts, contacts } = data; const [detailId, setDetailId] = useState(null); const [edit, setEdit] = useState(null); const [addC, setAddC] = useState(null); const [openSite, setOpenSite] = useState(null); const [q, setQ] = useState(""); const [sortPdv, setSortPdv] = useState("nom"); const [siteAdd, setSiteAdd] = useState(null); const [siteDetailId, setSiteDetailId] = useState(null); const [logosOpen, setLogosOpen] = useState(false); const [horairesOpen, setHorairesOpen] = useState(false); const [dupOpen, setDupOpen] = useState(false); const [view, setView] = useState("actifs"); const [archiveEdit, setArchiveEdit] = useState(null);
   useEffect(() => { if (focus && focus.site) { setSiteDetailId(focus.site); setDetailId(null); } else if (focus && focus.id) { setDetailId(focus.id); setSiteDetailId(null); } }, [focus && focus.n]);
+  // Anomalies d'identité (SIRET partagé, SIRET/SIREN incohérents, SIREN d'une autre enseigne) :
+  // triangle d'alerte sur les tuiles, explication au survol. Ce hook doit rester AVANT les retours
+  // conditionnels ci-dessous (fiche établissement / fiche groupe), sinon l'ordre des hooks change
+  // d'un rendu à l'autre et React interrompt l'application.
+  const anoms = useMemo(() => computeIdentityAnomalies(data), [data]);
   const unarchiveAccount = (id) => persist((p) => ({ ...p, accounts: p.accounts.map((x) => x.id === id ? { ...x, archived: false } : x), contacts: p.contacts.map((c) => c.accountId === id ? { ...c, archived: false } : c) }));
   const unarchiveSite = (id) => persist((p) => ({ ...p, sites: (p.sites || []).map((x) => x.id === id ? { ...x, archived: false } : x), contacts: p.contacts.map((c) => c.siteId === id ? { ...c, archived: false } : c) }));
   const saveArchive = (acc, info) => persist((p) => ({ ...p, accounts: p.accounts.map((x) => x.id === acc.id ? { ...x, archived: true, archiveReason: info.reason, archiveDate: info.date || TODAY(), archiveNote: info.note || "" } : x), contacts: p.contacts.map((c) => c.accountId === acc.id ? { ...c, archived: true } : c) }));
@@ -3796,9 +3801,6 @@ function Accounts({ data, persist, go, focus }) {
       {addC && <Modal title="Nouveau contact" onClose={() => setAddC(null)} wide><ContactForm contact={addC} accounts={accounts} contacts={contacts} sites={data.sites} known={collectKnownAddresses(data)} onSave={(x) => { saveContact(x); setAddC(null); }} /></Modal>}</>);
   }
   const isMulti = (a) => isGroupe(a);
-  // Anomalies d'identité (SIRET partagé, SIRET/SIREN incohérents, SIREN d'une autre enseigne) :
-  // triangle d'alerte sur les tuiles concernées, avec explication au survol.
-  const anoms = useMemo(() => computeIdentityAnomalies(data), [data]);
   const archivedAccounts = accounts.filter((a) => a.archived);
   const archivedIds = new Set(archivedAccounts.map((a) => a.id));
   const pdvSites = (data.sites || []).filter((s) => s.type === "pdv" && !s.archived && !archivedIds.has(s.accountId));
