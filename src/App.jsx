@@ -1802,7 +1802,7 @@ Français professionnel, sobre, sans emphase. Pas de tiret cadratin : virgules, 
 Pas de superlatifs, pas de formules creuses ("je me permets de revenir vers vous", "en espérant que ce mail vous trouve en bonne santé").
 Objet de 6 à 9 mots, informatif, sans point d'exclamation.
 Corps de 80 à 150 mots. Une seule idée par paragraphe. Une seule action finale, la plus légère possible (un échange, l'envoi d'un catalogue, ou un coffret d'essai selon la consigne).
-Signature complète : Matthis-Anaël Prevedello, Directeur des Opérations, PEN'UP 3D, 06 95 50 37 68, penup3d.com.
+N'ÉCRIS NI FORMULE DE POLITESSE FINALE NI SIGNATURE. Le message s'arrête sur sa dernière phrase utile : pas de « Bien à vous », « Cordialement » ou équivalent, pas de nom, de fonction, de société, de téléphone ni d'adresse de site. Gmail ajoute automatiquement la signature de l'expéditeur, laquelle contient déjà la formule de politesse : en écrire une ici la ferait apparaître en double.
 </style>
 
 <destinataire>
@@ -1824,6 +1824,26 @@ Mets "confiance" à "a_revoir" et explique dans "alertes" si tu as dû écarter 
 </format_sortie>`;
 // Vérification côté code : une affirmation de proximité ou de réseau qui n'est pas adossée à un angle
 // réellement disponible force la confiance à « a_revoir » et ajoute une alerte.
+// Retire la formule de politesse finale et le bloc de signature d'un message généré : Gmail ajoute
+// automatiquement la signature de la boîte, laquelle contient déjà la formule — en laisser une ici la
+// ferait apparaître en double. Filet de sécurité derrière la consigne donnée au modèle.
+// Prudence : on ne coupe que des lignes de FIN, courtes, qui portent un marqueur d'identité ou de
+// politesse — jamais une phrase du corps qui citerait le site ou le téléphone.
+const SIGN_MARKERS = /(matthis|prevedello|pen'?up|penup3d|directeur des operations|directrice des operations|06\s*95\s*50\s*37\s*68|0695503768|www\.|\.com\b|\.fr\b)/i;
+const CLOSING_LINE = /^(bien [àa] vous|bien cordialement|cordialement|sinc[èe]res salutations|salutations distingu[ée]es|[àa] tr[èe]s bient[ôo]t|[àa] bient[ôo]t|belle journ[ée]e|bonne journ[ée]e|au plaisir|dans l'attente|respectueusement)\b[\s,.!]*$/i;
+function stripSignature(text) {
+  const lines = String(text || "").replace(/\r/g, "").split("\n");
+  const isMarker = (l) => { const t = l.trim(); return t.length > 0 && t.length <= 60 && SIGN_MARKERS.test(t.normalize("NFD").replace(/[̀-ͯ]/g, "")); };
+  let end = lines.length;
+  while (end > 0 && !lines[end - 1].trim()) end--;              // lignes vides de fin
+  let cut = end;
+  while (cut > 0 && (isMarker(lines[cut - 1]) || !lines[cut - 1].trim())) cut--; // bloc d'identité
+  if (end - cut > 6) cut = end;                                  // au-delà de six lignes, ce n'est plus une signature : on ne touche à rien
+  while (cut > 0 && !lines[cut - 1].trim()) cut--;               // ligne vide avant le bloc
+  if (cut > 0 && CLOSING_LINE.test(lines[cut - 1].trim())) cut--; // formule de politesse
+  while (cut > 0 && !lines[cut - 1].trim()) cut--;
+  return lines.slice(0, cut).join("\n").replace(/\s+$/, "");
+}
 function verifyProspectMail(parsed, angles) {
   const alertes = Array.isArray(parsed.alertes) ? parsed.alertes.slice() : [];
   let confiance = ["haute", "standard", "a_revoir"].includes(parsed.confiance) ? parsed.confiance : "standard";
@@ -1877,7 +1897,7 @@ async function generateProspectMail({ prospect, angles, consigne, ton, mode, pre
     return { ok: false, objet: "", corps: raw, objectif: angles.objectif_type, angle_utilise: "", claims_verifiables: [], confiance: "a_revoir", alertes: ["Réponse IA non structurée : texte brut à relire entièrement."] };
   }
   const v = verifyProspectMail(parsed, angles);
-  let corps = String(parsed.corps || "");
+  let corps = stripSignature(parsed.corps || ""); // Gmail ajoute la signature : on ne la duplique pas
   if (corps && corps.toLowerCase().indexOf("cadre strictement professionnel") === -1) corps = corps.replace(/\s+$/, "") + "\n\nVous recevez ce message dans un cadre strictement professionnel. Si vous ne souhaitez pas être recontacté, un simple mot en réponse suffit.";
   return { ok: true, objet: parsed.objet || "", corps, objectif: parsed.objectif || angles.objectif_type, angle_utilise: parsed.angle_utilise || angles.bestAngle, claims_verifiables: Array.isArray(parsed.claims_verifiables) ? parsed.claims_verifiables : [], confiance: v.confiance, alertes: v.alertes };
 }
@@ -4899,7 +4919,7 @@ Le ton demandé module le registre, il n'autorise jamais l'approximation factuel
 </style>
 
 <contraintes_canal>
-EMAIL : objet de 6 à 9 mots, informatif et non racoleur, sans point d'exclamation. Corps de 90 à 180 mots. Signature complète (nom, fonction, société, téléphone, adresse électronique).
+EMAIL : objet de 6 à 9 mots, informatif et non racoleur, sans point d'exclamation. Corps de 90 à 180 mots. NI FORMULE DE POLITESSE FINALE NI SIGNATURE : le message s'arrête sur sa dernière phrase utile. Pas de « Bien à vous », « Cordialement » ou équivalent, pas de nom, fonction, société, téléphone ni site — Gmail ajoute automatiquement la signature de l'expéditeur, qui contient déjà la formule de politesse.
 LINKEDIN : pas d'objet. Message de 60 à 110 mots, ton conversationnel, pas de signature. Si le champ "sousCanal" vaut "invitation", plafond strict de 280 caractères.
 SMS : 2 phrases maximum, 300 caractères maximum, pas d'objet, pas de lien sauf s'il figure dans la consigne, identification de l'expéditeur dès la première phrase (nom et société), pas de familiarité.
 </contraintes_canal>
@@ -5044,8 +5064,8 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
   const charCount = useMemo(() => JSON.stringify(effCtx).length, [effCtx]);
   const applyResult = (r) => {
     setSubject(r.objet || (canal === "email" ? ("PEN'UP 3D — " + estabName) : ""));
-    setOut(r.corps || "");
-    setShortOut(r.variante_courte || "");
+    setOut(canal === "email" ? stripSignature(r.corps || "") : (r.corps || "")); // Gmail ajoute la signature
+    setShortOut(canal === "email" ? stripSignature(r.variante_courte || "") : (r.variante_courte || ""));
     setUsedCtx(Array.isArray(r.contexte_utilise) ? r.contexte_utilise : []);
     const al = Array.isArray(r.alertes) ? r.alertes.slice() : [];
     if (r.creneauxNonVerifies && r.creneauxNonVerifies.length) al.unshift("Créneau non vérifié, à contrôler : " + r.creneauxNonVerifies.join(" ; "));
