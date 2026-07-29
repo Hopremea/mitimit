@@ -88,6 +88,39 @@ const mailingWave = {
   setCards(next) { this.cards = typeof next === "function" ? next(this.cards) : next; this._notify(); },
   reset() { this.cards = []; this.form = {}; this._notify(); },
 };
+// Mémoire de travail des fenêtres IA : tout ce qui a été saisi ou généré survit à leur fermeture, si
+// bien qu'on peut sortir d'un volet pendant un traitement et le retrouver à l'identique. Le magasin est
+// la source de vérité : un traitement en arrière-plan continue de l'alimenter même fenêtre fermée (un
+// setState sur un composant démonté serait sans effet). Cloisonné par « scope » (le dossier concerné),
+// pour ne jamais restituer dans une fiche le brouillon d'une autre.
+const aiPanels = {
+  vals: new Map(), // "scope|clé" -> valeur
+  subs: new Map(), // "scope|clé" -> Set de callbacks
+  k(scope, key) { return scope + "|" + key; },
+  has(scope, key) { return this.vals.has(this.k(scope, key)); },
+  get(scope, key) { return this.vals.get(this.k(scope, key)); },
+  set(scope, key, upd) {
+    const kk = this.k(scope, key);
+    const next = typeof upd === "function" ? upd(this.vals.get(kk)) : upd;
+    this.vals.set(kk, next);
+    const s = this.subs.get(kk); if (s) s.forEach((f) => { try { f(next); } catch (e) {} });
+    return next;
+  },
+  sub(scope, key, f) { const kk = this.k(scope, key); if (!this.subs.has(kk)) this.subs.set(kk, new Set()); this.subs.get(kk).add(f); return () => { const s = this.subs.get(kk); if (s) s.delete(f); }; },
+  // Oublie tout ce qui concerne un dossier (ex. « recommencer » dans le volet).
+  clear(scope) { const pre = scope + "|"; [...this.vals.keys()].filter((k) => k.startsWith(pre)).forEach((k) => { this.vals.delete(k); const s = this.subs.get(k); if (s) s.forEach((f) => { try { f(undefined); } catch (e) {} }); }); },
+};
+// useState dont la valeur survit à la fermeture de la fenêtre, et que peut alimenter un traitement en
+// cours même fenêtre fermée. S'utilise exactement comme useState.
+function useKept(scope, key, initial) {
+  const [v, setV] = useState(() => aiPanels.has(scope, key) ? aiPanels.get(scope, key) : (aiPanels.set(scope, key, typeof initial === "function" ? initial() : initial)));
+  useEffect(() => {
+    if (!aiPanels.has(scope, key)) aiPanels.set(scope, key, typeof initial === "function" ? initial() : initial);
+    setV(aiPanels.get(scope, key));
+    return aiPanels.sub(scope, key, setV);
+  }, [scope, key]);
+  return [v, useCallback((upd) => aiPanels.set(scope, key, upd), [scope, key])];
+}
 // Cartes de la vague : le magasin est la source de vérité, si bien que la génération continue de les
 // alimenter même quand le volet est fermé (un setState sur un composant démonté serait sans effet).
 function useWaveCards() {
@@ -3820,7 +3853,8 @@ function Performance({ data, go }) {
 // Complétion des logos en masse (semi-auto) : propose un logo par enseigne, validation au clic.
 function LogosBulk({ data, persist, onClose }) {
   const missing = (data.accounts || []).filter((a) => !a.logo);
-  const [st, setSt] = useState({});
+  // Résultats conservés : on peut fermer la fenêtre et revenir, les logos proposés sont toujours là.
+  const [st, setSt] = useKept("logos", "st", {});
   const persistUsage = (u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }));
   const search = async (a) => {
     setSt((s) => ({ ...s, [a.id]: { busy: true } }));
@@ -3848,7 +3882,8 @@ function HorairesBulk({ data, persist, onClose }) {
     .map((s) => ({ s, acc: accById[s.accountId] || null }))
     .sort((x, y) => (x.s.label || "").localeCompare(y.s.label || ""));
   const missing = stores.filter((o) => !String(o.s.horaires || "").trim());
-  const [st, setSt] = useState({});
+  // Résultats conservés : la recherche en série continue de les alimenter même fenêtre fermée.
+  const [st, setSt] = useKept("horaires", "st", {});
   const jobs = useAiJobs();
   const HJOB = "horaires:complete";
   const running = jobs.has(HJOB);
@@ -4918,26 +4953,32 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
     const withEmail = list.find((c) => c.email); if (withEmail) return withEmail.id;
     return list[0] ? list[0].id : STD.id;
   };
-  const [recipientId, setRecipientId] = useState(pickDefault);
+  // Brouillon conservé par dossier : on peut fermer le rédacteur (pendant ou après la génération) et
+  // le rouvrir sur le même message. Le cloisonnement par établissement / contact évite qu'un brouillon
+  // réapparaisse dans une autre fiche.
+  // Le destinataire d'ouverture entre dans le cloisonnement : écrire à un autre contact du même compte
+  // ouvre bien un brouillon vierge, au lieu de restituer le message destiné au précédent.
+  const scope = "compose:" + ((account && account.id) || "") + ":" + ((site && site.id) || "") + ":" + (defaultContactId || (contact && contact.id) || "");
+  const [recipientId, setRecipientId] = useKept(scope, "recipientId", pickDefault);
   const recipient = fullList.find((c) => c.id === recipientId) || list[0] || STD;
   const isStd = !!(recipient && recipient.__standard);
-  const [canal, setCanal] = useState("email");
-  const [sousCanal, setSousCanal] = useState("");
-  const [type, setType] = useState("prospection");
-  const [ton, setTon] = useState("chaleureux");
-  const [forceSegment, setForceSegment] = useState("auto");
-  const [redaction, setRedaction] = useState("");
-  const [mode, setMode] = useState("consigne");
-  const [modeTouched, setModeTouched] = useState(false);
+  const [canal, setCanal] = useKept(scope, "canal", "email");
+  const [sousCanal, setSousCanal] = useKept(scope, "sousCanal", "");
+  const [type, setType] = useKept(scope, "type", "prospection");
+  const [ton, setTon] = useKept(scope, "ton", "chaleureux");
+  const [forceSegment, setForceSegment] = useKept(scope, "forceSegment", "auto");
+  const [redaction, setRedaction] = useKept(scope, "redaction", "");
+  const [mode, setMode] = useKept(scope, "mode", "consigne");
+  const [modeTouched, setModeTouched] = useKept(scope, "modeTouched", false);
   const [ctxOpen, setCtxOpen] = useState(false);
-  const [excluded, setExcluded] = useState(() => new Set());
+  const [excluded, setExcluded] = useKept(scope, "excluded", () => new Set());
   const [busy, setBusy] = useState(false);
-  const [subject, setSubject] = useState("");
-  const [out, setOut] = useState("");
-  const [shortOut, setShortOut] = useState("");
-  const [usedCtx, setUsedCtx] = useState([]);
-  const [alertes, setAlertes] = useState([]);
-  const [edited, setEdited] = useState(false);
+  const [subject, setSubject] = useKept(scope, "subject", "");
+  const [out, setOut] = useKept(scope, "out", "");
+  const [shortOut, setShortOut] = useKept(scope, "shortOut", "");
+  const [usedCtx, setUsedCtx] = useKept(scope, "usedCtx", []);
+  const [alertes, setAlertes] = useKept(scope, "alertes", []);
+  const [edited, setEdited] = useKept(scope, "edited", false);
   const [sending, setSending] = useState(false);
   const [sentMsg, setSentMsg] = useState("");
   const [refineOpen, setRefineOpen] = useState(false);
@@ -5010,12 +5051,15 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
       const dt = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(dt.error || ("Erreur " + res.status));
       logInteraction("email");
+      clearDraft(); // message parti : le brouillon conservé n'a plus lieu d'être restitué
       setSentMsg("✅ E-mail envoyé à " + recipient.email + " — échange journalisé.");
       maybeProposeRelance();
     } catch (e) { setSentMsg("❌ Échec : " + (e && e.message ? e.message : String(e))); }
     finally { setSending(false); }
   };
-  const markSent = async () => { logInteraction(canal); setSentMsg("✅ Message marqué comme envoyé — échange journalisé."); maybeProposeRelance(); };
+  // Vide le brouillon conservé pour ce dossier (message parti, ou remise à zéro demandée).
+  const clearDraft = () => { aiPanels.clear(scope); setOut(""); setShortOut(""); setSubject(""); setAlertes([]); setRedaction(""); setEdited(false); };
+  const markSent = async () => { logInteraction(canal); clearDraft(); setSentMsg("✅ Message marqué comme envoyé — échange journalisé."); maybeProposeRelance(); };
   const copy = () => { const txt = (canal === "email" && subject) ? ("Objet : " + subject + "\n\n" + out) : out; try { navigator.clipboard.writeText(txt); setSentMsg("Copié dans le presse-papiers."); setTimeout(() => setSentMsg(""), 1400); } catch (e) {} };
   const recMail = recipient && recipient.email;
   const recMobile = recipient && (recipient.mobile || recipient.fixe);
@@ -5081,7 +5125,9 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
       </div>
       {!!usedCtx.length && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}><strong>Contexte mobilisé :</strong> {usedCtx.join(" · ")}</div>}
       {!!alertes.length && <div style={{ marginTop: 10, border: "1px solid #f0c36d", background: "#fff7e6", borderRadius: 10, padding: "8px 11px" }}><div style={{ fontSize: 12, fontWeight: 800, color: "#9a6a00", display: "inline-flex", alignItems: "center", gap: 6 }}><AlertTriangle size={14} /> Alertes à vérifier</div><ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 12, color: "#7a5500" }}>{alertes.map((a, i) => <li key={i}>{a}</li>)}</ul></div>}
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <span style={{ fontSize: 11, color: "var(--muted)", marginRight: "auto" }}>Brouillon conservé : vous pouvez fermer cette fenêtre et la rouvrir sur le même message.</span>
+        <button className="btn btn-ghost btn-s" onClick={async () => { const ok = await appConfirm("Effacer ce brouillon et repartir d'une page vierge ?", { title: "Effacer le brouillon", confirmLabel: "Effacer" }); if (ok) clearDraft(); }} title="Vide le message conservé pour ce destinataire"><X size={14} /> Effacer le brouillon</button>
         {canal === "email" && recMail && <button className="btn btn-p" onClick={sendViaGmail} disabled={sending}><Send size={15} className={sending ? "spin" : ""} /> {sending ? "Envoi…" : "Envoyer via Gmail"}</button>}
         {canal === "sms" && smsHref && <a className="btn btn-p" href={smsHref}><MessageSquare size={15} /> Ouvrir l'app SMS</a>}
         {canal === "linkedin" && <a className="btn btn-p" href={recipient && recipient.linkedin ? ensureHttp(recipient.linkedin) : linkedinSearch(recipient || {}, account && account.enseigne)} target="_blank" rel="noreferrer"><Linkedin size={15} /> Ouvrir LinkedIn</a>}
@@ -5136,8 +5182,10 @@ function EstablishmentChat({ account, site, contacts = [], interactions = [], de
   const titre = (site && (site.label || site.adresse)) || (account && account.enseigne) || "Établissement";
   const ctx = useMemo(() => buildEstablishmentContext({ account, site, contacts, interactions, deals }), [account, site, contacts, interactions, deals]);
   const sys = "Tu es l'assistant commercial B2B de PEN'UP 3D (marque française de stylos 3D et de loisirs créatifs pour enfants, distribuée chez des revendeurs de jouets). Tu assistes le commercial sur CE dossier précis. Réponds en français, de façon concrète, utile et concise. Tu peux : analyser l'historique des échanges, proposer la prochaine action, suggérer des arguments adaptés à ce point de vente, aider à préparer un appel, rédiger un brouillon de message. Tu t'APPUIES sur le dossier ci-dessous et n'inventes AUCUN chiffre, date, fait ni engagement absent du dossier.\n\nDOSSIER DU COMPTE :\n" + ctx;
-  const [msgs, setMsgs] = useState([{ role: "bot", text: "Bonjour ! Je connais le dossier « " + titre + " » (contacts, échanges, devis). Posez une question, ou demandez une analyse, des arguments de vente ou un brouillon de message." }]);
-  const [input, setInput] = useState(""); const [busy, setBusy] = useState(false);
+  // Conversation conservée par dossier : on peut fermer le chat et le rouvrir sur le même fil.
+  const chatScope = "chat:" + ((site && site.id) || (account && account.id) || "x");
+  const [msgs, setMsgs] = useKept(chatScope, "msgs", () => [{ role: "bot", text: "Bonjour ! Je connais le dossier « " + titre + " » (contacts, échanges, devis). Posez une question, ou demandez une analyse, des arguments de vente ou un brouillon de message." }]);
+  const [input, setInput] = useKept(chatScope, "input", ""); const [busy, setBusy] = useState(false);
   const scrollRef = useRef(null);
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [msgs, busy]);
   const send = async (text) => {
@@ -5160,7 +5208,8 @@ function EstablishmentChat({ account, site, contacts = [], interactions = [], de
       </div>))}
       {busy && <div style={{ alignSelf: "flex-start", padding: "9px 12px", borderRadius: 14, fontSize: 13, background: "var(--bg)", border: "1px solid var(--line)", color: "var(--muted)" }}>L'assistant réfléchit…</div>}
     </div>
-    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "8px 0" }}>{quick.map((q) => <button key={q} type="button" className="btn btn-g btn-s" onClick={() => send(q)} disabled={busy} style={{ fontWeight: 600 }}>{q}</button>)}</div>
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "8px 0", alignItems: "center" }}>{quick.map((q) => <button key={q} type="button" className="btn btn-g btn-s" onClick={() => send(q)} disabled={busy} style={{ fontWeight: 600 }}>{q}</button>)}
+      {msgs.length > 1 && <button type="button" className="btn btn-ghost btn-s" disabled={busy} onClick={async () => { const ok = await appConfirm("Effacer cette conversation et repartir de zéro ?", { title: "Nouvelle conversation", confirmLabel: "Effacer" }); if (ok) setMsgs([{ role: "bot", text: "Bonjour ! Je connais le dossier « " + titre + " » (contacts, échanges, devis). Posez une question, ou demandez une analyse, des arguments de vente ou un brouillon de message." }]); }} style={{ marginLeft: "auto" }} title="La conversation est conservée quand vous fermez le chat ; ce bouton la remet à zéro."><X size={13} /> Nouvelle conversation</button>}</div>
     <div style={{ display: "flex", gap: 8 }}>
       <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") send(); }} disabled={busy} placeholder="Posez votre question sur ce compte…" style={{ flex: 1, border: "1px solid var(--line)", borderRadius: 11, padding: "10px 12px", fontFamily: "inherit", fontSize: 13.5 }} autoFocus />
       <button className="btn btn-p" onClick={() => send()} disabled={busy}><Send size={16} className={busy ? "spin" : ""} /></button>
