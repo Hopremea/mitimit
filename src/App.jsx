@@ -8840,17 +8840,32 @@ function ProspectMailing({ data, persist, onClose }) {
   // resélectionner après un rechargement de la page, jamais entre deux ouvertures du volet.
   const [piece, setPiece] = useWaveState("piece", null);
   const [pieceErr, setPieceErr] = useState("");
+  const [pieceBusy, setPieceBusy] = useState(false);
   const choisirPiece = async (file) => {
     setPieceErr("");
     if (!file) return;
-    // 3 Mo : au-delà, Vercel refuse la requête (le base64 gonfle le fichier d'un tiers) avant même
-    // que le serveur ne la voie. On le dit ici plutôt que de laisser remonter une erreur opaque.
-    if (file.size > 3 * 1024 * 1024) { setPieceErr("Fichier trop lourd (" + (file.size / 1048576).toFixed(1) + " Mo). Maximum 3 Mo."); return; }
+    // 25 Mo : la limite de Gmail lui-même. Le document ne passe PAS par nos fonctions serveur, dont le
+    // corps de requête est plafonné à 4,5 Mo : le navigateur le dépose directement dans le stockage,
+    // et le serveur l'y relit au moment de créer le brouillon.
+    if (file.size > 25 * 1024 * 1024) { setPieceErr("Fichier trop lourd (" + (file.size / 1048576).toFixed(1) + " Mo). Maximum 25 Mo, la limite de Gmail."); return; }
     if (!/pdf$/i.test(file.type || "") && !/\.pdf$/i.test(file.name || "")) { setPieceErr("Seuls les PDF sont acceptés."); return; }
+    setPieceBusy(true);
     try {
-      const dataUrl = await fileToBase64(file);
-      setPiece({ name: file.name, size: file.size, dataUrl });
-    } catch (e) { setPieceErr("Lecture du fichier impossible."); }
+      const dep = await fetch("/api/piece", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ name: file.name }) });
+      const dt = await dep.json().catch(() => ({}));
+      if (dep.ok && dt.path && dt.token && supabase) {
+        const up = await supabase.storage.from(dt.bucket).uploadToSignedUrl(dt.path, dt.token, file, { contentType: "application/pdf" });
+        if (up.error) throw new Error(up.error.message || "dépôt refusé");
+        setPiece({ name: file.name, size: file.size, storagePath: dt.path });
+      } else if (file.size <= 3 * 1024 * 1024) {
+        // Repli sans stockage : le fichier voyage dans la requête, donc borné par le plafond Vercel.
+        setPiece({ name: file.name, size: file.size, dataUrl: await fileToBase64(file) });
+      } else {
+        throw new Error(dt.error || "dépôt indisponible");
+      }
+    } catch (e) {
+      setPieceErr("Dépôt du document impossible (" + ((e && e.message) || e) + "). Réessayez, ou choisissez un PDF de moins de 3 Mo.");
+    } finally { setPieceBusy(false); }
   };
   const [cards, setCards] = useWaveCards();
   const [confirmReseau, setConfirmReseau] = useWaveState("confirmReseau", false);
@@ -8955,7 +8970,7 @@ function ProspectMailing({ data, persist, onClose }) {
     }
     updateCard(c.id, { sending: true, sendMsg: "" });
     try {
-      const pj = piece ? [{ filename: piece.name, mimeType: "application/pdf", contentBase64: piece.dataUrl }] : [];
+      const pj = piece ? [piece.storagePath ? { filename: piece.name, mimeType: "application/pdf", storagePath: piece.storagePath } : { filename: piece.name, mimeType: "application/pdf", contentBase64: piece.dataUrl }] : [];
       const res = await fetch("/api/gmail-draft", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ to, subject: c.objet || ("PEN'UP 3D — " + (c.prospect.nom || "")), body: c.corps, attachments: pj }) });
       const dt = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(dt.error || ("Erreur " + res.status));
@@ -9036,10 +9051,10 @@ function ProspectMailing({ data, persist, onClose }) {
         {piece
           ? <><span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, border: "1px solid var(--line)", borderRadius: 9, padding: "6px 10px", background: "#fff" }}><Paperclip size={14} style={{ color: "var(--red)" }} />{piece.name}<span style={{ fontWeight: 500, color: "var(--muted)" }}>· {(piece.size / 1024).toFixed(0)} Ko</span></span>
             <button type="button" className="btn btn-ghost btn-s" onClick={() => { setPiece(null); setPieceErr(""); }}><X size={13} /> Retirer</button></>
-          : <label className="btn btn-g btn-s" style={{ cursor: "pointer" }}><Paperclip size={14} /> Choisir un PDF<input type="file" accept="application/pdf,.pdf" style={{ display: "none" }} onChange={(e) => { choisirPiece(e.target.files && e.target.files[0]); e.target.value = ""; }} /></label>}
+          : <label className="btn btn-g btn-s" style={{ cursor: pieceBusy ? "wait" : "pointer", opacity: pieceBusy ? .65 : 1 }}><Paperclip size={14} className={pieceBusy ? "spin" : ""} /> {pieceBusy ? "Dépôt du document…" : "Choisir un PDF"}<input type="file" accept="application/pdf,.pdf" style={{ display: "none" }} onChange={(e) => { choisirPiece(e.target.files && e.target.files[0]); e.target.value = ""; }} /></label>}
       </div>
       {pieceErr && <span style={{ fontSize: 11.5, color: "var(--red)", fontWeight: 700 }}>{pieceErr}</span>}
-      <span style={{ fontSize: 11, color: "var(--muted)" }}>Joint à <strong>tous</strong> les brouillons de la vague (catalogue, plaquette…). Maximum 3 Mo. Le document reste sélectionné si vous fermez le volet, mais pas après un rechargement de la page.</span>
+      <span style={{ fontSize: 11, color: "var(--muted)" }}>Joint à <strong>tous</strong> les brouillons de la vague (catalogue, plaquette…). Maximum 25 Mo, la limite de Gmail. Le document reste sélectionné si vous fermez le volet, mais pas après un rechargement de la page.</span>
     </div>
     <div style={{ border: "1px solid var(--line)", borderRadius: 12, maxHeight: 240, overflowY: "auto", margin: "6px 0 10px" }}>
       {filtered.length === 0 ? <div className="empty" style={{ padding: 16 }}>{(!types.size && !nameQ) ? "Choisissez un ou plusieurs types de commerce ci-dessus pour afficher les prospects à cibler." : "Aucun prospect ne correspond aux filtres."}</div> : filtered.map(({ p, a, deja }) => { const on = sel.has(p.id); const mailTo = prospectMailAddress(p); const noMail = !mailTo; return (

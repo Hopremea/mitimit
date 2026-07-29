@@ -1,5 +1,7 @@
 import { verifyToken } from "@clerk/backend";
+import { createClient } from "@supabase/supabase-js";
 import { createDraft, gmailIsConfigured } from "../lib/gmail.js";
+import { BUCKET } from "./piece.js";
 
 // Création d'un BROUILLON dans la boîte Gmail connectée (GOOGLE_USER_EMAIL). N'ENVOIE JAMAIS :
 // le brouillon apparaît dans les brouillons Gmail, l'utilisateur le relit et l'envoie manuellement.
@@ -8,21 +10,49 @@ import { createDraft, gmailIsConfigured } from "../lib/gmail.js";
 // POST /api/gmail-draft { to, subject, body, appendSignature?, attachments? } -> { ok:true, id, messageId }
 // attachments : [{ filename, mimeType, contentBase64 }]
 
-// Vercel plafonne le corps d'une requête de fonction à 4,5 Mo. Le base64 gonfle un fichier d'environ
-// un tiers : au-delà de ~3 Mo de fichier, la requête est rejetée par la plateforme AVANT d'atteindre
-// ce code, avec une erreur illisible. On borne donc en amont pour rendre un message explicite.
-const MAX_PIECE = 3 * 1024 * 1024;
-const MAX_TOTAL = 3.2 * 1024 * 1024;
+// Deux chemins d'arrivée pour un document :
+//   - « storagePath » : le navigateur l'a déposé directement dans le stockage (voir /api/piece), et on
+//     le relit ici côté serveur. C'est la voie normale, qui autorise les 25 Mo admis par Gmail — le
+//     fichier ne traverse jamais le corps d'une requête Vercel.
+//   - base64 dans la requête : voie de repli, bornée par le plafond de 4,5 Mo de la plateforme. Le
+//     base64 gonflant d'un tiers, un fichier de plus de ~3 Mo serait rejeté avant d'atteindre ce code.
+const MAX_PIECE = 25 * 1024 * 1024;      // limite de Gmail
+const MAX_TOTAL = 25 * 1024 * 1024;
+const MAX_INLINE = 3 * 1024 * 1024;      // limite de la voie de repli (corps de requête)
 const MAX_NB = 3;
+
+function storageAdmin() {
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const svc = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !svc) return null;
+  return createClient(url, svc, { auth: { persistSession: false } });
+}
 
 // Décodage prudent : une chaîne base64 invalide ne doit pas produire une pièce jointe corrompue
 // silencieusement, mais une erreur nette. On accepte une data-URL complète comme du base64 nu.
-function decodeAttachments(list) {
+async function decodeAttachments(list) {
   const out = [];
   let total = 0;
+  const sb = storageAdmin();
   for (const a of list) {
     const nom = String((a && a.filename) || "").trim().replace(/[\r\n"\\/]/g, "").slice(0, 120);
     if (!nom) throw new Error("Pièce jointe sans nom de fichier.");
+    const mime = String((a && a.mimeType) || "application/octet-stream").replace(/[\r\n;"]/g, "").slice(0, 100);
+    // Voie normale : le document a été déposé dans le stockage, on le relit ici.
+    const chemin = String((a && a.storagePath) || "").replace(/^\/+/, "");
+    if (chemin) {
+      if (!sb) throw new Error("Stockage non configuré côté serveur : impossible de relire « " + nom + " ».");
+      if (chemin.includes("..")) throw new Error("Chemin de pièce jointe invalide.");
+      const { data, error } = await sb.storage.from(BUCKET).download(chemin);
+      if (error || !data) throw new Error("Document « " + nom + " » introuvable dans le dépôt (renvoyez-le).");
+      const buf = Buffer.from(await data.arrayBuffer());
+      if (!buf.length) throw new Error("Document « " + nom + " » vide.");
+      if (buf.length > MAX_PIECE) throw new Error("« " + nom + " » dépasse 25 Mo (" + (buf.length / 1048576).toFixed(1) + " Mo), la limite de Gmail.");
+      total += buf.length;
+      if (total > MAX_TOTAL) throw new Error("Pièces jointes trop volumineuses au total (max 25 Mo, limite de Gmail).");
+      out.push({ filename: nom, mimeType: mime, content: buf });
+      continue;
+    }
     let b64 = String((a && (a.contentBase64 || a.content)) || "");
     const virgule = b64.indexOf(",");
     if (b64.startsWith("data:") && virgule > 0) b64 = b64.slice(virgule + 1);
@@ -31,10 +61,10 @@ function decodeAttachments(list) {
     if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) throw new Error("Pièce jointe « " + nom + " » : contenu illisible.");
     const buf = Buffer.from(b64, "base64");
     if (!buf.length) throw new Error("Pièce jointe « " + nom + " » vide après décodage.");
-    if (buf.length > MAX_PIECE) throw new Error("« " + nom + " » dépasse 3 Mo (" + (buf.length / 1048576).toFixed(1) + " Mo). Allégez le fichier.");
+    if (buf.length > MAX_INLINE) throw new Error("« " + nom + " » dépasse 3 Mo par cette voie (" + (buf.length / 1048576).toFixed(1) + " Mo) : au-delà, le document doit passer par le dépôt.");
     total += buf.length;
-    if (total > MAX_TOTAL) throw new Error("Pièces jointes trop volumineuses au total (max 3,2 Mo).");
-    out.push({ filename: nom, mimeType: String((a && a.mimeType) || "application/octet-stream").replace(/[\r\n;"]/g, "").slice(0, 100), content: buf });
+    if (total > MAX_TOTAL) throw new Error("Pièces jointes trop volumineuses au total (max 25 Mo, limite de Gmail).");
+    out.push({ filename: nom, mimeType: mime, content: buf });
   }
   return out;
 }
@@ -73,7 +103,7 @@ export default async function handler(req, res) {
   let attachments = [];
   // Une pièce jointe invalide est une erreur de la demande, pas une panne du service : 400, et le
   // brouillon n'est pas créé du tout — mieux vaut aucun brouillon qu'un brouillon amputé du document.
-  try { attachments = decodeAttachments(brut); }
+  try { attachments = await decodeAttachments(brut); }
   catch (e) { res.status(400).json({ error: e && e.message ? e.message : String(e) }); return; }
 
   try {
