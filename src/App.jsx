@@ -5966,6 +5966,10 @@ function DealForm({ deal, accounts, products, sites, onSave, onPreview }) {
   return (<>
     <div className="row2"><div className="fld"><label>Groupe / établissement</label><EtabPicker accounts={accounts} sites={sites} accountId={f.accountId} siteId={f.siteId} onChange={(a, s) => setF((p) => ({ ...p, accountId: a, siteId: s }))} noneLabel="— Choisir —" /></div><div className="fld"><label>Type</label><select value={f.type} onChange={(e) => up("type", e.target.value)}><option value="Devis">Devis</option><option value="Commande">Bon de commande</option><option value="Facture">Facture</option><option value="Avoir">Avoir / Retour</option></select></div></div>
     <div className="row2"><div className="fld"><label>Référence</label><input value={f.ref} onChange={(e) => up("ref", e.target.value)} /></div><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div><div className="fld"><label>Statut</label><select value={f.statut} onChange={(e) => up("statut", e.target.value)}>{Object.entries(DEAL_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div></div>
+    {f.type === "Commande" && <div className="fld"><label>Numéro de suivi Colissimo / La Poste (facultatif)</label>
+      <input value={f.suivi || ""} onChange={(e) => up("suivi", e.target.value.toUpperCase().replace(/\s/g, ""))} placeholder="Ex. 6A123456789FR" />
+      <SuiviColis numero={f.suivi} />
+    </div>}
     {f.type === "Facture" && <div className="fld"><label>Date de paiement (laisser vide si non réglée)</label><input type="date" value={f.datePaiement || ""} onChange={(e) => up("datePaiement", e.target.value)} /><span style={{ fontSize: 11, color: "var(--muted)" }}>Renseigner la date d'encaissement alimente l'indicateur de délai de paiement (DSO) dans l'onglet Performance.</span></div>}
     {f.type === "Commande" && <div className="fld"><label>Destination de livraison (point de vente)</label><select value={f.livraisonSiteId || ""} onChange={(e) => up("livraisonSiteId", e.target.value)}><option value="">— aucune (pas de tracé sur la carte) —</option>{destSites.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select><span style={{ fontSize: 11, color: "var(--muted)" }}>Si renseignée et le statut « En cours de livraison », un tracé entrepôt → établissement apparaît sur la carte.</span></div>}
     {effLivraison(acc) && <div style={{ fontSize: 12, color: "var(--muted)" }}><MapPin size={12} style={{ verticalAlign: -2 }} /> Livraison : {effLivraison(acc)}</div>}
@@ -6464,6 +6468,9 @@ function Carte({ data, persist, go, focus }) {
   const [showRoads, setShowRoads] = useState(true);
   const [siteQuery, setSiteQuery] = useState("");
   const mapEl = useRef(null); const mapInst = useRef(null); const markersLayer = useRef(null); const routesLayer = useRef(null); const roadsLayer = useRef(null);
+  // Isochrone : polygone « à moins de N minutes » + fiches qu'il contient.
+  const isoLayer = useRef(null);
+  const [isoMin, setIsoMin] = useState(30); const [isoBusy, setIsoBusy] = useState(false); const [isoMsg, setIsoMsg] = useState(null);
   // Marqueurs indexés par id de site, pour la mise en avant au survol de la liste « Tous les sites ».
   const markerById = useRef({});
   const [mapReady, setMapReady] = useState(false);
@@ -6475,6 +6482,49 @@ function Carte({ data, persist, go, focus }) {
     Promise.all([import("leaflet"), import("leaflet/dist/leaflet.css")]).then(([mod]) => { if (on) setLF(mod.default || mod); }).catch(() => { });
     return () => { on = false; };
   }, []);
+  // ===== Isochrone : « qui est à moins de N minutes d'ici ? » =====
+  // Le polygone vient d'OpenRouteService (relais serveur, clé jamais exposée). Le test
+  // d'appartenance est fait ICI, en local : aucune donnée de fiche ne sort de l'application.
+  // Algorithme du rayon (ray casting) : compte les intersections d'une demi-droite avec le contour.
+  const pointDansPolygone = (lat, lng, anneau) => {
+    let dedans = false;
+    for (let i = 0, j = anneau.length - 1; i < anneau.length; j = i++) {
+      const xi = anneau[i][0], yi = anneau[i][1], xj = anneau[j][0], yj = anneau[j][1]; // [lng, lat]
+      if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) dedans = !dedans;
+    }
+    return dedans;
+  };
+  const effacerIso = () => { try { isoLayer.current && isoLayer.current.clearLayers(); } catch (e) {} setIsoMsg(null); };
+  const lancerIso = async (lat, lng, depuis) => {
+    if (!LF || !mapInst.current) return;
+    setIsoBusy(true); setIsoMsg(null);
+    try {
+      const r = await fetch("/api/outils", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "isochrone", lat, lng, minutes: isoMin }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((j && j.error) || ("erreur " + r.status));
+      const feat = (j.features || [])[0];
+      const anneau = feat && feat.geometry && (feat.geometry.coordinates || [])[0];
+      if (!anneau || !anneau.length) throw new Error("zone non calculable depuis ce point");
+      isoLayer.current.clearLayers();
+      // GeoJSON est en [lng, lat] ; Leaflet attend [lat, lng].
+      LF.polygon(anneau.map((c) => [c[1], c[0]]), { color: "#7c5cf0", weight: 2, fillColor: "#7c5cf0", fillOpacity: 0.12 }).addTo(isoLayer.current);
+      const dedansSites = (data.sites || []).filter((x) => x.lat != null && x.lng != null && pointDansPolygone(x.lat, x.lng, anneau));
+      const dedansProspects = (data.prospects || []).filter((x) => !x.archived && x.lat != null && x.lng != null && pointDansPolygone(x.lat, x.lng, anneau));
+      setIsoMsg({ ok: true, t: isoMin + " min autour de " + depuis + " : " + dedansSites.length + " établissement(s) et " + dedansProspects.length + " prospect(s) géolocalisé(s) dans la zone." });
+    } catch (e) {
+      setIsoMsg({ ok: false, t: String((e && e.message) || e) });
+    } finally { setIsoBusy(false); }
+  };
+  // Isochrone depuis la position réelle de l'utilisateur (tournée improvisée).
+  const isoDepuisMoi = () => {
+    if (!navigator.geolocation) { setIsoMsg({ ok: false, t: "Localisation indisponible sur cet appareil." }); return; }
+    setIsoBusy(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => lancerIso(pos.coords.latitude, pos.coords.longitude, "ma position"),
+      () => { setIsoBusy(false); setIsoMsg({ ok: false, t: "Localisation refusée." }); },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  };
   // Recentrage depuis la liste latérale ou la navigation : vole vers le site sélectionné.
   const selectSite = (s) => { setSel(s.id); if (s.lat == null || s.lng == null || !mapInst.current) return; const zz = Math.max(mapInst.current.getZoom(), 12); mapInst.current.flyTo([s.lat, s.lng], zz, { duration: 0.6 }); };
   // Survol d'une ligne de « Tous les sites » : le marqueur correspondant est mis en avant sur la carte
@@ -6602,6 +6652,7 @@ function Carte({ data, persist, go, focus }) {
     LF.control.scale({ imperial: false, metric: true, position: "bottomleft" }).addTo(map);
     routesLayer.current = LF.layerGroup().addTo(map);
     markersLayer.current = LF.layerGroup().addTo(map);
+    isoLayer.current = LF.layerGroup().addTo(map);
     mapInst.current = map;
     // Zoom molette maîtrisé : exactement UN niveau par cran. Le zoom natif de Leaflet
     // additionne les événements d'un cran (rafale) et saute plusieurs niveaux. On applique
@@ -6685,7 +6736,8 @@ function Carte({ data, persist, go, focus }) {
     if (target) { setSel(target.id); if (target.lat != null && target.lng != null && mapInst.current) mapInst.current.flyTo([target.lat, target.lng], 13, { duration: 0.8 }); }
   }, [mapReady, focus && focus.n]);
   return (<div className="fade">
-    <div className="card" style={{ marginBottom: 12, padding: "10px 14px" }}><div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}><div style={{ fontSize: 12.5, color: "var(--muted)", fontWeight: 600 }}><MapPin size={13} style={{ verticalAlign: -2, marginRight: 4 }} />{shown.length} site{shown.length > 1 ? "s" : ""} affiché{shown.length > 1 ? "s" : ""}{placed.length !== shown.length ? " · " + placed.length + " géolocalisé" + (placed.length > 1 ? "s" : "") : ""}{(liveSites.length - placed.length) > 0 ? " · " + (liveSites.length - placed.length) + " à géolocaliser" : ""}{showProspects && activeProspects.length > 0 ? " · " + prospPlaced.length + "/" + activeProspects.length + " prospect" + (activeProspects.length > 1 ? "s" : "") + " (onglet Prospection)" : ""}</div><div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}><label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, marginRight: 4 }} title="Tracer les itinéraires de livraison réels (routier) plutôt qu'à vol d'oiseau"><input type="checkbox" checked={useOSRM} onChange={(e) => setUseOSRM(e.target.checked)} style={{ width: 14, height: 14 }} />Itinéraires réels</label><button className={cx("btn", "btn-s", showRoads ? "btn-p" : "btn-g")} onClick={() => setShowRoads((v) => !v)} title="Afficher / masquer les grands axes routiers (autoroutes, nationales)"><Navigation size={15} /> Axes routiers</button><button className={cx("btn", "btn-s", showLegend ? "btn-p" : "btn-g")} onClick={() => setShowLegend((v) => !v)} title="Afficher / masquer la légende des couleurs et formes"><Layers size={15} /> Légende</button><button className="btn btn-g btn-s" onClick={aroundMe} disabled={meBusy} title="Se géolocaliser et lister les établissements / prospects les plus proches de moi"><MapPin size={15} className={meBusy ? "spin" : ""} /> Autour de moi</button><button className="btn btn-g btn-s" onClick={runTournee} title="Itinéraire optimisé des établissements affichés (selon les filtres)"><Navigation size={15} /> Tournée</button><button className="btn btn-p btn-s" onClick={() => setEdit({ id: "s_" + Date.now(), accountId: accounts[0]?.id || null, label: "", type: "pdv", adresse: "", lat: null, lng: null, siret: "", typeSurface: "", adresseLivraison: "", livraisonIdentique: true, contactId: "" })}><Plus size={15} /> Ajouter un site</button></div></div>
+    <div className="card" style={{ marginBottom: 12, padding: "10px 14px" }}><div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}><div style={{ fontSize: 12.5, color: "var(--muted)", fontWeight: 600 }}><MapPin size={13} style={{ verticalAlign: -2, marginRight: 4 }} />{shown.length} site{shown.length > 1 ? "s" : ""} affiché{shown.length > 1 ? "s" : ""}{placed.length !== shown.length ? " · " + placed.length + " géolocalisé" + (placed.length > 1 ? "s" : "") : ""}{(liveSites.length - placed.length) > 0 ? " · " + (liveSites.length - placed.length) + " à géolocaliser" : ""}{showProspects && activeProspects.length > 0 ? " · " + prospPlaced.length + "/" + activeProspects.length + " prospect" + (activeProspects.length > 1 ? "s" : "") + " (onglet Prospection)" : ""}</div><div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}><label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, marginRight: 4 }} title="Tracer les itinéraires de livraison réels (routier) plutôt qu'à vol d'oiseau"><input type="checkbox" checked={useOSRM} onChange={(e) => setUseOSRM(e.target.checked)} style={{ width: 14, height: 14 }} />Itinéraires réels</label><button className={cx("btn", "btn-s", showRoads ? "btn-p" : "btn-g")} onClick={() => setShowRoads((v) => !v)} title="Afficher / masquer les grands axes routiers (autoroutes, nationales)"><Navigation size={15} /> Axes routiers</button><button className={cx("btn", "btn-s", showLegend ? "btn-p" : "btn-g")} onClick={() => setShowLegend((v) => !v)} title="Afficher / masquer la légende des couleurs et formes"><Layers size={15} /> Légende</button><button className="btn btn-g btn-s" onClick={aroundMe} disabled={meBusy} title="Se géolocaliser et lister les établissements / prospects les plus proches de moi"><MapPin size={15} className={meBusy ? "spin" : ""} /> Autour de moi</button><button className="btn btn-g btn-s" onClick={runTournee} title="Itinéraire optimisé des établissements affichés (selon les filtres)"><Navigation size={15} /> Tournée</button><span style={{ display: "inline-flex", alignItems: "center", gap: 4, border: "1px solid var(--line)", borderRadius: 9, padding: "3px 6px" }} title="Zone atteignable en voiture depuis ma position, et fiches qui s'y trouvent"><Clock size={13} style={{ color: "#7c5cf0" }} /><select value={isoMin} onChange={(e) => setIsoMin(+e.target.value)} style={{ border: "none", background: "transparent", fontFamily: "inherit", fontSize: 12, fontWeight: 700, padding: 0, maxWidth: 66 }}>{[15, 30, 45, 60, 90].map((m) => <option key={m} value={m}>{m} min</option>)}</select><button className="btn btn-g btn-s" style={{ padding: "3px 8px" }} disabled={isoBusy} onClick={isoDepuisMoi}>{isoBusy ? "Calcul…" : "Zone"}</button>{isoMsg && <button className="iconbtn" onClick={effacerIso} title="Effacer la zone"><X size={13} /></button>}</span><button className="btn btn-p btn-s" onClick={() => setEdit({ id: "s_" + Date.now(), accountId: accounts[0]?.id || null, label: "", type: "pdv", adresse: "", lat: null, lng: null, siret: "", typeSurface: "", adresseLivraison: "", livraisonIdentique: true, contactId: "" })}><Plus size={15} /> Ajouter un site</button></div></div>
+      {isoMsg && <div style={{ marginTop: 10, fontSize: 12.5, lineHeight: 1.5, color: isoMsg.ok ? "var(--ink)" : "var(--red)", display: "flex", alignItems: "center", gap: 7 }}><Clock size={14} style={{ color: "#7c5cf0", flexShrink: 0 }} />{isoMsg.t}</div>}
       {meMsg && <div style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}><strong style={{ fontSize: 13, color: meMsg.ok === false ? "var(--red)" : "var(--ink)" }}><MapPin size={14} style={{ verticalAlign: -2, color: "#2563EB" }} /> Autour de moi{meMsg.near ? " — les plus proches" : ""}</strong><button className="iconbtn" onClick={() => { setMeMsg(null); setMePos(null); }} title="Fermer"><X size={15} /></button></div>
         {meMsg.t && <div style={{ fontSize: 12.5, color: meMsg.ok === false ? "var(--red)" : "var(--muted)", marginTop: 6 }}>{meMsg.t}</div>}
@@ -7102,7 +7154,7 @@ function telCoherent(tel, cp) {
 // ne peut pas lire un site tiers). Zéro token, zéro recherche web facturée.
 async function scrapeContact(url) {
   const u = String(url || "").trim(); if (!u) return null;
-  const res = await fetch("/api/scrape-contact", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ url: u }) });
+  const res = await fetch("/api/outils", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "scrape", url: u }) });
   if (!res.ok) return null;
   const j = await res.json();
   return { email: (j && j.email) || "", telephone: (j && j.telephone) || "", telephones: (j && j.telephones) || [] };
@@ -7522,9 +7574,9 @@ function enrichProspectAppliquer(p, out, text) {
 // Extrait le texte d'une réponse Claude (blocs « text » uniquement, hors blocs d'outil).
 const claudeText = (data) => (data && data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
 // ===== Client de l'API Batch (traitement par lot, 50 % moins cher sur les tokens) =====
-const BATCH_URL = "/api/claude-batch";
+const BATCH_URL = "/api/outils";
 async function batchCall(action, payload) {
-  const res = await fetch(BATCH_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action, ...payload }) });
+  const res = await fetch(BATCH_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "batch:" + action, ...payload }) });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((j && j.error) || ("API " + res.status));
   return j;
@@ -11185,6 +11237,41 @@ function ClaudeBatchWatcher({ batch, persist }) {
     return () => { stop = true; clearInterval(iv); };
   }, [id]);
   return null;
+}
+// Suivi d'un colis Colissimo / La Poste, affiché sous le numéro saisi dans une commande.
+// Le relais serveur porte la clé ; l'appel n'est lancé qu'à la demande, jamais automatiquement.
+function SuiviColis({ numero }) {
+  const [busy, setBusy] = useState(false); const [res, setRes] = useState(null); const [err, setErr] = useState(null);
+  const num = String(numero || "").trim();
+  // Un changement de numéro invalide le résultat affiché : on ne montre jamais le suivi d'un
+  // colis pour un autre numéro.
+  useEffect(() => { setRes(null); setErr(null); }, [num]);
+  if (!num) return null;
+  const COULEUR = { livre: "var(--green)", en_cours: "var(--blue)", attente: "var(--orange)", probleme: "var(--red)" };
+  const suivre = async () => {
+    setBusy(true); setErr(null); setRes(null);
+    try {
+      const r = await fetch("/api/outils", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "suivi", numero: num }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((j && j.error) || ("erreur " + r.status));
+      if (j.introuvable) { setErr(j.error || "Numéro inconnu du service de suivi."); return; }
+      setRes(j);
+    } catch (e) { setErr(String((e && e.message) || e)); }
+    finally { setBusy(false); }
+  };
+  return (<div style={{ marginTop: 7 }}>
+    <button type="button" className="btn btn-g btn-s" disabled={busy} onClick={suivre}><PackageCheck size={14} className={busy ? "spin" : ""} /> {busy ? "Interrogation…" : "Suivre le colis"}</button>
+    {err && <div style={{ fontSize: 11.5, color: "var(--red)", marginTop: 6, lineHeight: 1.5 }}>{err}</div>}
+    {res && (<div style={{ marginTop: 8, padding: "10px 12px", background: "var(--bg)", borderRadius: 10, borderLeft: "3px solid " + (COULEUR[res.etat] || "var(--blue)") }}>
+      <div style={{ fontWeight: 800, fontSize: 13, color: COULEUR[res.etat] || "var(--ink)" }}>{res.etatLabel || "Suivi"}</div>
+      {res.dernierEvenement && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3 }}>{res.dernierEvenement.date} {res.dernierEvenement.heure} — {res.dernierEvenement.libelle}</div>}
+      {res.evenements && res.evenements.length > 1 && <details style={{ marginTop: 7 }}>
+        <summary style={{ fontSize: 11.5, cursor: "pointer", color: "var(--blue)", fontWeight: 600 }}>Historique ({res.evenements.length} étapes)</summary>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>{res.evenements.map((e, i) => (
+          <div key={i} style={{ fontSize: 11.5, color: "var(--muted)" }}><span className="tnum">{e.date}</span> — {e.libelle}</div>))}</div>
+      </details>}
+    </div>)}
+  </div>);
 }
 // Veille sur l'état administratif des comptes et prospects : le registre national indique si une
 // société a cessé son activité. Détecter une fermeture évite de démarcher — ou de livrer — une
