@@ -193,46 +193,41 @@ export default async function handler(req, res) {
 }
 
 async function actionScrape(body, res) {
+  const raw = String(body.url || "").trim();
+  if (!raw) { res.status(400).json({ error: "URL manquante." }); return; }
+  const start = await safeUrl(/^https?:\/\//i.test(raw) ? raw : "https://" + raw.replace(/^\/+/, ""));
+  if (!start) { res.status(400).json({ error: "URL invalide ou non autorisee." }); return; }
+
+  // Budget global : on abandonne proprement avant la limite Vercel.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 22000);
   try {
-    const raw = String(body.url || "").trim();
-    if (!raw) { res.status(400).json({ error: "URL manquante." }); return; }
-    const start = await safeUrl(/^https?:\/\//i.test(raw) ? raw : "https://" + raw.replace(/^\/+/, ""));
-    if (!start) { res.status(400).json({ error: "URL invalide ou non autorisee." }); return; }
-
-    // Budget global : on abandonne proprement avant la limite Vercel.
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 22000);
-    try {
-      const emails = new Map(); const phones = new Map(); const visited = [];
-      for (const path of PATHS) {
-        if (controller.signal.aborted) break;
-        // On s'arrête dès qu'on tient un e-mail ET un téléphone : inutile de charger d'autres pages.
-        if (emails.size && phones.size) break;
-        let target;
-        try { target = new URL(path, start.origin + start.pathname.replace(/\/$/, "") + "/").href; } catch (e) { continue; }
-        const html = await fetchPage(path ? target : start.href, controller.signal);
-        if (!html) continue;
-        visited.push(path || "/");
-        extractEmails(html).forEach((e, i) => { if (!emails.has(e)) emails.set(e, i); });
-        extractPhones(html).forEach((p, i) => { if (!phones.has(p)) phones.set(p, i); });
-      }
-      res.status(200).json({
-        email: [...emails.keys()][0] || "",
-        telephone: [...phones.keys()][0] || "",
-        emails: [...emails.keys()],
-        telephones: [...phones.keys()],
-        pages: visited,
-      });
-    } catch (e) {
-      const msg = e && e.name === "AbortError" ? "Delai depasse." : ("Lecture impossible : " + ((e && e.message) || String(e)));
-      res.status(200).json({ email: "", telephone: "", emails: [], telephones: [], pages: [], error: msg });
-    } finally {
-      clearTimeout(timer);
+    const emails = new Map(); const phones = new Map(); const visited = [];
+    for (const path of PATHS) {
+      if (controller.signal.aborted) break;
+      // On s'arrête dès qu'on tient un e-mail ET un téléphone : inutile de charger d'autres pages.
+      if (emails.size && phones.size) break;
+      let target;
+      try { target = new URL(path, start.origin + start.pathname.replace(/\/$/, "") + "/").href; } catch (e) { continue; }
+      const html = await fetchPage(path ? target : start.href, controller.signal);
+      if (!html) continue;
+      visited.push(path || "/");
+      extractEmails(html).forEach((e, i) => { if (!emails.has(e)) emails.set(e, i); });
+      extractPhones(html).forEach((p, i) => { if (!phones.has(p)) phones.set(p, i); });
     }
-
-  } finally { clearTimeout(timer); }
+    res.status(200).json({
+      email: [...emails.keys()][0] || "",
+      telephone: [...phones.keys()][0] || "",
+      emails: [...emails.keys()],
+      telephones: [...phones.keys()],
+      pages: visited,
+    });
+  } catch (e) {
+    const msg = e && e.name === "AbortError" ? "Delai depasse." : ("Lecture impossible : " + ((e && e.message) || String(e)));
+    res.status(200).json({ email: "", telephone: "", emails: [], telephones: [], pages: [], error: msg });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function actionIsochrone(body, res) {
