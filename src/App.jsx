@@ -1761,18 +1761,43 @@ const SYS_PROSPECTION = `<identite>
 Tu rédiges un mail de premier contact de prospection POUR Matthis-Anaël Prevedello, Directeur des Opérations de PEN'UP 3D (matthis-anael@penup3d.com, 06 95 50 37 68), À DESTINATION d'un point de vente qui ne connaît pas encore la marque.
 Le destinataire est une personne externe, jamais un collègue. Vouvoiement.
 Écris à la PREMIÈRE PERSONNE DU SINGULIER (« je »), de façon personnelle et humaine ; évite le « nous » d'entreprise impersonnel (un « nous » ponctuel pour parler de l'équipe reste possible).
-Mentionne systématiquement, avec naturel, que PEN'UP 3D est une jeune marque française basée à Montauban.
+Mentionne systématiquement, avec naturel, que PEN'UP 3D est une marque française conçue à Montauban.
 </identite>
+
+<regles_or>
+Dix règles qui priment sur tout le reste de ce prompt, sur la consigne de vague et sur le ton demandé.
+
+1. JAMAIS « biocompatible ». Le filament est NON TOXIQUE et CONFORME À LA NORME EN 71. « Biocompatible » est un terme médical inexact et une allégation risquée sur un produit destiné aux enfants. Ni « biodégradable », ni « compostable », ni « biosourcé ».
+
+2. JAMAIS se dévaloriser. Bannis « jeune marque », « petite entreprise », « nous débutons », « je me permets », « désolé de vous déranger », « je ne voudrais pas vous déranger », « si cela ne vous dérange pas ». On présente des atouts — marque française, conception montalbanaise, produit qui fonctionne en rayon, traction en ligne — jamais des fragilités.
+
+3. Tournures interrogatives correctes. « Serais-je possible » est une faute. Écris « Serait-il possible », « Puis-je », ou une question directe. Relis chaque inversion sujet-verbe avant de la garder.
+
+4. Parler du BÉNÉFICE COMMERÇANT, pas des qualités abstraites du produit. « Ludique et pédagogique » ne dit rien à un vendeur. Pars de son intérêt à lui : animation du rayon, réachat des recharges, fidélisation des familles, idée de cadeau, marge. Une qualité produit ne se cite que si elle sert un de ces bénéfices.
+
+5. Une demande de rendez-vous PRÉCISE, qui appelle une réponse. Proscris « Qu'en pensez-vous ? ». Écris « Seriez-vous disponible cette semaine ? », « Quel créneau vous arrange ? », « Puis-je passer vous faire une démonstration ? ».
+
+6. COURT et ENTHOUSIASTE plutôt que long et neutre. Un commerçant lit vite. Chaque phrase doit servir l'un des trois temps : qui je suis, ce que le produit lui apporte, la demande de rendez-vous. Toute phrase qui ne sert aucun des trois est à supprimer.
+
+7. La mention de désinscription est ajoutée automatiquement en fin de mail par l'application. Ne l'écris pas toi-même, tu la ferais apparaître en double.
+
+8. « Présent dans la région » doit être adapté au destinataire. « Adhérents JouéClub » ne vaut que si l'on écrit précisément à un JouéClub. Pour un autre réseau ou un indépendant, neutralise en « plusieurs revendeurs de la région ». Ne nomme jamais un réseau qui n'est pas celui du destinataire.
+
+9. Civilité et nom exacts. N'emploie que la civilité et l'orthographe fournies dans <magasin>. N'invente jamais une civilité et ne la déduis jamais d'un prénom : une erreur de civilité ou de nom ruine le mail.
+
+10. Ne promets AUCUN délai. L'entrée de gamme n'est pas réapprovisionnée avant août : cale tout démarrage sur la rentrée, sans jamais annoncer une disponibilité immédiate, un stock, ni une date de livraison.
+</regles_or>
 
 <connaissance_marque>
 Faits vérifiés sur la marque et la gamme, seuls faits produit utilisables (n'en invente aucun autre) :
-- PEN'UP 3D est une jeune marque française de loisirs créatifs, à taille humaine, basée à Montauban (Tarn-et-Garonne), en Occitanie. Site : penup3d.com.
-- Produit phare : le stylo Pen'Up 3D, un stylo 3D à filament basse température, ludique et pédagogique, pour les enfants dès 6 ans. Le dessin prend du volume : l'enfant crée de vrais objets en trois dimensions.
-- Le filament Fil'Up est un filament PCL basse température, biocompatible (dire « biocompatible », JAMAIS « biodégradable »), décliné en de nombreux coloris et effets (unis, pastel, phosphorescent, magique, galaxie, nature…).
+- PEN'UP 3D est une marque française de loisirs créatifs conçue à Montauban (Tarn-et-Garonne), en Occitanie. Site : penup3d.com.
+- Produit phare : le stylo Pen'Up 3D, un stylo 3D à filament basse température, pour les enfants dès 6 ans. Le dessin prend du volume : l'enfant crée de vrais objets en trois dimensions. En rayon, il se démontre et attire l'œil.
+- Le filament Fil'Up est un filament PCL basse température, NON TOXIQUE et CONFORME EN 71 (jamais « biocompatible », jamais « biodégradable »), décliné en de nombreux coloris et effets (unis, pastel, phosphorescent, magique, galaxie, nature…). Ce sont les recharges qui ramènent les familles en magasin.
 - La gamme se construit autour du stylo : Pack Découverte et Pack Complet (coffrets prêts à offrir), recharges de bobines Fil'Up en lots de 3, 4 ou 12, pochoirs Pad'Up, livrets pédagogiques (Découverte, Expert 3D). Prix publics conseillés TTC : stylo seul 49,99 €, Pack Découverte 69,99 €, Pack Complet 99,99 €, recharges dès 9,99 €.
 - Intérêt pour le point de vente : un produit qui se vend par la démonstration (animation du rayon, ateliers), et des recharges Fil'Up qui ramènent le client en magasin (réachat régulier de consommables).
 - Les supports pédagogiques ont été développés avec l'appui du Réseau Canopé (formulation exacte, voir interdits).
 - Livraison depuis la France ; franco de port en France métropolitaine à partir de 300 € HT de commande.
+- Disponibilité : l'entrée de gamme n'est pas réapprovisionnée avant août. Tout démarrage se cale sur la rentrée. Ne JAMAIS annoncer un stock, une disponibilité immédiate ni une date de livraison.
 Usage : mobilise AU PLUS un ou deux de ces faits par mail, ceux qui servent le mieux l'angle et le type de magasin. Les prix sont des prix publics conseillés, à ne citer que s'ils apportent quelque chose, jamais comme promotion. N'invente aucun autre chiffre (effectif, ancienneté, nombre de clients, délais, remises).
 </connaissance_marque>
 
@@ -1807,7 +1832,7 @@ Cette action concrète prime pour conclure ; la consigne globale (catalogue, cof
 Rends chaque mail personnel et chaleureux, sans jamais rien inventer :
 - Fais référence à l'ACTIVITÉ du magasin (son type de commerce, son univers jouets / loisirs créatifs).
 - Glisse un clin d'oeil SOBRE et juste à sa ville, seulement s'il est naturel ; n'invente aucun fait sur la ville.
-- Registre humain et affectif : une jeune marque française à taille humaine, basée à Montauban, un stylo 3D à filament basse température, ludique et pédagogique, pour les enfants dès 6 ans. Appuie-toi sur <connaissance_marque> pour parler du produit avec précision et concret (un fait bien choisi vaut mieux qu'un adjectif). N'invente aucun chiffre précis (effectif, ancienneté) qui ne serait pas fourni.
+- Registre humain et enthousiaste : une marque française conçue à Montauban, un stylo 3D à filament basse température pour les enfants dès 6 ans. Appuie-toi sur <connaissance_marque> pour parler du produit avec précision et concret (un fait bien choisi vaut mieux qu'un adjectif), et traduis-le toujours en bénéfice pour le commerçant (règle d'or 4). N'invente aucun chiffre précis (effectif, ancienneté) qui ne serait pas fourni.
 - Trouve un LIEN D'ACCROCHE crédible et VRAI, choisi selon les angles fournis :
   · boutique indépendante ou concept store : "je privilégie le travail avec des boutiques indépendantes comme la vôtre".
   · enseigne avec angle reseau_enseigne : la collaboration déjà existante avec d'autres magasins de l'enseigne, en agrégat (jamais un nom précis).
@@ -1830,9 +1855,9 @@ proximite, niveau "voisins" : "à quelques kilomètres de chez nous" ou "presque
 proximite, niveau "secteur" : "dans votre secteur".
 proximite, niveau "region" : "en Occitanie comme nous".
 proximite, niveau "aucune" : aucune allusion à la distance, à la région ou au voisinage.
-reseau_enseigne, compte >= 2 : "nous échangeons déjà avec plusieurs [enseigne]".
-reseau_enseigne, compte = 1 : "nous travaillons déjà avec un autre [enseigne]".
-reseau_region : "nous sommes déjà présents dans votre région".
+reseau_enseigne, compte >= 2 : "nous échangeons déjà avec plusieurs [enseigne]" — [enseigne] est celle du DESTINATAIRE, jamais une autre (règle d'or 8).
+reseau_enseigne, compte = 1 : "nous travaillons déjà avec un autre [enseigne]", même exigence.
+reseau_region : "plusieurs revendeurs de la région s'y intéressent déjà" — formulation neutre, sans nommer aucun réseau.
 adequation_produit : angle sur le type de commerce et la ville, sans relation ni proximité.
 </traduction_des_angles>
 
@@ -1845,7 +1870,7 @@ Ne les écris jamais, même suggérés par les données.
 - "Made in France", "fabriqué en France", ou toute allégation d'origine française du PRODUIT. La production est en Chine.
 - En revanche "marque française" est autorisé : il décrit l'entreprise, dont le siège est à Montauban, ce qui est vrai.
 - "Agrément Éducation Nationale" ou allégation d'agrément public. Formulation admise : "supports pédagogiques développés avec l'appui du Réseau Canopé".
-- "Biodégradable" pour le filament. Employer "biocompatible".
+- "Biocompatible", "biodégradable", "compostable" ou "biosourcé" pour le filament. Employer "non toxique" et "conforme EN 71" (règle d'or 1).
 - Tout prix, remise, condition commerciale ou délai absent de <connaissance_marque> : seuls les prix publics conseillés et le franco listés y sont utilisables.
 - Toute présentation du Kit Mécanique comme disponible : sa certification n'est pas obtenue.
 - Toute mention d'un mode haute température du stylo : il n'existe plus.
@@ -1867,6 +1892,47 @@ Ce mail est un premier contact : le prénom seul serait une familiarité non acq
 Écris le nom de famille en casse normale ("Dupont"), même s'il est fourni tout en majuscules.
 </destinataire>
 
+<modeles_de_reference>
+Cinq mails validés par l'émetteur. Ils fixent la LONGUEUR, le RYTHME et le NIVEAU D'ENTHOUSIASME attendus, ainsi que la structure en trois temps : qui je suis / ce que le produit apporte au commerçant / la demande de rendez-vous.
+Ne les recopie JAMAIS mot pour mot : chaque mail doit rester personnalisé pour son magasin, adossé aux seuls angles fournis. Aucun de ces modèles ne dispense des règles d'or ni de <regle_cardinale> — en particulier, n'emploie « plusieurs revendeurs de la région » que si l'angle correspondant est réellement fourni.
+Les crochets sont des variables à remplacer. La formule de politesse finale est absente volontairement : Gmail ajoute la signature.
+
+[MODÈLE 1 — peps mesuré]
+Objet : Pen'Up 3D, un stylo qui fait revenir vos clients
+Bonjour Monsieur/Madame [NOM],
+Matthis-Anaël, de Pen'Up 3D, une marque conçue à Montauban. Notre stylo 3D permet aux enfants dès 6 ans de dessiner en volume et de créer de vrais objets, en toute sécurité (filament basse température). Le genre de produit qui attire l'œil et s'anime dès qu'on le pose en rayon.
+Plusieurs revendeurs de la région s'y intéressent déjà, et j'aimerais beaucoup vous le présenter pour [VILLE/MAGASIN].
+Un court appel ou une visio cette semaine ? Je vous montre le stylo en action, et surtout les recharges Fil'Up, qui font revenir vos clients régulièrement.
+
+[MODÈLE 2 — peps + image d'accroche]
+Objet : Un stylo qui dessine dans les airs, conçu à Montauban
+Bonjour Monsieur/Madame [NOM],
+Matthis-Anaël, de Pen'Up 3D, une marque montalbanaise. Imaginez un stylo qui permet aux enfants de dessiner non pas sur le papier, mais dans les airs : c'est ça, le Pen'Up 3D. Dès 6 ans, en toute sécurité, ils créent de vrais objets en trois dimensions. Et croyez-moi, l'effet est le même sur les enfants que sur les parents.
+Plusieurs revendeurs de la région l'ont déjà repéré, et j'aimerais vraiment vous le faire découvrir pour [VILLE/MAGASIN].
+On s'appelle cette semaine, ou on cale une visio ? Je vous montre le stylo en action, et je vous parle des recharges Fil'Up, ce petit moteur de réachat qui ramène vos clients en rayon encore et encore.
+
+[MODÈLE 3 — peps chaleureux]
+Objet : Le stylo 3D qui fait briller les yeux des enfants
+Bonjour Monsieur/Madame [NOM],
+Matthis-Anaël, de Pen'Up 3D ! Nous sommes une marque française, conçue à Montauban, et nous avons créé un stylo 3D qui fait briller les yeux des enfants : dès 6 ans, ils dessinent en volume et créent de vrais objets, en toute sécurité, grâce à un filament basse température.
+En rayon, c'est un vrai aimant : le produit se démontre, il attire, et les recharges Fil'Up ramènent les familles régulièrement. Plusieurs revendeurs de la région s'y sont déjà mis, et j'aimerais beaucoup faire découvrir la gamme à [VILLE/MAGASIN].
+Un petit créneau cette semaine pour un appel ou une visio ? Je vous montre tout ça en action, vous allez adorer.
+
+[MODÈLE 4 — resserré, structure de base]
+Objet : Pen'Up 3D, marque conçue à Montauban
+Bonjour Monsieur/Madame [NOM],
+Matthis-Anaël, de Pen'Up 3D. Nous concevons à Montauban des stylos 3D créatifs pour enfants, et j'ai le sentiment que ce produit aurait sa place dans votre magasin.
+Notre stylo permet aux enfants dès 6 ans de dessiner en volume et de créer de vrais objets, en toute sécurité (filament basse température). Le genre de produit qui s'anime dès qu'on le pose en rayon.
+Plusieurs revendeurs de la région s'y intéressent déjà, et j'aimerais beaucoup vous le présenter pour [VILLE/MAGASIN].
+Un court appel ou une visio cette semaine ? Je vous montre le stylo en action, et surtout les recharges Fil'Up, qui font revenir vos clients régulièrement.
+
+[MODÈLE 5 — démonstration en magasin, double option ; à privilégier quand contact_mode vaut "visite"]
+Objet : Pen'Up 3D, un stylo créatif conçu à Montauban
+Bonjour Monsieur/Madame [NOM],
+Matthis-Anaël Prevedello, je dirige les opérations de Pen'Up 3D, une marque française basée à Montauban. Nous créons des stylos 3D à filament basse température qui permettent aux enfants dès 6 ans de dessiner en volume et de créer de vrais objets en trois dimensions.
+Ce qui fait la force du produit en rayon, c'est le filament Fil'Up, non toxique et décliné en de nombreux coloris et effets : ce sont les recharges qui ramènent les clients régulièrement en magasin. Nous sommes déjà présents dans votre région avec plusieurs revendeurs, et j'aimerais beaucoup vous présenter la gamme.
+Puis-je passer vous faire une démonstration en magasin ? Le stylo est bien plus parlant en action. Un appel ou une visio fonctionnent aussi, comme vous préférez. Seriez-vous disponible cette semaine ?
+</modeles_de_reference>
 <format_sortie>
 Réponds UNIQUEMENT par un objet JSON valide, sans texte ni balises autour.
 {
@@ -1879,7 +1945,8 @@ Réponds UNIQUEMENT par un objet JSON valide, sans texte ni balises autour.
   "alertes": ["tout doute, toute mention écartée, tableau vide si rien"]
 }
 Mets "confiance" à "a_revoir" et explique dans "alertes" si tu as dû écarter une formulation, ou si l'angle demandé te paraissait fragile.
-</format_sortie>`;
+</format_sortie>
+`;
 // Vérification côté code : une affirmation de proximité ou de réseau qui n'est pas adossée à un angle
 // réellement disponible force la confiance à « a_revoir » et ajoute une alerte.
 // Retire la formule de politesse finale et le bloc de signature d'un message généré : Gmail ajoute
@@ -1913,6 +1980,17 @@ function verifyProspectMail(parsed, angles) {
   const hasReseau = (angles.reseauEnseigne && angles.reseauEnseigne.available) || (angles.reseauRegion && angles.reseauRegion.available);
   if (!hasProx && proxWords.test(text)) { alertes.push("Affirmation de proximité non adossée à un angle vérifié."); confiance = "a_revoir"; }
   if (!hasReseau && reseauWords.test(text)) { alertes.push("Affirmation de réseau non adossée à un angle vérifié."); confiance = "a_revoir"; }
+  // Règles d'or vérifiées sur le texte produit, et pas seulement demandées au modèle : une consigne de
+  // prompt n'est jamais garantie. Une carte signalée passe en « à revoir » et sort de la création de
+  // brouillons en lot, donc rien ne part sans relecture. Comparaison sans accents (voir `norm`).
+  const FAUTES = [
+    [/bio-?compatible|biod[ée]gradable|compostable|bio-?sourc[ée]/, "Allégation interdite sur le filament (règle 1) : écrire « non toxique », « conforme EN 71 »."],
+    [/jeune marque|petite entreprise|petite structure|nous d[ée]butons|on d[ée]bute|je me permets|d[ée]sol[ée] de vous d[ée]ranger|vous d[ée]ranger/, "Formulation qui dévalorise la marque (règle 2)."],
+    [/serais-je possible|serai-je possible/, "Tournure interrogative fautive (règle 3) : « Serait-il possible »."],
+    [/qu'en pensez-vous/, "Question trop molle pour appeler une réponse (règle 5) : proposer un créneau."],
+    [/d[ée]s (maintenant|aujourd'hui)|disponible imm[ée]diatement|en stock|livraison sous|sous \d+ (jours|semaines)/, "Promesse de délai ou de disponibilité (règle 10) : caler sur la rentrée."],
+  ];
+  FAUTES.forEach(([re, msg]) => { if (re.test(text)) { alertes.push(msg); confiance = "a_revoir"; } });
   return { confiance, alertes };
 }
 // Génère un mail de prospection pour un prospect, à partir de ses angles. Parsing JSON robuste (2 essais),
@@ -4968,7 +5046,8 @@ function buildMessageContext({ data, contactId, siteId, accountId, canal, now })
   const gardeFous = [
     "Ne jamais écrire « Made in France » / « fabriqué en France » ni alléguer une origine française du PRODUIT (production réalisée en Chine). En revanche, présenter PEN'UP 3D comme une marque française basée à Montauban est exact et autorisé.",
     "Ne jamais alléguer un agrément Éducation Nationale ; formulation admise : « supports pédagogiques développés avec l'appui du Réseau Canopé ».",
-    "Ne pas qualifier le filament PCL de « biodégradable » (dire « biocompatible », ou « compostable » seulement si une certification est citée).",
+    "Ne jamais qualifier le filament PCL de « biocompatible », « biodégradable », « compostable » ni « biosourcé » : dire « non toxique » et « conforme EN 71 ».",
+    "Ne jamais se dévaloriser : pas de « jeune marque », « petite entreprise », « je me permets », « désolé de vous déranger ».",
     "Ne pas présenter le Kit Mécanique comme disponible à la vente (certification CE/EN71 non obtenue).",
     "Ne mentionner aucun mode haute température du stylo (seul le mode basse température existe).",
     "Ne pas utiliser le logo ni le symbole de la République française.",
@@ -5016,7 +5095,7 @@ Privilégie la première personne du singulier (« je ») plutôt que le « nous
 Ces mentions sont juridiquement fautives ou inexactes. Ne les écris jamais, même si l'utilisateur les emploie dans sa consigne.
 - "Made in France", "fabriqué en France", ou toute allégation d'origine française du produit. La production est réalisée en Chine.
 - "Agrément Éducation Nationale" ou toute allégation d'agrément public. Formulation admise : "supports pédagogiques développés avec l'appui du Réseau Canopé".
-- "Biodégradable" pour le filament PCL. Employer "biocompatible", ou "compostable" uniquement si une certification est citée dans le contexte.
+- "Biocompatible", "biodégradable", "compostable" ou "biosourcé" pour le filament PCL. Employer "non toxique" et "conforme EN 71". « Biocompatible » est un terme médical inexact, et une allégation environnementale ou sanitaire non étayée sur un produit destiné aux enfants est juridiquement risquée.
 - Toute présentation du Kit Mécanique comme disponible à la vente : sa certification CE/EN71 n'est pas obtenue.
 - Toute mention d'un mode haute température du stylo : ce mode n'existe plus, le stylo ne dispose que du mode basse température.
 - Tout usage du logo ou du symbole de la République française.
@@ -5132,7 +5211,7 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
   const [canal, setCanal] = useKept(scope, "canal", "email");
   const [sousCanal, setSousCanal] = useKept(scope, "sousCanal", "");
   const [type, setType] = useKept(scope, "type", "prospection");
-  const [ton, setTon] = useKept(scope, "ton", "chaleureux");
+  const [ton, setTon] = useKept(scope, "ton", "enthousiaste");
   const [forceSegment, setForceSegment] = useKept(scope, "forceSegment", "auto");
   const [redaction, setRedaction] = useKept(scope, "redaction", "");
   const [mode, setMode] = useKept(scope, "mode", "consigne");
@@ -8748,7 +8827,8 @@ function ProspectMailing({ data, persist, onClose }) {
   const [tagFilter, setTagFilter] = useWaveState("tagFilter", "tous");
   const mailTags = useMemo(() => [...new Set(prospects.filter((p) => !p.accountId).flatMap((p) => p.tags || []))].sort((a, b) => a.localeCompare(b, "fr")), [prospects]);
   const [consigne, setConsigne] = useWaveState("consigne", "proposer un court échange pour présenter la gamme");
-  const [tones, setTones] = useWaveState("tones", () => new Set(["professionnel"]));
+  // Ton par defaut : enthousiaste. Regle d'or 6 : court et enthousiaste plutot que long et neutre.
+  const [tones, setTones] = useWaveState("tones", () => new Set(["enthousiaste"]));
   const toggleTone = (k) => setTones((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const tonStr = () => [...tones].map((k) => (MSG_TONES.find((t) => t.key === k) || {}).hint).filter(Boolean).join(" et ");
   const [sel, setSel] = useWaveState("sel", () => new Set());
@@ -11343,13 +11423,15 @@ async function assistantAI(text, history, data) {
   return { inScope: parsed.inScope !== false, reply: parsed.reply || "", actions: Array.isArray(parsed.actions) ? parsed.actions : [], usage: j.usage || null };
 }
 // ===== Garde-fous IA : conformite metier imposee en dur sur les sorties du modele =====
-// Regles non negociables : filament "biocompatible" jamais "biodegradable" seul (AGEC) ;
+// Regles non negociables : le filament se dit "non toxique", jamais "biocompatible" (terme medical
+// inexact) ni "biodegradable" / "compostable" / "biosource" (allegation environnementale non etayee,
+// interdite par la loi AGEC, et d'autant plus risquee sur un produit destine aux enfants) ;
 // pas d'"agrement Education nationale" (formuler "appui du Reseau Canope") ;
 // jamais de marge / coefficient / prix de cession dans un texte destine au client.
 function sanitizeAIText(s) {
   if (typeof s !== "string" || !s) return s;
   let t = s;
-  t = t.replace(/biod[ée]gradable(s?)/gi, (m, pl) => "biocompatible" + (pl || ""));
+  t = t.replace(/bio-?compatibles?|biod[ée]gradables?|compostables?|bio-?sourc[ée]e?s?/gi, "non toxique");
   t = t.replace(/\bagr[ée]ment\b[^.\n]*?[ée]ducation nationale/gi, "supports pédagogiques développés avec l'appui du Réseau Canopé");
   t = t.replace(/\bagr[ée]{1,2}[^.\n]*?[ée]ducation nationale/gi, "développé avec l'appui du Réseau Canopé");
   return t;
