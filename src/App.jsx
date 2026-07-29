@@ -2509,6 +2509,7 @@ ${ACCENT_CSS}
 .fld{display:flex;flex-direction:column;gap:5px;}.fld label{font-size:12px;font-weight:600;color:var(--muted);}
 .fld input,.fld select,.fld textarea{border:1px solid var(--line);border-radius:10px;padding:9px 11px;font-family:inherit;font-size:13.5px;width:100%;background:#fff;}
 .fld input:focus,.fld select:focus,.fld textarea:focus{outline:0;border-color:var(--blue);}
+.fld input::placeholder,.fld textarea::placeholder{color:var(--muted);opacity:.75;}
 .row2{display:flex;gap:12px;}.row2>*{flex:1;min-width:0;}
 .iconbtn{border:1px solid rgba(255,255,255,.5);background:rgba(242,244,249,.55);-webkit-backdrop-filter:blur(12px) saturate(155%);backdrop-filter:blur(12px) saturate(155%);width:32px;height:32px;border-radius:9px;display:grid;place-items:center;cursor:pointer;color:var(--muted);}.iconbtn:hover{background:rgba(231,235,244,.8);color:var(--ink);}.iconbtn:disabled{opacity:.4;cursor:not-allowed;}
 .conn{display:flex;align-items:center;gap:14px;padding:16px;border:1px solid var(--line);border-radius:15px;background:#fff;}.conn .logo{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;font-weight:800;color:#fff;}
@@ -7910,7 +7911,9 @@ function Prospection({ data, persist, go }) {
   const [selMode, setSelMode] = useState(false); const [selIds, setSelIds] = useState(() => new Set());
   const [sirBusy, setSirBusy] = useState(false); const [sirMsg, setSirMsg] = useState(null);
   const [edit, setEdit] = useState(null);
-  const [zone, setZone] = useState("Occitanie"); const [kind, setKind] = useState("toutes");
+  // Champ vide au départ : « Occitanie » était pré-saisi en dur, donc à retaper à chaque recherche
+  // ailleurs. L'exemple vit maintenant dans le placeholder, qui s'efface dès la première frappe.
+  const [zone, setZone] = useState(""); const [kind, setKind] = useState("toutes");
   // Source de la recherche : magasins (OSM + IA) ou registres officiels gratuits (NAF, écoles,
   // associations, médiathèques). Seule « magasins » peut engager une dépense.
   const [source, setSource] = useState("magasins"); const [naf, setNaf] = useState(NAF_CIBLES[0].code); const [assoMot, setAssoMot] = useState("ludothèque"); const [busy, setBusy] = useState(false); const [aiMsg, setAiMsg] = useState(null); const [aiErr, setAiErr] = useState(null);
@@ -8364,6 +8367,10 @@ function Prospection({ data, persist, go }) {
   const mapsUrl = (p) => "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent([p.nom, p.adresse, p.cp, p.ville].filter(Boolean).join(" "));
   const runAI = () => {
     if (aiJobs.has("prospects:search")) return;
+    // Le champ étant vide par défaut, lancer sans zone deviendrait le geste le plus courant : une
+    // recherche « France » entière est très lente côté OpenStreetMap et peut basculer sur l'IA
+    // payante. On demande donc une zone plutôt que de partir sur un périmètre national par défaut.
+    if (!zone.trim()) { setAiErr("Indiquez d'abord une zone (région, département, ville) ou le nom d'un établissement précis."); return; }
     setBusy(true); setAiErr(null); setAiMsg(null);
     // Registre global : la recherche continue même si l'on quitte l'onglet, et reste visible partout.
     aiJobs.run("prospects:search", "Recherche de prospects", async () => {
