@@ -575,27 +575,44 @@ async function gmailSyncAll(data, persist) {
   const msgs = dt.messages || [];
   const byId = new Map((data.interactions || []).filter((i) => i.gmailId).map((i) => [i.gmailId, i]));
   const toAdd = []; const updates = new Map(); // gmailId -> nouveau corps (réparation des anciens imports tronqués)
+  // Un BROUILLON n'est pas un échange : le message n'a jamais quitté la boîte. On ne le journalise
+  // donc jamais, et on relève ceux qui l'ont été par le passé pour les retirer du fil d'activité.
+  const draftIds = new Set(); const draftSigs = new Set();
   msgs.forEach((m) => {
     if (!m || !m.id) return;
     const ent = addrMap[(m.address || "").toLowerCase()]; if (!ent) return;
+    const sortant = m.direction !== "entrant";
+    if (m.draft === true || (sortant && m.sent !== true)) {
+      draftIds.add(m.id);
+      draftSigs.add((m.date || "") + "|" + normStr(m.subject || "")); // repère des imports anciens, sans identifiant Gmail
+      return;
+    }
     const resume = m.body || m.snippet || "";
     const ex = byId.get(m.id);
     if (ex) { if (resume && resume.length > (ex.resume || "").length + 5) updates.set(m.id, resume); return; }
     byId.set(m.id, true);
-    toAdd.push({ id: "gm_" + m.id, gmailId: m.id, accountId: ent.accountId || "", contactId: ent.contactId || "", siteId: ent.siteId || "", type: "email", direction: m.direction === "entrant" ? "entrant" : "sortant", date: m.date || TODAY(), heure: m.heure || "", sujet: m.subject || "(sans objet)", resume, email: m.address || "", source: "gmail", sourced: true });
+    toAdd.push({ id: "gm_" + m.id, gmailId: m.id, accountId: ent.accountId || "", contactId: ent.contactId || "", siteId: ent.siteId || "", type: "email", direction: sortant ? "sortant" : "entrant", date: m.date || TODAY(), heure: m.heure || "", sujet: m.subject || "(sans objet)", resume, email: m.address || "", source: "gmail", sourced: true });
   });
-  let added = 0, updated = 0;
+  let added = 0, updated = 0, purged = 0;
   persist((p) => {
     const have = new Set((p.interactions || []).filter((i) => i.gmailId).map((i) => i.gmailId));
     const fresh = toAdd.filter((t) => !have.has(t.gmailId));
     added = fresh.length;
     let interactions = p.interactions || [];
+    // Purge des brouillons déjà journalisés : par identifiant Gmail, ou — pour les imports plus anciens
+    // qui n'en portent pas — par date et objet, et seulement sur un échange sortant issu de Gmail.
+    interactions = interactions.filter((i) => {
+      if (!i || i.source !== "gmail") return true;
+      if (i.gmailId) { if (draftIds.has(i.gmailId)) { purged++; return false; } return true; }
+      if (i.direction !== "entrant" && draftSigs.has((i.date || "") + "|" + normStr(i.sujet || ""))) { purged++; return false; }
+      return true;
+    });
     if (updates.size) { interactions = interactions.map((i) => (i.gmailId && updates.has(i.gmailId)) ? (updated++, { ...i, resume: updates.get(i.gmailId) }) : i); }
     if (fresh.length) interactions = [...interactions, ...fresh];
     return { ...p, interactions, settings: { ...p.settings, lastGmailSync: new Date().toISOString() } };
   }, { snapshot: false });
   const converted = await gmailAutoConvertProspects(data, persist);
-  return { added, updated, total: msgs.length, converted };
+  return { added, updated, purged, total: msgs.length, converted };
 }
 // Conversion automatique des prospects contactés : dès que l'API Gmail confirme qu'un mail SORTANT
 // (libellé SENT, un brouillon ne compte pas) a été envoyé à l'adresse d'un prospect, sa fiche quitte
@@ -9506,7 +9523,7 @@ function Connexions({ data, persist, autoBackup }) {
   const lastSync = settings.lastGmailSync ? new Date(settings.lastGmailSync) : null;
   const doGmailSync = async () => {
     setGmSync({ busy: true, msg: "" });
-    try { const r = await gmailSyncAll(data, persist); setGmSync({ busy: false, msg: r.skipped ? "Aucune adresse e-mail renseignée à associer." : ("✅ " + r.added + " courriel(s) ajouté(s)" + (r.updated ? ", " + r.updated + " complété(s)" : "") + " (sur " + r.total + " trouvé(s))." + (r.converted ? " " + r.converted + " prospect(s) converti(s) en établissement (envoi confirmé par Gmail)." : "")) }); }
+    try { const r = await gmailSyncAll(data, persist); setGmSync({ busy: false, msg: r.skipped ? "Aucune adresse e-mail renseignée à associer." : ("✅ " + r.added + " courriel(s) ajouté(s)" + (r.updated ? ", " + r.updated + " complété(s)" : "") + (r.purged ? ", " + r.purged + " brouillon(s) retiré(s) du fil" : "") + " (sur " + r.total + " trouvé(s))." + (r.converted ? " " + r.converted + " prospect(s) converti(s) en établissement (envoi confirmé par Gmail)." : "")) }); }
     catch (e) { setGmSync({ busy: false, msg: "❌ " + ((e && e.message) || String(e)) }); }
   };
   // Envoi d'un e-mail de test vers sa propre adresse, pour vérifier le rendu à la réception (mise en
