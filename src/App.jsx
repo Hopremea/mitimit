@@ -524,6 +524,31 @@ async function gmailSyncAll(data, persist) {
 // (libellé SENT, un brouillon ne compte pas) a été envoyé à l'adresse d'un prospect, sa fiche quitte
 // « Prospection » et passe en « Groupes & établissements » (même logique que le bouton « Convertir »),
 // avec journalisation du courriel envoyé sur la nouvelle fiche. Idempotent (gmailId, prospect déjà converti).
+// Vérifie auprès de l'API Gmail si un courriel a DÉJÀ ÉTÉ ENVOYÉ à chacun des prospects fournis
+// (message sortant portant le libellé SENT ; un brouillon non envoyé ne compte pas). Renvoie une Map
+// prospect.id -> { date, sujet, nb } pour éviter de recontacter quelqu'un déjà démarché.
+async function gmailCheckAlreadySent(list) {
+  const out = new Map();
+  const byAddr = {};
+  (list || []).forEach((p) => prospectAddresses(p).forEach((e) => { (byAddr[e] = byAddr[e] || []).push(p); }));
+  const addrs = Object.keys(byAddr);
+  if (!addrs.length) return out;
+  for (let i = 0; i < addrs.length && i < 400; i += 80) {
+    const batch = addrs.slice(i, i + 80);
+    const res = await fetch("/api/gmail-sync", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ addresses: batch, max: 120, newerThan: "2y" }) });
+    const dt = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(dt.error || ("Erreur " + res.status));
+    (dt.messages || []).forEach((m) => {
+      if (!m || m.direction !== "sortant" || m.draft || m.sent !== true) return;
+      (byAddr[(m.address || "").toLowerCase()] || []).forEach((p) => {
+        const prev = out.get(p.id);
+        if (!prev) out.set(p.id, { date: m.date || "", sujet: m.subject || "", nb: 1 });
+        else out.set(p.id, { date: (m.date || "") > (prev.date || "") ? (m.date || "") : prev.date, sujet: (m.date || "") > (prev.date || "") ? (m.subject || "") : prev.sujet, nb: prev.nb + 1 });
+      });
+    });
+  }
+  return out;
+}
 async function gmailAutoConvertProspects(data, persist) {
   const prosMap = {};
   (data.prospects || []).forEach((p) => {
@@ -1447,6 +1472,24 @@ function WarnTip({ msgs, size = 14 }) {
 // Adresse de destination d'un mail de prospection : l'e-mail du MAGASIN en priorité (adresse générique
 // du point de vente), à défaut celui du contact identifié.
 const prospectMailAddress = (p) => (((p || {}).email) || "").trim() || (((p || {}).contactEmail) || "").trim();
+// Toutes les adresses connues d'un prospect (magasin + contact), en minuscules — pour rapprocher un
+// courriel déjà envoyé, quelle que soit l'adresse utilisée à l'époque.
+const prospectAddresses = (p) => [((p || {}).email) || "", ((p || {}).contactEmail) || ""].map((e) => e.trim().toLowerCase()).filter((e) => e.includes("@"));
+// Antécédent de contact d'un prospect, d'après les données déjà présentes dans MITMIT (hors Gmail) :
+// statut « contacté », brouillon de prospection créé, et échanges sortants journalisés portant l'une
+// de ses adresses. Renvoie null si rien, sinon { date, quoi, source }.
+function prospectContactHistory(p, data) {
+  if (!p) return null;
+  const addrs = new Set(prospectAddresses(p));
+  const sent = (data.interactions || []).filter((i) => i.type === "email" && i.direction !== "entrant" && addrs.has(String(i.email || "").trim().toLowerCase()));
+  if (sent.length) {
+    const last = sent.slice().sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0];
+    return { date: last.date || "", quoi: last.sujet || "courriel envoyé", source: last.source === "gmail" ? "échange Gmail journalisé" : "échange enregistré dans MITMIT" };
+  }
+  if (p.statut === "contacte") return { date: p.dateContact || p.brouillonDate || "", quoi: p.brouillonObjet || "prospect marqué « contacté »", source: "statut de la fiche" };
+  if (p.statut === "brouillon_cree" || p.brouillonDate) return { date: p.brouillonDate || "", quoi: p.brouillonObjet || "brouillon de prospection créé", source: "brouillon déjà créé depuis MITMIT" };
+  return null;
+}
 function computeProspectAngles({ prospect, accounts, sites, interactions, hq, now }) {
   const p = prospect || {};
   hq = hq || SIEGE;
@@ -7661,6 +7704,31 @@ function ProspectMailing({ data, persist, onClose }) {
   const waveJob = jobs.get("mailing:wave");
   const onUsage = (u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }));
   const anglesOf = (p) => computeProspectAngles({ prospect: p, accounts: data.accounts, sites: data.sites, interactions: data.interactions, hq: SIEGE });
+  // « Déjà contacté » : croisement de l'API Gmail (mail réellement ENVOYÉ, libellé SENT — vérification
+  // lancée à l'ouverture du volet) et des données MITMIT (statut, brouillon créé, échanges journalisés).
+  // Ces prospects sont masqués par défaut et jamais présélectionnés : on ne redémarche pas quelqu'un
+  // déjà contacté.
+  const [gmSent, setGmSent] = useState(() => new Map());
+  const [gmCheck, setGmCheck] = useState({ busy: false, msg: "", done: false });
+  const runGmailCheck = async () => {
+    const list = prospects.filter((p) => !p.accountId && prospectAddresses(p).length);
+    if (!list.length) { setGmCheck({ busy: false, msg: "", done: true }); return; }
+    setGmCheck({ busy: true, msg: "", done: false });
+    try {
+      const m = await gmailCheckAlreadySent(list);
+      setGmSent(m);
+      setGmCheck({ busy: false, done: true, msg: m.size ? ("✅ Gmail : " + m.size + " prospect(s) ont déjà reçu un mail, ils sont masqués et décochés.") : "✅ Gmail : aucun envoi antérieur trouvé pour ces prospects." });
+    } catch (e) {
+      setGmCheck({ busy: false, done: true, msg: "⚠ Vérification Gmail indisponible (" + ((e && e.message) || e) + ") : seuls les antécédents enregistrés dans MITMIT sont pris en compte." });
+    }
+  };
+  useEffect(() => { runGmailCheck(); }, []);
+  // Antécédent de contact, toutes sources confondues (Gmail d'abord, sinon les données MITMIT).
+  const contactedInfo = (p) => {
+    const g = gmSent.get(p.id);
+    if (g) return { date: g.date || "", quoi: g.sujet || "courriel envoyé", source: "envoi confirmé par Gmail" + (g.nb > 1 ? " · " + g.nb + " messages" : "") };
+    return prospectContactHistory(p, data);
+  };
   const filtered = useMemo(() => prospects.filter((p) => {
     if (p.accountId) return false;
     if (listFilter !== "tous") { const L = mailLists.find((l) => l.id === listFilter); if (!L || !(L.ids || []).includes(p.id)) return false; }
@@ -7670,11 +7738,12 @@ function ProspectMailing({ data, persist, onClose }) {
     if (region !== "tous" && (p.region || "") !== region) return false;
     const st = p.statut || "a_qualifier";
     if (statuts.size && !statuts.has(st)) return false;
-    if (!showTreated && (st === "brouillon_cree" || st === "contacte")) return false;
+    if (!showTreated && (st === "brouillon_cree" || st === "contacte" || contactedInfo(p))) return false;
     return true;
-  }).map((p) => ({ p, a: anglesOf(p) })), [prospects, types, region, statuts, showTreated, listFilter, tagFilter, nameQ, data.accounts, data.sites, data.interactions]);
-  const filterSig = [...types].sort().join(",") + "|" + region + "|" + [...statuts].sort().join(",") + "|" + showTreated + "|" + listFilter + "|" + tagFilter + "|" + nameQ;
-  useEffect(() => { setSel(new Set(filtered.map((x) => x.p.id))); }, [filterSig]);
+  }).map((p) => ({ p, a: anglesOf(p), deja: contactedInfo(p) })), [prospects, types, region, statuts, showTreated, listFilter, tagFilter, nameQ, gmSent, data.accounts, data.sites, data.interactions]);
+  const filterSig = [...types].sort().join(",") + "|" + region + "|" + [...statuts].sort().join(",") + "|" + showTreated + "|" + listFilter + "|" + tagFilter + "|" + nameQ + "|G" + gmSent.size;
+  // Présélection : jamais les prospects déjà contactés (ils restent cochables à la main si besoin).
+  useEffect(() => { setSel(new Set(filtered.filter((x) => !x.deja).map((x) => x.p.id))); }, [filterSig]);
   const toggleType = (k) => setTypes((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const toggleStatut = (k) => setStatuts((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const toggleSel = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -7683,32 +7752,44 @@ function ProspectMailing({ data, persist, onClose }) {
   const sortCards = (arr) => arr.slice().sort((a, b) => rank(a) - rank(b));
   const updateCard = (id, patch) => setCards((cs) => cs.map((c) => c.id === id ? { ...c, ...patch } : c));
   const appendNote = (cur, add) => (add && normStr(cur || "").indexOf(normStr(add)) === -1) ? ((cur ? cur + "\n— " : "") + add) : cur;
-  const generate = () => {
+  const generate = async () => {
     if (running || !selectedRows.length) return;
+    // Garde-fou : un prospect déjà démarché ne peut être relancé qu'après confirmation explicite.
+    const dejas = selectedRows.filter((x) => x.deja);
+    if (dejas.length) {
+      const ok = await appConfirm(dejas.length + " prospect(s) sélectionné(s) ont DÉJÀ reçu un mail (" + (dejas[0].deja.source || "antécédent") + (dejas[0].deja.date ? ", le " + dejas[0].deja.date : "") + "). Générer quand même un nouveau mail pour eux ?", { title: "Prospects déjà contactés", confirmLabel: "Générer quand même" });
+      if (!ok) return;
+    }
     const rows = selectedRows.slice();
     const tstr = tonStr();
     setCards([]);
     jobs.run("mailing:wave", "Mailing prospection", async (prog) => {
       let done = 0; prog(0, rows.length); const acc = [];
-      for (const { p, a } of rows) {
+      for (const { p, a, deja } of rows) {
+        const relance = deja ? ["Ce prospect a déjà reçu un mail (" + deja.source + (deja.date ? ", le " + deja.date : "") + ") : ce message est une relance, à relire avant envoi."] : [];
         if (a.risque === "bloquant") {
-          acc.push({ id: p.id, prospect: p, angles: a, objet: "", corps: "", objectif: a.objectif_type, angle_utilise: "", confiance: "a_revoir", alertes: ["À revoir à la main : " + (a.risqueMotif || "identification incertaine") + "."], edited: false, done: false, blocked: true });
+          acc.push({ id: p.id, prospect: p, angles: a, deja, objet: "", corps: "", objectif: a.objectif_type, angle_utilise: "", confiance: "a_revoir", alertes: ["À revoir à la main : " + (a.risqueMotif || "identification incertaine") + "."].concat(relance), edited: false, done: false, blocked: true });
         } else {
           try {
             const cons = a.objectif_type === "referencement" ? consigne : "";
             const r = await generateProspectMail({ prospect: p, angles: a, consigne: cons, ton: tstr, onUsage });
-            acc.push({ id: p.id, prospect: p, angles: a, objet: r.objet, corps: r.corps, objectif: r.objectif, angle_utilise: r.angle_utilise, confiance: r.confiance, alertes: r.alertes, edited: false, done: false, blocked: false });
+            acc.push({ id: p.id, prospect: p, angles: a, deja, objet: r.objet, corps: r.corps, objectif: r.objectif, angle_utilise: r.angle_utilise, confiance: r.confiance, alertes: (r.alertes || []).concat(relance), edited: false, done: false, blocked: false });
           } catch (e) {
-            acc.push({ id: p.id, prospect: p, angles: a, objet: "", corps: "Génération indisponible : " + ((e && e.message) || e), objectif: a.objectif_type, angle_utilise: "", confiance: "a_revoir", alertes: ["Erreur de génération."], edited: false, done: false, blocked: false });
+            acc.push({ id: p.id, prospect: p, angles: a, deja, objet: "", corps: "Génération indisponible : " + ((e && e.message) || e), objectif: a.objectif_type, angle_utilise: "", confiance: "a_revoir", alertes: ["Erreur de génération."].concat(relance), edited: false, done: false, blocked: false });
           }
         }
         done++; prog(done, rows.length); setCards(sortCards([...acc]));
       }
     });
   };
-  const createDraftFor = async (c) => {
+  const createDraftFor = async (c, opts) => {
     const to = prospectMailAddress(c.prospect);
     if (!to) { updateCard(c.id, { sendMsg: "❌ Pas d'adresse e-mail." }); return false; }
+    // Un prospect déjà démarché n'est jamais recontacté sans validation explicite.
+    if (c.deja && !(opts && opts.force)) {
+      const ok = await appConfirm("« " + (c.prospect.nom || "Ce prospect") + " » a déjà reçu un mail (" + c.deja.source + (c.deja.date ? ", le " + c.deja.date : "") + (c.deja.quoi ? " — " + c.deja.quoi : "") + "). Créer tout de même un nouveau brouillon ?", { title: "Prospect déjà contacté", confirmLabel: "Créer le brouillon" });
+      if (!ok) return false;
+    }
     updateCard(c.id, { sending: true, sendMsg: "" });
     try {
       const res = await fetch("/api/gmail-draft", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ to, subject: c.objet || ("PEN'UP 3D — " + (c.prospect.nom || "")), body: c.corps }) });
@@ -7728,9 +7809,11 @@ function ProspectMailing({ data, persist, onClose }) {
   };
   const regenCard = async (c) => { if (c.edited) { const ok = await appConfirm("Régénérer va écraser vos modifications sur ce mail. Continuer ?", { title: "Régénérer", confirmLabel: "Régénérer" }); if (!ok) return; } runGen(c); };
   const isReseauClaim = (c) => c.angle_utilise === "reseau_enseigne" || c.angle_utilise === "reseau_region";
-  const batchEligible = cards.filter((c) => !c.done && !c.blocked && c.confiance !== "a_revoir" && (!c.alertes || c.alertes.length === 0) && (!isReseauClaim(c) || confirmReseau) && prospectMailAddress(c.prospect));
+  // Traitement groupé : jamais un prospect déjà contacté (il reste traitable un par un, avec confirmation).
+  const batchEligible = cards.filter((c) => !c.done && !c.blocked && !c.deja && c.confiance !== "a_revoir" && (!c.alertes || c.alertes.length === 0) && (!isReseauClaim(c) || confirmReseau) && prospectMailAddress(c.prospect));
   const createAllSafe = async () => { for (const c of batchEligible) { if (!cards.find((x) => x.id === c.id && x.done)) await createDraftFor(c); } };
   const nbNoMail = selectedRows.filter((x) => !prospectMailAddress(x.p)).length;
+  const nbDeja = selectedRows.filter((x) => x.deja).length;
   const nbIdent = selectedRows.filter((x) => x.a.objectif_type === "identifier_contact").length;
   const CONF = { haute: { label: "haute", color: "#2bb673" }, standard: { label: "standard", color: "#F8B133" }, a_revoir: { label: "à revoir", color: "#FF5A45" } };
   const ANGLE_LBL = { proximite: "proximité", reseau_enseigne: "réseau enseigne", reseau_region: "réseau régional", adequation_produit: "adéquation produit" };
@@ -7742,19 +7825,24 @@ function ProspectMailing({ data, persist, onClose }) {
     <div className="row2">
       <div className="fld"><label>Région</label><select value={region} onChange={(e) => setRegion(e.target.value)}><option value="tous">Toutes</option>{regions.map((r) => <option key={r} value={r}>{r}</option>)}</select></div>
       {(mailLists.length > 0 || mailTags.length > 0) && <div className="fld"><label>Cibler une liste / étiquette</label><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{mailLists.length > 0 && <select value={listFilter} onChange={(e) => setListFilter(e.target.value)} style={{ flex: 1, minWidth: 130 }} title="Liste enregistrée"><option value="tous">Toutes les listes</option>{mailLists.map((l) => <option key={l.id} value={l.id}>{l.name} ({(l.ids || []).length})</option>)}</select>}{mailTags.length > 0 && <select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} style={{ flex: 1, minWidth: 130 }} title="Étiquette"><option value="tous">Toutes les étiquettes</option>{mailTags.map((t) => <option key={t} value={t}>#{t}</option>)}</select>}</div></div>}
-      <div className="fld"><label>Statut</label><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{["a_qualifier", "a_contacter"].map((k) => { const on = statuts.has(k); return (<button key={k} type="button" className={cx("btn", "btn-s", on ? "btn-p" : "btn-g")} onClick={() => toggleStatut(k)}>{PROSPECT_STATUT[k].label}</button>); })}<label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--muted)", cursor: "pointer" }}><input type="checkbox" checked={showTreated} onChange={(e) => setShowTreated(e.target.checked)} style={{ width: "auto" }} /> réafficher déjà traités</label></div></div>
+      <div className="fld"><label>Statut</label><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{["a_qualifier", "a_contacter"].map((k) => { const on = statuts.has(k); return (<button key={k} type="button" className={cx("btn", "btn-s", on ? "btn-p" : "btn-g")} onClick={() => toggleStatut(k)}>{PROSPECT_STATUT[k].label}</button>); })}<label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--muted)", cursor: "pointer" }} title="Réaffiche les prospects déjà contactés (mail déjà envoyé selon Gmail, ou brouillon / échange déjà enregistré dans MITMIT). Ils restent décochés."><input type="checkbox" checked={showTreated} onChange={(e) => setShowTreated(e.target.checked)} style={{ width: "auto" }} /> réafficher déjà traités</label></div></div>
+    </div>
+    <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", fontSize: 11.5, color: "var(--muted)", margin: "2px 0 8px", padding: "7px 10px", border: "1px solid var(--line)", borderRadius: 10, background: "var(--bg)" }}>
+      <Mail size={13} className={gmCheck.busy ? "spin" : ""} style={{ flexShrink: 0, color: "var(--blue)" }} />
+      <span style={{ flex: 1, minWidth: 180, lineHeight: 1.45 }}>{gmCheck.busy ? "Vérification dans Gmail des mails déjà envoyés à ces prospects…" : (gmCheck.msg || "Les prospects déjà contactés (envoi confirmé par Gmail, brouillon ou échange déjà enregistré dans MITMIT) sont masqués et jamais présélectionnés.")}</span>
+      <button type="button" className="btn btn-g btn-s" onClick={runGmailCheck} disabled={gmCheck.busy}><RefreshCw size={13} className={gmCheck.busy ? "spin" : ""} /> Revérifier</button>
     </div>
     <div className="fld"><label>Consigne de vague (action visée, pour les mails de référencement)</label><input value={consigne} onChange={(e) => setConsigne(e.target.value)} placeholder="Ex : proposer un échange en visio, envoyer le catalogue, un coffret d'essai…" /><span style={{ fontSize: 11, color: "var(--muted)" }}>Ignorée pour les prospects en objectif « identifier le contact » (chaîne, GSS…), où l'action est imposée.</span></div>
     <div className="fld"><label>Ton (cumulable)</label><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{MSG_TONES.map((t) => { const on = tones.has(t.key); return (<button key={t.key} type="button" className={cx("btn", "btn-s", on ? "btn-p" : "btn-g")} onClick={() => toggleTone(t.key)} title={t.hint}>{t.label}</button>); })}</div><span style={{ fontSize: 11, color: "var(--muted)" }}>Cochez un ou plusieurs tons ; ils se combinent. Aucun ton coché : registre neutre. Le ton n'autorise jamais d'affirmation fausse.</span></div>
     <div style={{ border: "1px solid var(--line)", borderRadius: 12, maxHeight: 240, overflowY: "auto", margin: "6px 0 10px" }}>
-      {filtered.length === 0 ? <div className="empty" style={{ padding: 16 }}>Aucun prospect ne correspond aux filtres.</div> : filtered.map(({ p, a }) => { const on = sel.has(p.id); const mailTo = prospectMailAddress(p); const noMail = !mailTo; return (
-        <label key={p.id} className="hrow" style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 11px", borderBottom: "1px solid var(--line)", cursor: "pointer", opacity: a.risque === "bloquant" ? 0.6 : 1 }}>
+      {filtered.length === 0 ? <div className="empty" style={{ padding: 16 }}>Aucun prospect ne correspond aux filtres.</div> : filtered.map(({ p, a, deja }) => { const on = sel.has(p.id); const mailTo = prospectMailAddress(p); const noMail = !mailTo; return (
+        <label key={p.id} className="hrow" style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 11px", borderBottom: "1px solid var(--line)", cursor: "pointer", opacity: (a.risque === "bloquant" || deja) ? 0.6 : 1 }}>
           <input type="checkbox" checked={on} onChange={() => toggleSel(p.id)} style={{ width: "auto" }} />
-          <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{p.nom || p.enseigne || "Sans nom"} <span style={{ fontWeight: 500, color: "var(--muted)" }}>· {p.ville || "—"} · {(PROSPECT_TYPES[p.type] || {}).label || "—"}</span></div><div style={{ fontSize: 11.5, color: "var(--muted)", display: "flex", gap: 8, flexWrap: "wrap" }}><span style={{ color: a.objectif_type === "referencement" ? "var(--green)" : "#7c5cf0", fontWeight: 700 }}>{a.objectif_type === "referencement" ? "→ référencement" : "→ trouver le contact centrale"}</span><span>angle : {ANGLE_LBL[a.bestAngle]}</span><span style={{ color: noMail ? "var(--red)" : "var(--muted)" }} title={!noMail && !(p.email || "").trim() ? "Adresse du contact identifié (pas d'e-mail magasin renseigné)" : "E-mail du magasin"}>{noMail ? "✉ aucune adresse" : "✉ " + mailTo}</span>{a.risque === "bloquant" && <span style={{ color: "var(--red)", fontWeight: 700 }}>⚠ à revoir</span>}</div></div>
+          <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{p.nom || p.enseigne || "Sans nom"} <span style={{ fontWeight: 500, color: "var(--muted)" }}>· {p.ville || "—"} · {(PROSPECT_TYPES[p.type] || {}).label || "—"}</span></div><div style={{ fontSize: 11.5, color: "var(--muted)", display: "flex", gap: 8, flexWrap: "wrap" }}><span style={{ color: a.objectif_type === "referencement" ? "var(--green)" : "#7c5cf0", fontWeight: 700 }}>{a.objectif_type === "referencement" ? "→ référencement" : "→ trouver le contact centrale"}</span><span>angle : {ANGLE_LBL[a.bestAngle]}</span><span style={{ color: noMail ? "var(--red)" : "var(--muted)" }} title={!noMail && !(p.email || "").trim() ? "Adresse du contact identifié (pas d'e-mail magasin renseigné)" : "E-mail du magasin"}>{noMail ? "✉ aucune adresse" : "✉ " + mailTo}</span>{a.risque === "bloquant" && <span style={{ color: "var(--red)", fontWeight: 700 }}>⚠ à revoir</span>}{deja && <span style={{ color: "#b45309", fontWeight: 800 }} title={deja.source + (deja.quoi ? " — " + deja.quoi : "")}>✔ déjà contacté{deja.date ? " le " + deja.date : ""}</span>}</div></div>
         </label>); })}
     </div>
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-      <span style={{ fontSize: 12, color: "var(--muted)" }}>{selectedRows.length} sélectionné(s){nbNoMail ? " · " + nbNoMail + " sans adresse" : ""}{nbIdent ? " · " + nbIdent + " en recherche de contact" : ""}</span>
+      <span style={{ fontSize: 12, color: "var(--muted)" }}>{selectedRows.length} sélectionné(s){nbNoMail ? " · " + nbNoMail + " sans adresse" : ""}{nbIdent ? " · " + nbIdent + " en recherche de contact" : ""}{nbDeja ? " · " : ""}{nbDeja ? <strong style={{ color: "#b45309" }}>{nbDeja} déjà contacté(s)</strong> : null}</span>
       <button className="btn btn-p" onClick={generate} disabled={running || !selectedRows.length}><Sparkles size={15} className={running ? "spin" : ""} /> {running ? ("Génération… " + (waveJob && waveJob.total ? waveJob.done + "/" + waveJob.total : "")) : "Générer la vague (" + selectedRows.length + ")"}</button>
     </div>
     {cards.length > 0 && <>
@@ -7770,6 +7858,7 @@ function ProspectMailing({ data, persist, onClose }) {
               <span style={{ fontSize: 11.5, color: "var(--muted)" }}>{(PROSPECT_TYPES[c.prospect.type] || {}).label} · {c.prospect.ville || "—"}</span>
               <Badge color={conf.color}>{conf.label}</Badge>
               <Badge color={c.objectif === "referencement" ? "#2bb673" : "#7c5cf0"}>{c.objectif === "referencement" ? "référencement" : "contact centrale"}</Badge>
+              {c.deja && <span title={c.deja.source + (c.deja.quoi ? " — " + c.deja.quoi : "")}><Badge color="#b45309">déjà contacté{c.deja.date ? " · " + c.deja.date : ""}</Badge></span>}
               {!c.blocked && c.angle_utilise && <span style={{ fontSize: 11, color: "var(--muted)" }}>angle : {ANGLE_LBL[c.angle_utilise] || c.angle_utilise}</span>}
               <span style={{ fontSize: 11.5, color: prospectMailAddress(c.prospect) ? "var(--muted)" : "var(--red)", marginLeft: "auto" }} title={!(c.prospect.email || "").trim() && prospectMailAddress(c.prospect) ? "Adresse du contact identifié (pas d'e-mail magasin renseigné)" : "E-mail du magasin"}>{prospectMailAddress(c.prospect) || "aucune adresse"}</span>
             </div>
