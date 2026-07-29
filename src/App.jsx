@@ -8487,6 +8487,13 @@ function CommandCenter({ data, persist, go }) {
   const priAccounts = accounts.filter((a) => !a.archived).map((a) => ({ a, ...priorityScore(a, data) })).filter((x) => x.score >= 35).sort((x, y) => y.score - x.score).slice(0, 6);
   const markDone = (id) => persist((p) => ({ ...p, events: (p.events || []).map((e) => e.id === id ? { ...e, done: true } : e) }));
   const snooze = (id) => persist((p) => ({ ...p, events: (p.events || []).map((e) => e.id === id ? { ...e, date: isoLocal(new Date(Date.now() + 86400000)) } : e) }));
+  // Suppression définitive d'un événement depuis la liste. Confirmation obligatoire : contrairement à
+  // « Marquer fait », l'événement disparaît de l'agenda et de l'historique, sans retour possible.
+  const delEventRow = async (e) => {
+    const ok = await appConfirm("Supprimer définitivement « " + evLabel(e) + " » ? L'événement disparaîtra aussi du calendrier. Pour seulement le retirer de cette liste en gardant la trace, utilisez plutôt « Marquer fait ».", { title: "Supprimer l'événement", confirmLabel: "Supprimer" });
+    if (!ok) return;
+    persist((p) => ({ ...p, events: (p.events || []).filter((x) => x.id !== e.id) }));
+  };
   const evGo = (e) => e.contactId ? go("repertoire", e.contactId) : e.accountId ? go("accounts", e.accountId) : go("agenda");
   const evMeta = (e) => EVENT_TYPES[e.type] || EVENT_TYPES.rdv;
   const evLabel = (e) => e.titre || evMeta(e).label;
@@ -8532,10 +8539,10 @@ function CommandCenter({ data, persist, go }) {
     </div>
     {total === 0 && <div className="card" style={{ textAlign: "center", padding: "34px 16px", color: "var(--muted)" }}><CheckCircle2 size={34} style={{ color: "var(--green)" }} /><div className="pu-display" style={{ fontSize: 16, marginTop: 8, color: "var(--ink)" }}>Tout est à jour</div><div style={{ fontSize: 12.5, marginTop: 4 }}>Aucune relance en retard, aucun RDV du jour, aucune facture échue. Planifie une action depuis le calendrier ou la prospection.</div></div>}
     <Section title="En retard" color="#FF5A45" icon="⚠️" count={overdue.length}>
-      {overdue.map((e) => <Row key={e.id} onClick={() => evGo(e)} icon={evMeta(e).icon} title={evLabel(e)} sub={evSub(e)} right={<span style={{ color: "var(--red)" }}>{relDate(e.date)}</span>} actions={<><button className="iconbtn" title="Reporter à demain" onClick={() => snooze(e.id)}><ChevronRight size={15} /></button><button className="iconbtn" title="Marquer fait" onClick={() => markDone(e.id)}><CheckCircle2 size={15} /></button></>} />)}
+      {overdue.map((e) => <Row key={e.id} onClick={() => evGo(e)} icon={evMeta(e).icon} title={evLabel(e)} sub={evSub(e)} right={<span style={{ color: "var(--red)" }}>{relDate(e.date)}</span>} actions={<><button className="iconbtn" title="Reporter à demain" onClick={() => snooze(e.id)}><ChevronRight size={15} /></button><button className="iconbtn" title="Marquer fait" onClick={() => markDone(e.id)}><CheckCircle2 size={15} /></button><button className="iconbtn" title="Supprimer l'événement" onClick={() => delEventRow(e)} style={{ color: "var(--red)" }}><X size={15} /></button></>} />)}
     </Section>
     <Section title="Aujourd'hui" color="#3F60AA" icon="📅" count={todayEv.length}>
-      {todayEv.map((e) => <Row key={e.id} onClick={() => evGo(e)} icon={evMeta(e).icon} title={evLabel(e)} sub={evSub(e)} right={e.heure || null} actions={<button className="iconbtn" title="Marquer fait" onClick={() => markDone(e.id)}><CheckCircle2 size={15} /></button>} />)}
+      {todayEv.map((e) => <Row key={e.id} onClick={() => evGo(e)} icon={evMeta(e).icon} title={evLabel(e)} sub={evSub(e)} right={e.heure || null} actions={<><button className="iconbtn" title="Marquer fait" onClick={() => markDone(e.id)}><CheckCircle2 size={15} /></button><button className="iconbtn" title="Supprimer l'événement" onClick={() => delEventRow(e)} style={{ color: "var(--red)" }}><X size={15} /></button></>} />)}
     </Section>
     <Section title="Devis à relancer" color="#F8B133" icon="📄" count={devisRelance.length}>
       {devisRelance.map((d) => <Row key={d.id} onClick={() => go("deals", d.id)} icon="📄" title={(d.ref || "Devis") + (accName(d.accountId) ? " · " + accName(d.accountId) : "")} sub={"Envoyé " + relDate(d.date) + " · en attente"} right={eur(d.montant || 0)} />)}
