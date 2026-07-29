@@ -25,9 +25,12 @@ class ErrorBoundary extends React.Component {
           <div style={{ fontSize: 30, marginBottom: 8 }}>⚠️</div>
           <h1 style={{ fontSize: 19, margin: "0 0 8px" }}>Une erreur inattendue est survenue</h1>
           <p style={{ fontSize: 14, color: "#6b7589", lineHeight: 1.55, margin: "0 0 18px" }}>
-            Vos données sont en sécurité (sauvegardées localement et sur le serveur). Rechargez la page pour reprendre.
+            Vos données sont en sécurité (sauvegardées localement et sur le serveur). Rechargez la page pour reprendre : l'application rouvre sur l'accueil.
           </p>
-          <button onClick={() => { try { const u = new URL(window.location.href); u.searchParams.set("_v", Date.now().toString(36)); window.location.replace(u.toString()); } catch (e) { window.location.reload(); } }}
+          {/* Le rechargement remet l'application sur l'onglet d'accueil : sans cela, l'écran qui vient
+              de planter serait rouvert aussitôt et l'erreur réapparaîtrait, donnant l'impression que le
+              bouton ne fait rien. Seul le repère de navigation est effacé, jamais les données. */}
+          <button onClick={() => { try { localStorage.removeItem("penup_nav"); } catch (e) {} try { const u = new URL(window.location.href); u.searchParams.set("_v", Date.now().toString(36)); window.location.replace(u.toString()); } catch (e) { window.location.reload(); } }}
             style={{ border: "none", cursor: "pointer", fontWeight: 800, fontSize: 14, color: "#fff", padding: "11px 20px", borderRadius: 12, background: "linear-gradient(135deg,#3F60AA,#2f4c86)", fontFamily: "inherit" }}>
             Recharger l'application
           </button>
