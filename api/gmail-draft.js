@@ -1,7 +1,6 @@
 import { verifyToken } from "@clerk/backend";
-import { createClient } from "@supabase/supabase-js";
 import { createDraft, gmailIsConfigured } from "../lib/gmail.js";
-import { BUCKET } from "./piece.js";
+import { BUCKET, storageAdmin } from "../lib/depot.js";
 
 // Création d'un BROUILLON dans la boîte Gmail connectée (GOOGLE_USER_EMAIL). N'ENVOIE JAMAIS :
 // le brouillon apparaît dans les brouillons Gmail, l'utilisateur le relit et l'envoie manuellement.
@@ -11,7 +10,7 @@ import { BUCKET } from "./piece.js";
 // attachments : [{ filename, mimeType, contentBase64 }]
 
 // Deux chemins d'arrivée pour un document :
-//   - « storagePath » : le navigateur l'a déposé directement dans le stockage (voir /api/piece), et on
+//   - « storagePath » : le navigateur l'a déposé directement dans le stockage (action « piece » de /api/outils), et on
 //     le relit ici côté serveur. C'est la voie normale, qui autorise les 25 Mo admis par Gmail — le
 //     fichier ne traverse jamais le corps d'une requête Vercel.
 //   - base64 dans la requête : voie de repli, bornée par le plafond de 4,5 Mo de la plateforme. Le
@@ -20,13 +19,6 @@ const MAX_PIECE = 25 * 1024 * 1024;      // limite de Gmail
 const MAX_TOTAL = 25 * 1024 * 1024;
 const MAX_INLINE = 3 * 1024 * 1024;      // limite de la voie de repli (corps de requête)
 const MAX_NB = 3;
-
-function storageAdmin() {
-  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const svc = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !svc) return null;
-  return createClient(url, svc, { auth: { persistSession: false } });
-}
 
 // Décodage prudent : une chaîne base64 invalide ne doit pas produire une pièce jointe corrompue
 // silencieusement, mais une erreur nette. On accepte une data-URL complète comme du base64 nu.
