@@ -2296,6 +2296,8 @@ ${ACCENT_CSS}
 .mapwrap .leaflet-bar a{background:#fff;}
 .site-marker{background:transparent;border:none;}
 .site-marker .halo{transform-origin:center;animation:halo 2.2s ease-out infinite;}
+.site-marker svg{transition:transform .16s ease;}
+.site-marker.marker-hover svg{transform:scale(1.55);transform-origin:50% 62%;filter:drop-shadow(0 2px 5px rgba(0,0,0,.6)) !important;}
 .site-tip{background:rgba(20,32,58,.92);color:#fff;border:none;border-radius:7px;font-weight:700;font-size:11px;box-shadow:0 2px 6px rgba(0,0,0,.45);padding:2px 8px;}
 .site-tip::before{display:none;}
 .route-badge{background:transparent;border:none;}
@@ -6090,6 +6092,8 @@ function Carte({ data, persist, go, focus }) {
   const [showRoads, setShowRoads] = useState(true);
   const [siteQuery, setSiteQuery] = useState("");
   const mapEl = useRef(null); const mapInst = useRef(null); const markersLayer = useRef(null); const routesLayer = useRef(null); const roadsLayer = useRef(null);
+  // Marqueurs indexés par id de site, pour la mise en avant au survol de la liste « Tous les sites ».
+  const markerById = useRef({});
   const [mapReady, setMapReady] = useState(false);
   const [LF, setLF] = useState(null);
   // Leaflet (≈ 150 Ko) est chargé à la demande, uniquement à l'ouverture de la carte :
@@ -6101,6 +6105,24 @@ function Carte({ data, persist, go, focus }) {
   }, []);
   // Recentrage depuis la liste latérale ou la navigation : vole vers le site sélectionné.
   const selectSite = (s) => { setSel(s.id); if (s.lat == null || s.lng == null || !mapInst.current) return; const zz = Math.max(mapInst.current.getZoom(), 12); mapInst.current.flyTo([s.lat, s.lng], zz, { duration: 0.6 }); };
+  // Survol d'une ligne de « Tous les sites » : le marqueur correspondant est mis en avant sur la carte
+  // (grossi, passé au premier plan, étiquette ouverte), sans recréer les marqueurs ni déplacer la carte.
+  const hoverSite = (x) => {
+    const m = markerById.current[x.id]; if (!m) return;
+    try {
+      m.setZIndexOffset(1500);
+      const el = m.getElement(); if (el) el.classList.add("marker-hover");
+      if (x.id !== sel) m.bindTooltip(x.label || "Site", { direction: "top", offset: [0, -20], className: "site-tip" }).openTooltip();
+    } catch (e) {}
+  };
+  const unhoverSite = (x) => {
+    const m = markerById.current[x.id]; if (!m) return;
+    try {
+      m.setZIndexOffset(x.id === sel ? 1000 : 0);
+      const el = m.getElement(); if (el) el.classList.remove("marker-hover");
+      if (x.id !== sel) m.unbindTooltip();
+    } catch (e) {}
+  };
   const s = sites.find((x) => x.id === sel); const sAcc = s ? accOf(s.accountId) : null; const tmeta = s ? (SITE_TYPES[s.type] || SITE_TYPES.pdv) : null;
   const saveSite = (site) => persist((p) => { const ex = p.sites.some((x) => x.id === site.id); return { ...p, sites: ex ? p.sites.map((x) => x.id === site.id ? site : x) : [...p.sites, site] }; });
   const delSite = (id) => { persist((p) => { const att = { ...(p.attachments || {}) }; delete att[id]; return ({ ...p, sites: p.sites.filter((x) => x.id !== id), contacts: (p.contacts || []).map((c) => c.siteId === id ? { ...c, siteId: "" } : c), deals: (p.deals || []).map((d) => { const nd = d.siteId === id ? { ...d, siteId: "" } : d; return nd.livraisonSiteId === id ? { ...nd, livraisonSiteId: "" } : nd; }), interactions: (p.interactions || []).map((i) => i.siteId === id ? { ...i, siteId: "" } : i), attachments: att }); }); if (sel === id) setSel(null); };
@@ -6243,6 +6265,7 @@ function Carte({ data, persist, go, focus }) {
   useEffect(() => {
     if (!mapReady || !markersLayer.current) return;
     const lg = markersLayer.current; lg.clearLayers();
+    markerById.current = {};
     shown.forEach((p) => {
       const acc = accOf(p.accountId); const col = siteColor(p, acc); const tp = (SITE_TYPES[p.type] || SITE_TYPES.pdv).shape; const on = p.id === sel;
       const W = on ? 38 : 30; const H = W * 26 / 24;
@@ -6251,6 +6274,7 @@ function Carte({ data, persist, go, focus }) {
       const m = LF.marker([p.lat, p.lng], { icon, zIndexOffset: on ? 1000 : 0, title: p.label }).addTo(lg);
       m.on("click", () => setSel(p.id));
       if (on) m.bindTooltip(p.label, { permanent: true, direction: "top", offset: [0, -W * 2 / 3], className: "site-tip" }).openTooltip();
+      markerById.current[p.id] = m;
     });
     // Prospects (onglet Prospection) : cercle pointillé couleur « Prospect » pour les distinguer des
     // établissements enregistrés. Clic → ouverture de l'onglet Prospection.
@@ -6332,7 +6356,7 @@ function Carte({ data, persist, go, focus }) {
         {(() => { const nq = normStr(siteQuery); const filteredSites = liveSites.filter((x) => { if (!nq) return true; const xa = accOf(x.accountId); return normStr((x.label || "") + " " + (x.adresse || "") + " " + (xa ? xa.enseigne : "") + " " + (SITE_TYPES[x.type] || SITE_TYPES.pdv).label).includes(nq); }); return (
         <div className="card" style={{ flex: "1 1 0", minHeight: 160, display: "flex", flexDirection: "column", overflow: "hidden" }}><div className="sec-h" style={{ flexShrink: 0 }}><h3 className="pu-display">Tous les sites</h3><span>{filteredSites.length}{filteredSites.length !== liveSites.length ? " / " + liveSites.length : ""}</span></div>
           <div style={{ position: "relative", marginBottom: 8, flexShrink: 0 }}><Search size={14} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--muted)" }} /><input value={siteQuery} onChange={(e) => setSiteQuery(e.target.value)} placeholder="Rechercher un site…" style={{ width: "100%", padding: "7px 9px 7px 30px", border: "1px solid var(--line)", borderRadius: 9, fontFamily: "inherit", fontSize: 13, background: "#fff" }} /></div>
-          <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>{filteredSites.length === 0 ? <div className="empty">Aucun site ne correspond.</div> : filteredSites.map((x) => { const xa = accOf(x.accountId); return (<div key={x.id} className="hrow" onClick={() => selectSite(x)} style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 6px", borderBottom: "1px solid #f0f3f9", cursor: "pointer", borderRadius: 8, background: x.id === sel ? "var(--blue-l)" : "transparent" }}><svg width="18" height="18" viewBox="-12 -16 24 26" style={{ flexShrink: 0 }}><path d={shapePath((SITE_TYPES[x.type] || SITE_TYPES.pdv).shape)} fill={siteColor(x, xa)} stroke="#fff" strokeWidth={1.5} /></svg><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600, fontSize: 13 }}>{x.label}</div><div style={{ fontSize: 11, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{(SITE_TYPES[x.type] || SITE_TYPES.pdv).label}{!x.lat && " · à géolocaliser"}</div></div></div>); })}</div>
+          <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>{filteredSites.length === 0 ? <div className="empty">Aucun site ne correspond.</div> : filteredSites.map((x) => { const xa = accOf(x.accountId); return (<div key={x.id} className="hrow" onClick={() => selectSite(x)} onMouseEnter={() => hoverSite(x)} onMouseLeave={() => unhoverSite(x)} style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 6px", borderBottom: "1px solid #f0f3f9", cursor: "pointer", borderRadius: 8, background: x.id === sel ? "var(--blue-l)" : "transparent" }}><svg width="18" height="18" viewBox="-12 -16 24 26" style={{ flexShrink: 0 }}><path d={shapePath((SITE_TYPES[x.type] || SITE_TYPES.pdv).shape)} fill={siteColor(x, xa)} stroke="#fff" strokeWidth={1.5} /></svg><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600, fontSize: 13 }}>{x.label}</div><div style={{ fontSize: 11, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{(SITE_TYPES[x.type] || SITE_TYPES.pdv).label}{!x.lat && " · à géolocaliser"}</div></div></div>); })}</div>
         </div>); })()}
       </div>
     </div>
