@@ -10,7 +10,7 @@ import {
   Layers, ShoppingCart, Navigation, Copy, Sparkles, Camera, Image as ImageIcon, Palette, Mic, MessageSquare, Video, Archive, ArchiveRestore,
   Download, Paperclip, Moon, Sun, ChevronRight, ChevronDown, CalendarDays,
   Wand2, Scissors, Check, CheckSquare, Tag as TagIcon, ListChecks, Bookmark,
-  Clock, Flame, Trophy, Award, Coffee,
+  Clock, Hourglass, Flame, Trophy, Award, Coffee,
   GitBranch, Save, FileDown, ArrowDown, ArrowUp, Undo2,
   Globe, Facebook, Instagram, Menu, Home,
   Filter as FunnelIcon, PieChart as PieIcon
@@ -8884,7 +8884,7 @@ function CommandCenter({ data, persist, go }) {
     {dupOpen && <EventDupModal groups={evDups} accName={accName} evMeta={evMeta} onConfirm={applyEvDups} onClose={() => setDupOpen(false)} />}
     {total === 0 && <div className="card" style={{ textAlign: "center", padding: "34px 16px", color: "var(--muted)" }}><CheckCircle2 size={34} style={{ color: "var(--green)" }} /><div className="pu-display" style={{ fontSize: 16, marginTop: 8, color: "var(--ink)" }}>Tout est à jour</div><div style={{ fontSize: 12.5, marginTop: 4 }}>Aucune relance en retard, aucun RDV du jour, aucune facture échue. Planifie une action depuis le calendrier ou la prospection.</div></div>}
     <Section title="En retard" color="#FF5A45" icon="⚠️" count={overdue.length} action={evDups.length > 0 ? <button className="btn btn-g btn-s" onClick={() => setDupOpen(true)} title="Regrouper les relances recréées plusieurs fois pour le même interlocuteur et supprimer les répétitions"><GitBranch size={14} /> Doublons ({evDups.reduce((n, g) => n + g.length - 1, 0)})</button> : null}>
-      {overdue.map((e) => <Row key={e.id} onClick={() => evGo(e)} icon={evMeta(e).icon} title={evLabel(e)} sub={evSub(e)} right={<span style={{ color: "var(--red)" }}>{relDate(e.date)}</span>} actions={<><button className="iconbtn" title="Reporter à demain" onClick={() => snooze(e.id)}><ChevronRight size={15} /></button><button className="iconbtn" title="Marquer fait" onClick={() => markDone(e.id)}><CheckCircle2 size={15} /></button><button className="iconbtn" title="Supprimer l'événement" onClick={() => delEventRow(e)} style={{ color: "var(--red)" }}><X size={15} /></button></>} />)}
+      {overdue.map((e) => <Row key={e.id} onClick={() => evGo(e)} icon={evMeta(e).icon} title={evLabel(e)} sub={evSub(e)} right={<span style={{ color: "var(--red)" }}>{relDate(e.date)}</span>} actions={<><button className="iconbtn" title="Reporter à demain" onClick={() => snooze(e.id)}><Hourglass size={15} /></button><button className="iconbtn" title="Marquer fait" onClick={() => markDone(e.id)}><CheckCircle2 size={15} /></button><button className="iconbtn" title="Supprimer l'événement" onClick={() => delEventRow(e)} style={{ color: "var(--red)" }}><X size={15} /></button></>} />)}
     </Section>
     <Section title="Aujourd'hui" color="#3F60AA" icon="📅" count={todayEv.length}>
       {todayEv.map((e) => <Row key={e.id} onClick={() => evGo(e)} icon={evMeta(e).icon} title={evLabel(e)} sub={evSub(e)} right={e.heure || null} actions={<><button className="iconbtn" title="Marquer fait" onClick={() => markDone(e.id)}><CheckCircle2 size={15} /></button><button className="iconbtn" title="Supprimer l'événement" onClick={() => delEventRow(e)} style={{ color: "var(--red)" }}><X size={15} /></button></>} />)}
