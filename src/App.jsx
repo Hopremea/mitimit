@@ -760,6 +760,20 @@ function ClaudeCostChart({ usage }) {
       </ResponsiveContainer>
     </div>}
     <p style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 12, lineHeight: 1.5 }}>Coût par jour (tokens au tarif Claude Haiku 4.5 : {CLAUDE_PRICE_USD.in} $/M entrée, {CLAUDE_PRICE_USD.out} $/M sortie + recherche web ≈ 10 $ / 1000, convertis à 1 $ = {CLAUDE_USD_EUR} €). L'historique journalier est enregistré depuis la mise en place de ce suivi : les dépenses antérieures figurent uniquement dans le cumul ci-dessus.</p>
+    <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+      <div style={{ fontWeight: 800, fontSize: 12.5, marginBottom: 6 }}>Sources gratuites interrogées avant l'IA</div>
+      <div style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.6 }}>Pour limiter la facture, MITMIT interroge d'abord ces sources publiques <strong>gratuites et sans clé</strong> ; l'IA payante ne complète plus que ce qui reste introuvable :
+        <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+          <li><strong>SIRENE / annuaire-entreprises</strong> — identité légale, dirigeant, et SIRET exact du magasin même dans une chaîne à plusieurs centaines d'établissements.</li>
+          <li><strong>OpenStreetMap</strong> (Overpass + Nominatim) — magasins d'une zone, adresse, téléphone, site, e-mail et horaires d'ouverture.</li>
+          <li><strong>Base Adresse Nationale</strong> et <strong>geo.api.gouv.fr</strong> — normalisation d'adresse, ville depuis le code postal, département et région.</li>
+          <li><strong>BODACC</strong> — alerte si une procédure collective, liquidation ou radiation est publiée sur le SIREN.</li>
+          <li><strong>Wikidata</strong> — site officiel et réseaux sociaux des enseignes nationales.</li>
+          <li><strong>Site officiel du magasin</strong> — lecture de la page d'accueil, « contact » et mentions légales pour en extraire l'e-mail et le téléphone publiés (indépendants uniquement ; un numéro dont l'indicatif ne correspond pas au département de la fiche est écarté).</li>
+        </ul>
+        <div style={{ marginTop: 6 }}>Les e-mails et téléphones <strong>nominatifs</strong> restent le seul domaine sans source publique fiable : ils passent encore par l'IA, désormais plafonnée en nombre de recherches web — et guidée par les faits ci-dessus, ce qui réduit d'autant ses recherches.</div>
+      </div>
+    </div>
   </div>);
 }
 
@@ -3001,6 +3015,11 @@ async function aiFindLinks(query, persistUsage) {
 // Recherche web des horaires d'ouverture habituels d'un magasin (fiche Google / site officiel).
 // Renvoie une chaîne au format français jour par jour, directement exploitable par parseHoraires
 // (ex. « Lun 10h-19h; Mar 10h-19h; … Dim fermé »). Chaîne vide si aucun horaire fiable trouvé.
+// Horaires depuis OpenStreetMap (gratuit) puis, seulement si rien trouvé, via l'IA (payant).
+async function findHoraires(nom, ville, query, persistUsage) {
+  try { const p = await osmFindPlace(nom, ville); if (p && p.horaires) return p.horaires; } catch (e) {}
+  return aiFindHoraires(query, persistUsage);
+}
 async function aiFindHoraires(query, persistUsage) {
   const prompt = "Recherche les horaires d'ouverture HABITUELS de ce magasin (fiche Google Business / site officiel) : \"" + query + "\". " +
     "N'invente RIEN : si tu ne trouves pas d'horaires fiables pour CE magasin précis, renvoie une chaîne vide. " +
@@ -3702,7 +3721,7 @@ function HorairesBulk({ data, persist, onClose }) {
     setSt((s) => ({ ...s, [id]: { busy: true } }));
     const q = [o.s.label, o.acc && o.acc.enseigne, o.s.adresse || (o.acc && o.acc.ville)].filter(Boolean).join(" ");
     try {
-      const h = await aiFindHoraires(q, persistUsage);
+      const h = await findHoraires(o.s.label, (o.acc && o.acc.ville) || "", q, persistUsage);
       if (h) { applyHoraires(id, h); setSt((s) => ({ ...s, [id]: { busy: false, applied: true, horaires: h } })); }
       else setSt((s) => ({ ...s, [id]: { busy: false, msg: "Aucun horaire fiable trouvé — à saisir manuellement." } }));
     } catch (e) { setSt((s) => ({ ...s, [id]: { busy: false, msg: "Recherche IA indisponible ici (fonctionne dans l'app Claude)." } })); }
@@ -3984,10 +4003,19 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
     setAiBusy(true); setAiMsg(null);
     const usage = (u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }));
     const q = [s.label, acc && acc.enseigne, s.adresse || (acc && acc.ville)].filter(Boolean).join(" ");
+    const ville = (acc && acc.ville) || "";
     try {
-      // Un seul appel IA pour liens + horaires (au lieu de deux) : moitié moins de recherches web payantes.
-      const links = await aiFindLinksHoraires(q, usage, !String(s.horaires || "").trim());
-      const horaires = links.horaires || "";
+      // Étage 1 GRATUIT : OpenStreetMap (liens + horaires du point de vente) puis Wikidata pour les
+      // liens officiels de l'enseigne. L'IA payante ne prend le relais que sur ce qui manque encore.
+      const free = { site: "", facebook: "", instagram: "", horaires: "" };
+      try { const pl = await osmFindPlace(s.label || (acc && acc.enseigne), ville); if (pl) { free.site = pl.site; free.facebook = pl.facebook; free.instagram = pl.instagram; free.horaires = pl.horaires; } } catch (e) {}
+      if (!free.site && acc && acc.enseigne) { try { const w = await wikidataBrand(acc.enseigne); if (w) { free.site = free.site || w.site; free.facebook = free.facebook || w.facebook; free.instagram = free.instagram || w.instagram; } } catch (e) {} }
+      const needHoraires = !String(s.horaires || "").trim() && !free.horaires;
+      const needLinks = (!s.site && !free.site) || (!s.facebook && !free.facebook) || (!s.instagram && !free.instagram);
+      // Un seul appel IA pour liens + horaires (au lieu de deux) — et zéro appel si tout est déjà couvert.
+      const ai = (needLinks || needHoraires) ? await aiFindLinksHoraires(q, usage, needHoraires) : { site: "", facebook: "", instagram: "", horaires: "" };
+      const links = { site: free.site || ai.site, facebook: free.facebook || ai.facebook, instagram: free.instagram || ai.instagram };
+      const horaires = free.horaires || ai.horaires || "";
       const patch = {}; const got = [];
       if (links.site && !s.site) { patch.site = links.site; got.push("site web"); }
       if (links.facebook && !s.facebook) { patch.facebook = links.facebook; got.push("Facebook"); }
@@ -4004,7 +4032,7 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
     const usage = (u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }));
     const q = [s.label, acc && acc.enseigne, s.adresse || (acc && acc.ville)].filter(Boolean).join(" ");
     try {
-      const h = await aiFindHoraires(q, usage);
+      const h = await findHoraires(s.label, (acc && acc.ville) || "", q, usage);
       if (h) { saveSite({ ...s, horaires: h }); setHorMsg(null); }
       else setHorMsg("Aucun horaire fiable trouvé pour ce magasin — à saisir manuellement via « Modifier ».");
     } catch (e) { setHorMsg("Recherche IA indisponible ici (fonctionne dans l'app Claude)."); }
@@ -6639,7 +6667,7 @@ function natureJuridiqueLabel(code) {
 }
 // Recherche officielle (annuaire-entreprises / base SIRENE) — GRATUITE, sans clé ni crédit IA. À partir
 // d'un SIREN/SIRET ou d'un nom (+ ville), renvoie l'identité légale vérifiée d'une entreprise française.
-async function lookupSirene(query) {
+async function lookupSirene(query, villeHint) {
   const q = String(query || "").trim(); if (!q) return null;
   const res = await fetch("https://recherche-entreprises.api.gouv.fr/search?q=" + encodeURIComponent(q) + "&per_page=1");
   if (!res.ok) throw new Error("API " + res.status);
@@ -6649,22 +6677,166 @@ async function lookupSirene(query) {
   const dir = (r.dirigeants || []).find((d) => d.type_dirigeant === "personne physique") || null;
   const nb = r.nombre_etablissements || 0;
   const mono = nb === 1; // société mono-établissement → le siège EST l'établissement (adresse/SIRET fiables)
+  // Société MULTI-établissements : l'API renvoie les établissements correspondant à la requête
+  // (matching_etablissements). Si l'un d'eux est dans la ville attendue, on tient le SIRET et
+  // l'adresse EXACTS du magasin — gratuitement, ce que l'IA cherchait au prix fort.
+  const vh = stripAccentsLow(String(villeHint || ""));
+  const etab = !mono && vh ? (r.matching_etablissements || []).find((e) =>
+    String(e.etat_administratif || "A") === "A" && (stripAccentsLow(e.libelle_commune || "") === vh || String(e.code_postal || "") === String(villeHint || "").trim())
+  ) : null;
   return {
     siren: r.siren || "",
     raisonSociale: r.nom_raison_sociale || r.nom_complet || "",
     formeJuridique: natureJuridiqueLabel(r.nature_juridique),
-    // Adresse / SIRET renseignés seulement si mono-établissement (sinon = siège, faux pour un magasin de chaîne).
-    siret: mono ? (siege.siret || "") : "",
-    adresse: mono ? (siege.adresse || "") : "",
-    cp: mono ? (siege.code_postal || "") : "",
-    ville: mono ? (siege.libelle_commune || "") : "",
+    // Adresse / SIRET renseignés si mono-établissement OU si un établissement correspond à la ville.
+    siret: mono ? (siege.siret || "") : (etab ? (etab.siret || "") : ""),
+    adresse: mono ? (siege.adresse || "") : (etab ? (etab.adresse || "") : ""),
+    cp: mono ? (siege.code_postal || "") : (etab ? (etab.code_postal || "") : ""),
+    ville: mono ? (siege.libelle_commune || "") : (etab ? (etab.libelle_commune || "") : ""),
     dirigeantNom: dir ? (dir.nom || "") : "",
     dirigeantPrenom: dir ? ((dir.prenoms || "").split(/\s+/)[0] || "") : "",
     dirigeantFonction: dir ? (dir.qualite && dir.qualite !== "Autre" ? dir.qualite : "Dirigeant") : "",
     siegeAdresse: siege.adresse || "",
     nbEtab: nb,
     mono,
+    etabMatch: !!etab,
   };
+}
+// ===== Sources GRATUITES et sans clé : BAN, geo.api.gouv, BODACC, Wikidata, OpenStreetMap =====
+// Toutes best-effort : chaque échec est silencieux et l'IA (payante) ne sert plus que de complément.
+// Normalisation / complétion d'adresse via la Base Adresse Nationale (api-adresse.data.gouv.fr).
+async function banNormalize(q) {
+  const s = String(q || "").trim(); if (!s) return null;
+  const res = await fetch("https://api-adresse.data.gouv.fr/search/?limit=1&q=" + encodeURIComponent(s));
+  if (!res.ok) return null;
+  const j = await res.json(); const f = (j.features || [])[0]; if (!f) return null;
+  const pr = f.properties || {}; const co = (f.geometry && f.geometry.coordinates) || [];
+  if ((pr.score || 0) < 0.5) return null; // correspondance trop incertaine : on n'invente rien
+  return { adresse: pr.name || "", cp: pr.postcode || "", ville: pr.city || "", label: pr.label || "", lat: co[1] != null ? co[1] : null, lng: co[0] != null ? co[0] : null };
+}
+// Ville depuis un code postal (geo.api.gouv.fr) — gratuit, sans clé.
+async function geoVilleFromCp(cp) {
+  const c = String(cp || "").replace(/\D/g, ""); if (c.length !== 5) return "";
+  const res = await fetch("https://geo.api.gouv.fr/communes?codePostal=" + c + "&fields=nom&limit=1");
+  if (!res.ok) return "";
+  const j = await res.json(); return (j[0] && j[0].nom) || "";
+}
+// Alerte BODACC (annonces légales, open data) : signale une procédure collective / liquidation /
+// radiation récente sur le SIREN — pour ne pas démarcher un prospect en difficulté sans le savoir.
+async function bodaccCheck(siren) {
+  const s = String(siren || "").replace(/\D/g, ""); if (s.length !== 9) return "";
+  // Filtre sur le champ `registre` (et non la recherche plein texte `q`, qui ne filtre pas et
+  // renverrait des annonces sans rapport → fausses alertes sur les fiches).
+  const res = await fetch("https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/annonces-commerciales/records?limit=5&order_by=dateparution%20desc&where=" + encodeURIComponent('registre like "' + s + '"'));
+  if (!res.ok) return "";
+  const j = await res.json();
+  const bad = (j.results || []).find((r) => /collectiv|liquidation|redressement|sauvegarde|radiation/i.test([r.familleavis_lib, r.typeavis_lib].filter(Boolean).join(" ")));
+  return bad ? ("⚠ BODACC " + (bad.dateparution || "") + " : " + (bad.familleavis_lib || bad.typeavis_lib || "annonce légale") + ".") : "";
+}
+// Fiche Wikidata d'une enseigne / marque : site officiel, Facebook, Instagram — gratuit, sans clé.
+async function wikidataBrand(name) {
+  const q = String(name || "").trim(); if (!q) return null;
+  const s = await fetch("https://www.wikidata.org/w/api.php?action=wbsearchentities&format=json&language=fr&uselang=fr&type=item&limit=1&origin=*&search=" + encodeURIComponent(q));
+  if (!s.ok) return null;
+  const sj = await s.json(); const id = sj.search && sj.search[0] && sj.search[0].id; if (!id) return null;
+  const c = await fetch("https://www.wikidata.org/w/api.php?action=wbgetclaims&format=json&origin=*&entity=" + id);
+  if (!c.ok) return null;
+  const cj = await c.json(); const cl = (cj.claims || {});
+  const val = (p) => { const a = cl[p]; const v = a && a[0] && a[0].mainsnak && a[0].mainsnak.datavalue; return v && v.value != null ? String(v.value) : ""; };
+  const fb = val("P2013"), ig = val("P2003");
+  return { site: val("P856"), facebook: fb ? "https://www.facebook.com/" + fb : "", instagram: ig ? "https://www.instagram.com/" + ig : "" };
+}
+// Géocodage d'une zone (ville, département, région) vers une « area » OpenStreetMap, avec cache en
+// mémoire (respect de la politique Nominatim ~1 req/s : les villes se répètent lors des lots).
+const _nominatimCache = new Map();
+async function nominatimArea(q) {
+  const key = String(q || "").trim().toLowerCase(); if (!key) return null;
+  if (_nominatimCache.has(key)) return _nominatimCache.get(key);
+  const res = await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&accept-language=fr&q=" + encodeURIComponent(q));
+  const r = res.ok ? ((await res.json())[0] || null) : null;
+  const out = r ? { areaId: r.osm_type === "relation" ? 3600000000 + Number(r.osm_id) : (r.osm_type === "way" ? 2400000000 + Number(r.osm_id) : null), lat: +r.lat, lng: +r.lon, bbox: r.boundingbox } : null;
+  _nominatimCache.set(key, out);
+  return out;
+}
+// Traduction basique des horaires OpenStreetMap (« Mo-Sa 10:00-19:00 ») vers le format français.
+function osmHoursToFr(h) {
+  let t = String(h || "").trim(); if (!t) return "";
+  t = t.replace(/\bPH\s+off\b/gi, "").replace(/\bPH\b/gi, "jours fériés");
+  const days = { Mo: "Lun", Tu: "Mar", We: "Mer", Th: "Jeu", Fr: "Ven", Sa: "Sam", Su: "Dim" };
+  Object.entries(days).forEach(([en, fr]) => { t = t.replace(new RegExp("\\b" + en + "\\b", "g"), fr); });
+  t = t.replace(/\boff\b/gi, "fermé").replace(/\bclosed\b/gi, "fermé");
+  t = t.replace(/(\d{1,2}):(\d{2})/g, (m, hh, mm) => hh + "h" + (mm === "00" ? "" : mm));
+  return t.replace(/\s*;\s*/g, "; ").replace(/\s+/g, " ").trim();
+}
+// Regex ANCRÉE (^…$) : sans les ancres, Overpass fait une correspondance par sous-chaîne et
+// « car_parts » ou « party » ressortiraient à cause de « art ».
+// Zone téléphonique française par département (01 IDF, 02 Nord-Ouest, 03 Nord-Est, 04 Sud-Est,
+// 05 Sud-Ouest). Sert à écarter un numéro manifestement étranger à la ville de la fiche : une page
+// web contient souvent des numéros sans rapport (siège, partenaire, gabarit du site).
+const TEL_ZONES = {
+  1: ["75", "77", "78", "91", "92", "93", "94", "95"],
+  2: ["14", "18", "22", "27", "28", "29", "35", "36", "37", "41", "44", "45", "49", "50", "53", "56", "61", "72", "76", "85"],
+  3: ["02", "08", "10", "21", "25", "39", "51", "52", "54", "55", "57", "58", "59", "60", "62", "67", "68", "70", "71", "80", "88", "89", "90"],
+  4: ["01", "03", "04", "05", "06", "07", "11", "13", "15", "26", "30", "34", "38", "42", "43", "48", "63", "66", "69", "73", "74", "83", "84", "2A", "2B"],
+  5: ["09", "12", "16", "17", "19", "23", "24", "31", "32", "33", "40", "46", "47", "64", "65", "79", "81", "82", "86", "87"],
+};
+const DEPT_TEL_ZONE = {}; Object.entries(TEL_ZONES).forEach(([z, ds]) => ds.forEach((d) => { DEPT_TEL_ZONE[d] = +z; }));
+// true si le numéro est plausible pour ce code postal. Ne juge QUE les fixes 01–05 : les mobiles
+// (06/07), les numéros non géographiques (09) et les services (08) sont acceptés sans contrôle,
+// de même que tout cas non tranchable (département inconnu, outre-mer).
+function telCoherent(tel, cp) {
+  const d = String(tel || "").replace(/\D/g, ""); if (!/^0[1-5]/.test(d)) return true;
+  const dep = cpToDepartement(cp); if (!dep || dep.length > 2) return true;
+  const z = DEPT_TEL_ZONE[dep]; if (!z) return true;
+  return +d[1] === z;
+}
+// Lecture GRATUITE des coordonnées publiques sur le site du magasin (relais serveur : le navigateur
+// ne peut pas lire un site tiers). Zéro token, zéro recherche web facturée.
+async function scrapeContact(url) {
+  const u = String(url || "").trim(); if (!u) return null;
+  const res = await fetch("/api/scrape-contact", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ url: u }) });
+  if (!res.ok) return null;
+  const j = await res.json();
+  return { email: (j && j.email) || "", telephone: (j && j.telephone) || "", telephones: (j && j.telephones) || [] };
+}
+const OSM_SHOP_TAGS = "^(toys|games|craft|hobby|model|art|stationery)$";
+const osmTagsToStore = (e) => { const t = e.tags || {}; return {
+  nom: t.name || "", enseigne: t.brand || "",
+  adresse: [t["addr:housenumber"], t["addr:street"]].filter(Boolean).join(" "), cp: t["addr:postcode"] || "", ville: t["addr:city"] || "",
+  telephone: t.phone || t["contact:phone"] || "", email: t.email || t["contact:email"] || "",
+  site: t.website || t["contact:website"] || "", facebook: t["contact:facebook"] || "", instagram: t["contact:instagram"] || "",
+  horaires: osmHoursToFr(t.opening_hours || ""),
+  lat: e.lat != null ? e.lat : (e.center && e.center.lat) || null, lng: e.lon != null ? e.lon : (e.center && e.center.lon) || null,
+  shop: t.shop || "",
+}; };
+// Overpass renvoie ses erreurs de surcharge en HTTP 200 avec une page HTML : on vérifie donc le
+// contenu, pas seulement le statut. En cas d'échec, l'appelant retombe silencieusement sur l'IA.
+async function overpassQuery(q) {
+  const res = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "data=" + encodeURIComponent(q) });
+  if (!res.ok) throw new Error("Overpass " + res.status);
+  const txt = await res.text();
+  if (!txt.trim().startsWith("{")) throw new Error("Overpass indisponible (serveur occupé)");
+  return (JSON.parse(txt).elements || []);
+}
+// Tous les magasins jouets / jeux / loisirs créatifs d'une zone, depuis OpenStreetMap — GRATUIT :
+// c'est le premier étage de la recherche de prospects par zone (l'IA ne sert plus qu'en complément).
+async function osmSearchStores(zone) {
+  const a = await nominatimArea(/france/i.test(zone) ? zone : zone + ", France"); if (!a) return [];
+  let sel;
+  if (a.areaId) sel = `area(${a.areaId})->.z;nwr["shop"~"${OSM_SHOP_TAGS}"]["name"](area.z);`;
+  else if (a.bbox && a.bbox.length === 4) sel = `nwr["shop"~"${OSM_SHOP_TAGS}"]["name"](${a.bbox[0]},${a.bbox[2]},${a.bbox[1]},${a.bbox[3]});`;
+  else return [];
+  const els = await overpassQuery(`[out:json][timeout:25];${sel}out tags center 80;`);
+  return els.map(osmTagsToStore).filter((x) => x.nom);
+}
+// UN établissement précis (nom + ville) sur OpenStreetMap : téléphone, site, horaires… — GRATUIT.
+async function osmFindPlace(name, ville) {
+  const n = String(name || "").trim(); const v = String(ville || "").trim(); if (!n || !v) return null;
+  const a = await nominatimArea(v + ", France"); if (!a || !a.areaId) return null;
+  const rx = n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/["']/g, ".");
+  const els = await overpassQuery(`[out:json][timeout:15];area(${a.areaId})->.z;nwr["name"~"${rx}",i](area.z);out tags center 5;`);
+  const m = els.map(osmTagsToStore).find((x) => x.nom);
+  return m || null;
 }
 // Grandes enseignes nationales : le site web et les réseaux sociaux sont ceux de la MARQUE, pas du
 // magasin — on ne paie pas de recherches web pour les retrouver fiche par fiche.
@@ -6708,42 +6880,100 @@ async function aiEnrichProspect(p, persistUsage, instruction) {
   //    et, pour les grandes enseignes, sans chercher le site web ni les réseaux sociaux.
   const has = (v) => Boolean(String(v || "").trim());
   const out = { nom: "", site: "", facebook: "", instagram: "", siren: "", siret: "", raisonSociale: "", formeJuridique: "", adresse: "", cp: "", ville: "", departement: "", region: "", telephone: "", email: "", contactPrenom: "", contactNom: "", contactFonction: "", contactEmail: "", contactTel: "", contactSource: "", notes: "", confiance: "?", source: "", usage: null };
-  // 1) Registre officiel SIRENE — gratuit, sans crédit IA.
+  // 1) Registre officiel SIRENE — gratuit, sans crédit IA. L'indice « ville » permet, pour une
+  //    société multi-établissements, de récupérer le SIRET et l'adresse EXACTS du magasin.
   try {
+    const byId = has(p.siret) || has(p.siren); // recherche par identifiant : résultat non ambigu
     const qs = (p.siret || p.siren || [p.raisonSociale || p.nom || p.enseigne, p.ville].filter(Boolean).join(" ")).trim();
     if (qs) {
-      const r = await lookupSirene(qs);
-      if (r) {
+      const r = await lookupSirene(qs, p.ville || p.cp);
+      // Garde-fou anti-confusion d'enseigne : une recherche PAR NOM est approximative et peut
+      // renvoyer une autre société (un SIRET King Jouet sur une fiche JouéClub serait une erreur
+      // grave, cf. détection d'anomalies). On n'accepte le résultat que si la raison sociale
+      // partage un mot significatif avec le nom / l'enseigne de la fiche.
+      const coherent = byId || (() => {
+        if (!r) return false;
+        const tok = (s) => new Set(stripAccentsLow(String(s || "")).split(/[^a-z0-9]+/).filter((w) => w.length >= 4));
+        const cible = new Set([...tok(p.nom), ...tok(p.enseigne), ...tok(p.raisonSociale)]);
+        if (!cible.size) return false;
+        return [...tok(r.raisonSociale)].some((w) => cible.has(w));
+      })();
+      if (r && coherent) {
         out.siren = r.siren || ""; out.raisonSociale = r.raisonSociale || ""; out.formeJuridique = r.formeJuridique || "";
-        if (r.mono) { out.siret = r.siret || ""; out.adresse = r.adresse || ""; out.cp = r.cp || ""; out.ville = r.ville || ""; }
+        if (r.mono || r.etabMatch) { out.siret = r.siret || ""; out.adresse = r.adresse || ""; out.cp = r.cp || ""; out.ville = r.ville || ""; }
         out.contactNom = r.dirigeantNom || ""; out.contactPrenom = r.dirigeantPrenom || ""; out.contactFonction = r.dirigeantFonction || "";
         if (r.dirigeantNom) out.contactSource = "RNE/INSEE (annuaire-entreprises)";
         out.source = "SIRENE (annuaire-entreprises)"; out.confiance = "haute";
       }
     }
   } catch (e) { /* registre indisponible : l'IA prendra le relais pour ces champs */ }
-  // 2) Département + région depuis le code postal — gratuit, sans IA.
+  // 1bis) Alerte BODACC (gratuit) : procédure collective / liquidation / radiation sur le SIREN.
+  try { const alerte = await bodaccCheck(p.siren || out.siren); if (alerte) out.notes = alerte; } catch (e) {}
+  // 2) Adresse et géographie — gratuit, sans IA : BAN pour normaliser / compléter l'adresse,
+  //    geo.api.gouv pour la ville depuis le CP, table locale pour département + région.
+  try {
+    if (has(p.adresse) && (!has(p.cp) || !has(p.ville)) && (!has(out.cp) || !has(out.ville))) {
+      const b = await banNormalize([p.adresse, p.cp, p.ville].filter(Boolean).join(" "));
+      if (b) { if (!has(out.cp)) out.cp = b.cp; if (!has(out.ville)) out.ville = b.ville; }
+    }
+    if (!has(p.ville) && !has(out.ville) && (has(p.cp) || has(out.cp))) { const v = await geoVilleFromCp(p.cp || out.cp); if (v) out.ville = v; }
+  } catch (e) {}
   const dep = cpToDepartement(p.cp || out.cp);
   if (dep && !has(p.departement)) { out.departement = dep; if (!has(p.region)) out.region = DEPT_REGION[dep] || ""; }
-  // 3) Champs restants → IA. Grandes enseignes : ni site web ni réseaux sociaux (ceux de la marque).
+  // 2bis) OpenStreetMap (gratuit) : téléphone, e-mail, site, réseaux du magasin si la fiche
+  //    a un nom + une ville — encore des champs que l'IA n'aura pas à chercher.
   const grande = isGrandeEnseigne(p);
+  try {
+    const needOsm = !has(p.telephone) || !has(p.email) || (!grande && (!has(p.site) || !has(p.facebook) || !has(p.instagram)));
+    if (needOsm) {
+      const place = await osmFindPlace(p.nom || p.enseigne, p.ville || out.ville);
+      if (place) {
+        if (!has(out.telephone)) out.telephone = place.telephone;
+        if (!has(out.email)) out.email = place.email;
+        if (!grande) { if (!has(out.site)) out.site = place.site; if (!has(out.facebook)) out.facebook = place.facebook; if (!has(out.instagram)) out.instagram = place.instagram; }
+        if (!has(out.adresse) && place.adresse) { out.adresse = place.adresse; if (!has(out.cp)) out.cp = place.cp; if (!has(out.ville)) out.ville = place.ville; }
+        if (place.telephone || place.site || place.email) out.source = out.source ? out.source + " + OpenStreetMap" : "OpenStreetMap";
+      }
+    }
+  } catch (e) {}
+  // 2ter) Site du magasin lu par le relais serveur (GRATUIT) : e-mail et téléphone publiés sur la
+  //    page d'accueil / contact / mentions légales. Inutile pour une grande enseigne (site de la
+  //    marque, coordonnées du siège) — on ne le fait que pour les indépendants.
+  const siteConnu = p.site || out.site;
+  if (!grande && has(siteConnu) && (!has(p.email) && !has(out.email) || !has(p.telephone) && !has(out.telephone))) {
+    try {
+      const sc = await scrapeContact(siteConnu);
+      if (sc) {
+        if (sc.email && !has(out.email) && !has(p.email)) out.email = sc.email;
+        if (!has(out.telephone) && !has(p.telephone)) {
+          // Une page web contient souvent des numéros sans rapport : on ne retient que le premier
+          // qui soit géographiquement plausible pour la ville de la fiche.
+          const cpRef = p.cp || out.cp;
+          const tel = [sc.telephone, ...(sc.telephones || [])].filter(Boolean).find((t) => telCoherent(t, cpRef));
+          if (tel) out.telephone = tel;
+        }
+        if (sc.email || out.telephone) out.source = out.source ? out.source + " + site officiel" : "site officiel";
+      }
+    } catch (e) {}
+  }
+  // 3) Champs restants → IA. Grandes enseignes : ni site web ni réseaux sociaux (ceux de la marque).
   const misses = [];
   const need = (cond, key, desc) => { if (cond) misses.push({ key, desc }); };
   need(!has(p.nom) && !has(out.nom), "nom", "nom commercial de CE point de vente (ex. « King Jouet Cahors »), reconstitué depuis les autres données");
   need(!has(p.adresse) && !has(out.adresse), "adresse", "adresse postale complète de l'établissement");
   need(!has(p.cp) && !has(out.cp), "cp", "code postal");
   need(!has(p.ville) && !has(out.ville), "ville", "ville");
-  need(!has(p.telephone) && !has(p.contactTel), "telephone", "téléphone du magasin, format français");
-  need(!has(p.email) && !has(p.contactEmail), "email", "adresse e-mail GÉNÉRIQUE du magasin (accueil, contact), publiée sur le site officiel, la fiche magasin de l'enseigne ou la fiche Google — PAS celle d'une personne");
-  need(!grande && !has(p.site), "site", "URL du site web officiel de l'établissement");
-  need(!grande && !has(p.facebook), "facebook", "URL de la page Facebook officielle");
-  need(!grande && !has(p.instagram), "instagram", "URL du compte Instagram officiel");
+  need(!has(p.telephone) && !has(p.contactTel) && !has(out.telephone), "telephone", "téléphone du magasin, format français");
+  need(!has(p.email) && !has(p.contactEmail) && !has(out.email), "email", "adresse e-mail GÉNÉRIQUE du magasin (accueil, contact), publiée sur le site officiel, la fiche magasin de l'enseigne ou la fiche Google — PAS celle d'une personne");
+  need(!grande && !has(p.site) && !has(out.site), "site", "URL du site web officiel de l'établissement");
+  need(!grande && !has(p.facebook) && !has(out.facebook), "facebook", "URL de la page Facebook officielle");
+  need(!grande && !has(p.instagram) && !has(out.instagram), "instagram", "URL du compte Instagram officiel");
   need(!has(p.siret) && !has(out.siret), "siret", "SIRET (14 chiffres) de CET établissement à cette adresse — il commence par le SIREN de la société exploitante ; JAMAIS le SIRET d'un magasin d'une AUTRE enseigne, même dans la même ville ou zone (un SIRET King Jouet sur une fiche JouéClub est une erreur grave) ; vide en cas de doute");
   need(!has(p.siren) && !has(out.siren), "siren", "SIREN (9 chiffres) de la société qui exploite RÉELLEMENT ce magasin (ou RNA « W… » pour une association) — celui de la centrale seulement si succursale intégrée, sinon la société propre de l'adhérent/franchisé (fréquent chez JouéClub) ; jamais l'identifiant d'une autre enseigne ; vide en cas de doute");
   need(!has(p.raisonSociale) && !has(out.raisonSociale), "raisonSociale", "raison sociale (registres officiels)");
   need(!has(p.formeJuridique) && !has(out.formeJuridique), "formeJuridique", "forme juridique");
   need(!has(p.contactNom) && !has(out.contactNom), "contact", "dirigeant ou responsable identifié (prénom, nom, fonction, e-mail, téléphone, source de l'info)");
-  need(!has(p.notes), "notes", "une phrase factuelle (univers produits, implantation)");
+  need(!has(p.notes) && !has(out.notes), "notes", "une phrase factuelle (univers produits, implantation)");
   const consigne = (instruction || "").trim();
   if (!misses.length && !consigne) return out; // tout est couvert par les sources gratuites : zéro appel IA
   const schemaObj = {};
@@ -6751,13 +6981,29 @@ async function aiEnrichProspect(p, persistUsage, instruction) {
   if (consigne) schemaObj.notes = schemaObj.notes || "";
   schemaObj.confiance = "haute/moyenne/faible"; schemaObj.source = "";
   const cible = [p.nom, p.enseigne && p.enseigne !== p.nom ? p.enseigne : "", p.adresse || out.adresse, [p.cp || out.cp, p.ville || out.ville].filter(Boolean).join(" ")].filter(Boolean).join(" · ") || "(nom non renseigné — à identifier depuis les données ci-dessous)";
-  const sys = "Tu enrichis la fiche d'un point de vente français (jouets / loisirs créatifs) à partir du web : site officiel, fiche Google, store locator de l'enseigne, et registres officiels si besoin. Tu ne recherches QUE les champs demandés — les autres sont déjà connus. Tu n'inventes JAMAIS une donnée (identifiant, adresse, courriel, nom) : en cas de doute, tu laisses le champ vide. Tu réponds UNIQUEMENT par du JSON valide.";
-  const knownVals = { SIRET: p.siret || out.siret, SIREN: p.siren || out.siren, "Raison sociale": p.raisonSociale || out.raisonSociale, Adresse: p.adresse || out.adresse, Ville: [p.cp || out.cp, p.ville || out.ville].filter(Boolean).join(" "), "Téléphone": p.telephone || p.contactTel, "E-mail": p.email || p.contactEmail, Site: p.site, Facebook: p.facebook, Instagram: p.instagram };
-  const known = Object.entries(knownVals).filter(([, v]) => has(v)).map(([k, v]) => k + " : " + v).join(" ; ");
-  const user = `Établissement : ${cible}.${known ? "\nDonnées déjà connues (sers-t'en pour identifier l'établissement, ne les recherche pas) : " + known + "." : ""}
-Recherche UNIQUEMENT les informations suivantes, vérifiables (attention aux homonymes : ne retiens que l'établissement correspondant aux données connues) :
+  const sys = "Tu enrichis la fiche d'un point de vente français (jouets / loisirs créatifs) à partir du web : site officiel, fiche Google, store locator de l'enseigne, et registres officiels si besoin. Des sources officielles gratuites ont DÉJÀ été consultées avant toi : leurs résultats te sont fournis comme faits ÉTABLIS et VÉRIFIÉS. Sers-t'en pour cibler tes recherches, ne les redemande pas et ne les contredis pas. Tu ne recherches QUE les champs demandés. Tu n'inventes JAMAIS une donnée (identifiant, adresse, courriel, nom) : en cas de doute, tu laisses le champ vide. Tu réponds UNIQUEMENT par du JSON valide.";
+  // Les faits issus des sources gratuites sont transmis à l'IA comme point de départ vérifié : ils
+  // lui évitent de re-chercher ce qui est déjà connu et surtout lui donnent des clés de recherche
+  // très discriminantes (raison sociale exacte, SIREN, dirigeant, adresse normalisée).
+  const officiels = {
+    "Raison sociale (registre officiel)": out.raisonSociale,
+    "SIREN (registre officiel)": out.siren,
+    "SIRET de cet établissement (registre officiel)": out.siret,
+    "Forme juridique (registre officiel)": out.formeJuridique,
+    "Dirigeant (registre officiel)": [out.contactPrenom, out.contactNom, out.contactFonction ? "(" + out.contactFonction + ")" : ""].filter(Boolean).join(" "),
+    "Adresse (registre / base adresse nationale)": [out.adresse, out.cp, out.ville].filter(Boolean).join(" "),
+    "Téléphone (OpenStreetMap / site officiel)": out.telephone,
+    "E-mail (OpenStreetMap / site officiel)": out.email,
+    "Site officiel": out.site || p.site,
+  };
+  const faits = Object.entries(officiels).filter(([, v]) => has(v)).map(([k, v]) => "- " + k + " : " + v).join("\n");
+  const saisis = Object.entries({ SIRET: p.siret, SIREN: p.siren, Adresse: [p.adresse, p.cp, p.ville].filter(Boolean).join(" "), "Téléphone": p.telephone || p.contactTel, "E-mail": p.email || p.contactEmail, Facebook: p.facebook, Instagram: p.instagram })
+    .filter(([k, v]) => has(v) && !has(officiels[k])).map(([k, v]) => k + " : " + v).join(" ; ");
+  const user = `Établissement : ${cible}.
+${faits ? "FAITS DÉJÀ ÉTABLIS par des sources officielles gratuites (registre des entreprises, OpenStreetMap, base adresse nationale, site officiel du magasin). Ils sont fiables : appuie-toi dessus pour identifier le bon établissement et cibler tes recherches, ne les redemande pas.\n" + faits + "\n" : ""}${saisis ? "Autres données de la fiche : " + saisis + ".\n" : ""}
+Recherche UNIQUEMENT les informations suivantes, vérifiables (attention aux homonymes : ne retiens que l'établissement correspondant aux faits ci-dessus) :
 ${misses.map((m) => "- " + m.key + " : " + m.desc).join("\n")}
-Si l'établissement appartient à une enseigne ou un réseau (JouéClub, King Jouet, Cultura…), consulte en priorité la fiche magasin du site officiel de l'enseigne (store locator) : elle donne souvent l'adresse exacte, le téléphone et le courriel du point de vente.
+${has(out.raisonSociale) ? "Utilise la raison sociale exacte « " + out.raisonSociale + " »" + (has(out.siren) ? " et le SIREN " + out.siren : "") + " dans tes requêtes : c'est le moyen le plus sûr de tomber sur la bonne société.\n" : ""}${has(out.site) || has(p.site) ? "Le site officiel du magasin est " + (out.site || p.site) + " : commence par y chercher (page contact, mentions légales, « qui sommes-nous »).\n" : ""}Si l'établissement appartient à une enseigne ou un réseau (JouéClub, King Jouet, Cultura…), consulte en priorité la fiche magasin du site officiel de l'enseigne (store locator) : elle donne souvent l'adresse exacte, le téléphone et le courriel du point de vente.
 Renvoie UNIQUEMENT un objet JSON valide (aucun texte ni balise autour) avec EXACTEMENT ces clés :
 ${JSON.stringify(schemaObj)}
 "source" = registre / source principale utilisée. Tout champ non trouvé reste une chaîne vide.${consigne ? "\n\nPRIORITÉ DEMANDÉE PAR L'UTILISATEUR (concentre ta recherche là-dessus, sans rien inventer, et résume les trouvailles dans \"notes\") :\n" + consigne : ""}`;
@@ -7325,8 +7571,21 @@ function Prospection({ data, persist, go }) {
     // Registre global : la recherche continue même si l'on quitte l'onglet, et reste visible partout.
     aiJobs.run("prospects:search", "Recherche de prospects", async () => {
       try {
-        const { stores: arr, usage } = await aiSearchStores(zone.trim() || "France", kind);
-        const seen = new Set(data.prospects.map((p) => (p.nom + "|" + p.ville).toLowerCase())); const today = TODAY(); const add = [];
+        // Étage 1 GRATUIT : OpenStreetMap liste les magasins jouets / jeux / loisirs créatifs de la
+        // zone avec adresse, téléphone, site et horaires. L'IA (payante) n'est appelée qu'ensuite,
+        // et seulement si OSM n'a pas suffi (zone peu cartographiée ou recherche d'un nom précis).
+        const z = zone.trim() || "France";
+        let osm = [];
+        try { osm = await osmSearchStores(z); } catch (e) {}
+        const seenOsm = new Set(data.prospects.map((p) => ((p.nom || "") + "|" + (p.ville || "")).toLowerCase()));
+        const osmNew = osm.filter((s) => { const k = ((s.nom || "") + "|" + (s.ville || "")).toLowerCase(); if (seenOsm.has(k)) return false; seenOsm.add(k); return true; });
+        const today0 = TODAY();
+        const osmAdd = osmNew.map((s, i) => ({ id: "p_osm_" + Date.now() + "_" + i, nom: s.nom, enseigne: s.enseigne || "", type: s.enseigne ? "chaine" : "independant", format: "", adresse: s.adresse || "", ville: s.ville || "", cp: s.cp || "", departement: cpToDepartement(s.cp) || "", region: DEPT_REGION[cpToDepartement(s.cp)] || "", telephone: s.telephone || "", site: s.site || "", email: s.email || "", facebook: s.facebook || "", instagram: s.instagram || "", horaires: s.horaires || "", statut: "a_qualifier", potentiel: "", notes: "", source: "OpenStreetMap (gratuit) · " + today0, accountId: null, createdAt: today0, siren: "", siret: "", raisonSociale: "", formeJuridique: "", contactPrenom: "", contactNom: "", contactFonction: "", contactEmail: "", contactTel: "", contactSource: "", lat: s.lat, lng: s.lng }));
+        if (osmAdd.length) persist((d) => ({ ...d, prospects: [...osmAdd, ...d.prospects] }));
+        // OSM a suffi : on s'arrête là, sans dépenser un seul crédit IA.
+        if (osmAdd.length >= 6) { setQ(""); setFType("tous"); setFRegion("tous"); setFlashIds(new Set(osmAdd.map((a) => a.id))); setAiMsg(osmAdd.length + " prospect(s) ajouté(s) depuis OpenStreetMap — gratuitement, sans crédit IA. Statut « À qualifier », à vérifier."); return; }
+        const { stores: arr, usage } = await aiSearchStores(z, kind);
+        const seen = new Set(data.prospects.concat(osmAdd).map((p) => ((p.nom || "") + "|" + (p.ville || "")).toLowerCase())); const today = TODAY(); const add = [];
         arr.forEach((r) => { const nom = (r.nom || r.enseigne || "").trim(); if (!nom) return; const key = (nom + "|" + (r.ville || "")).toLowerCase(); if (seen.has(key)) return; seen.add(key); const ct = r.contact || {};
           add.push({ id: "p_" + Date.now() + "_" + add.length, nom, enseigne: r.enseigne || "", type: ["cooperative", "chaine", "franchise", "independant", "specialiste", "gss", "autre"].includes(r.type) ? r.type : "autre", format: "", adresse: r.adresse || "", ville: r.ville || "", cp: r.cp || "", departement: r.departement || "", region: r.region || "", telephone: r.telephone || "", site: r.site || "", email: r.email || "", statut: "a_qualifier", potentiel: "", notes: r.notes || "", source: "Recherche IA · " + today, accountId: null, createdAt: today, siren: r.siren || "", siret: r.siret || "", raisonSociale: r.raisonSociale || "", formeJuridique: r.formeJuridique || "", contactPrenom: ct.prenom || "", contactNom: ct.nom || "", contactFonction: ct.fonction || "", contactEmail: ct.email || "", contactTel: ct.telephone || "", contactSource: ct.source || "" }); });
         persist((d) => ({ ...d, prospects: add.length ? [...add, ...d.prospects] : d.prospects, claudeUsage: addUsage(d.claudeUsage, usage) }));
