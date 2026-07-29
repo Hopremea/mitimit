@@ -1342,17 +1342,21 @@ function identityKeys(o) {
   // deux commerces distincts partageant la même adresse « ZAC / zone / centre commercial » sans n° de rue
   // (ex. King Jouet et Cultura dans la même ZAC) ne doivent PAS être fusionnés.
   if (a.length >= 6 && sc) keys.push("A:" + a);
-  if (siren.length === 9 && ville) { keys.push("S:" + siren + "|" + ville); if (coreName) keys.push("S:" + siren + "|" + ville + "|" + coreName); }
+  // Le SIREN n'est PAS une preuve d'identité d'établissement : dans les réseaux (King Jouet, JouéClub…),
+  // de nombreux magasins partagent le SIREN de la centrale. Seul le SIRET (propre à chaque établissement)
+  // fait foi — la clé « T: » ci-dessus.
   if (sc && sc.split(" ").length >= 3) { if (loc) keys.push("R:" + sc + "|" + loc); else keys.push("R:" + sc); }
   // Le « site » n'est pris comme nom que s'il ne ressemble PAS à une vraie URL (site officiel partagé exclu).
   [o.nom, o.enseigne, isUrlLike(o.site) ? "" : o.site].forEach((v) => { const toks = normSp(v).split(/\s+/).filter((t) => t.length > 1 && !GEN.has(t)); if (toks.length >= 2 && loc) keys.push("N:" + toks.join(" ") + "|" + loc); if (loc && ville) { const strip = toks.filter((t) => !(t.length >= 3 && ville.includes(t))); if (strip.length >= 2 && strip.length < toks.length) keys.push("N:" + strip.join(" ") + "|" + loc); } });
   // Signaux « évidents » : e-mail identique (hors boîtes génériques), téléphone identique, gérant + ville.
   const GEN_MAIL = new Set(["contact", "info", "infos", "standard", "accueil", "service", "serviceclient", "bonjour", "hello", "commande", "commandes", "direction", "secretariat", "magasin", "boutique"]);
+  // Localité exigée pour l'e-mail et le téléphone : un standard national ou une boîte partagée par tout
+  // un réseau ne doit pas rapprocher deux magasins de villes différentes.
   const email = String(o.email || o.contactEmail || "").trim().toLowerCase();
   const em = email.match(/^([^@\s]+)@[^@\s]+\.[^@\s]+$/);
-  if (em && !GEN_MAIL.has(em[1].replace(/[._\-0-9]/g, ""))) keys.push("E:" + email);
+  if (em && !GEN_MAIL.has(em[1].replace(/[._\-0-9]/g, "")) && loc) keys.push("E:" + email + "|" + loc);
   const tel = digits(o.telephone || o.contactTel);
-  if (tel.length >= 9 && tel.length <= 15) keys.push("P:" + tel.slice(-9));
+  if (tel.length >= 9 && tel.length <= 15 && loc) keys.push("P:" + tel.slice(-9) + "|" + loc);
   const ger = normSp(o.contactNom).split(/\s+/).filter((t) => t.length > 1);
   if (ger.length && ville) keys.push("G:" + ger.join("") + "|" + ville);
   return keys;
@@ -1373,6 +1377,44 @@ const OCCITANIE_DEPTS = new Set(["09", "11", "12", "30", "31", "32", "34", "46",
 function enseigneNorm(name) {
   const FJ = new Set(["sas", "sasu", "sarl", "eurl", "sa", "snc", "sci", "scm", "ei", "eirl", "societe", "ste", "ets", "etablissement", "etablissements", "groupe", "group", "france", "the", "la", "le", "les", "de", "du", "des", "et"]);
   return String(name || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").split(/\s+/).filter((t) => t && !FJ.has(t)).join("");
+}
+// Anomalies d'identité légale (erreurs typiques de la recherche IA) : SIRET incohérent avec le SIREN
+// de la fiche, même SIRET sur plusieurs fiches (un SIRET désigne UN seul établissement), SIREN porté
+// par des enseignes différentes. Renvoie { "p:<id>"|"a:<id>"|"s:<id>": [messages] } pour affichage
+// d'un triangle d'alerte sur les tuiles/fiches concernées. Rien n'est corrigé automatiquement.
+function computeIdentityAnomalies(data) {
+  const digits = (s) => String(s || "").replace(/\D/g, "");
+  const entries = [];
+  (data.prospects || []).forEach((p) => { if (!p.archived && !p.accountId) entries.push({ key: "p:" + p.id, label: p.nom || p.enseigne || "Prospect", enseigne: p.enseigne || p.nom || "", siren: digits(p.siren), siret: digits(p.siret) }); });
+  const accById = {}; (data.accounts || []).forEach((a) => { accById[a.id] = a; });
+  (data.accounts || []).forEach((a) => { if (!a.archived) entries.push({ key: "a:" + a.id, label: a.enseigne || "Compte", enseigne: a.enseigne || "", siren: digits(a.siren), siret: "" }); });
+  (data.sites || []).forEach((s) => { if (!s.archived && (s.type === "pdv" || s.type === "decision")) { const acc = accById[s.accountId]; entries.push({ key: "s:" + s.id, label: s.label || "Établissement", enseigne: (acc && acc.enseigne) || s.label || "", siren: acc ? digits(acc.siren) : "", siret: digits(s.siret) }); } });
+  const out = {}; const add = (k, m) => { (out[k] = out[k] || []).push(m); };
+  // 1. SIRET incohérent avec le SIREN de la même fiche (les 9 premiers chiffres du SIRET = SIREN).
+  entries.forEach((e) => { if (e.siret.length === 14 && e.siren.length === 9 && !e.siret.startsWith(e.siren)) add(e.key, "Le SIRET " + e.siret + " ne commence pas par le SIREN de la fiche (" + e.siren + ") : l'un des deux est erroné. Confusion probable de la recherche IA entre deux sociétés — à corriger à la main ou via « Vérifier via SIRENE »."); });
+  // 2. Même SIRET sur plusieurs fiches.
+  const bySiret = {}; entries.forEach((e) => { if (e.siret.length === 14) (bySiret[e.siret] = bySiret[e.siret] || []).push(e); });
+  Object.values(bySiret).forEach((g) => { if (g.length > 1) g.forEach((e) => { const others = g.filter((x) => x !== e).map((x) => "« " + x.label + " »").slice(0, 3).join(", "); add(e.key, "SIRET " + e.siret + " également porté par " + others + ". Un SIRET identifie un seul établissement : l'une de ces fiches a hérité d'un identifiant erroné (erreur typique de la recherche IA)."); }); });
+  // 3. Même SIREN sur des enseignes différentes : légitime pour des magasins intégrés à une centrale
+  // (ex. King Jouet), suspect pour l'enseigne minoritaire — on ne signale que celle-ci.
+  const bySiren = {}; entries.forEach((e) => { if (e.siren.length === 9 && enseigneNorm(e.enseigne)) (bySiren[e.siren] = bySiren[e.siren] || []).push(e); });
+  Object.values(bySiren).forEach((g) => {
+    const count = {}; g.forEach((e) => { const b = enseigneNorm(e.enseigne); count[b] = (count[b] || 0) + 1; });
+    const brands = Object.keys(count); if (brands.length < 2) return;
+    const max = Math.max(...brands.map((b) => count[b]));
+    const majority = brands.filter((b) => count[b] === max);
+    const lbls = [...new Set(g.map((e) => e.enseigne))].slice(0, 4).join(", ");
+    g.forEach((e) => { const b = enseigneNorm(e.enseigne); if (majority.length === 1 && b === majority[0]) return; add(e.key, "SIREN " + e.siren + " porté par des fiches d'enseignes différentes (" + lbls + "). Un SIREN de centrale est parfois légitime (magasins intégrés), mais cette fiche porte probablement l'identifiant d'une autre enseigne : vérifier l'identité légale."); });
+  });
+  return out;
+}
+// Petit triangle d'alerte jaune ; au survol, un paragraphe explicatif sur fond blanc (pop-up).
+function WarnTip({ msgs, size = 14 }) {
+  if (!msgs || !msgs.length) return null;
+  return (<span className="warntip" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }} title="">
+    <AlertTriangle size={size} style={{ color: "#b45309", fill: "#FDE68A" }} />
+    <span className="warntip-pop">{msgs.map((m, i) => <span key={i} style={{ display: "block", marginTop: i ? 7 : 0 }}>{m}</span>)}</span>
+  </span>);
 }
 // Calculateur d'angles VRAIS d'un prospect (fonction pure, aucun appel réseau). Ce qui n'est pas
 // calculé ici ne pourra pas être affirmé dans le mail : proximité, réseau d'enseigne, réseau régional,
@@ -2167,6 +2209,10 @@ ${ACCENT_CSS}
 /* Tuile cliquable : réagit au survol (légère élévation + ombre) comme les boutons. */
 .tile{cursor:pointer;background:rgba(255,255,255,.52);-webkit-backdrop-filter:blur(16px) saturate(170%);backdrop-filter:blur(16px) saturate(170%);box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 4px 16px rgba(20,32,58,.06);transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease;}
 .tile:hover{transform:translateY(-3px);box-shadow:0 12px 26px rgba(20,32,58,.14);border-color:#cfdcf3;background:var(--bg);}
+.warntip{position:relative;display:inline-flex;align-items:center;cursor:help;flex-shrink:0;}
+.warntip .warntip-pop{display:none;position:absolute;left:50%;top:calc(100% + 7px);transform:translateX(-50%);z-index:80;width:290px;max-width:74vw;background:#fff;color:#3a4358;border:1px solid #f0c36d;border-radius:10px;padding:9px 11px;font-size:11.5px;line-height:1.5;font-weight:500;text-align:left;box-shadow:0 10px 26px rgba(20,32,58,.2);white-space:normal;}
+.warntip:hover .warntip-pop{display:block;}
+.pu-root.dark .warntip .warntip-pop{background:#fff;color:#3a4358;}
 .tile:active{transform:translateY(-1px);box-shadow:0 6px 14px rgba(20,32,58,.12);}
 .pu-root.dark .tile:hover{box-shadow:0 12px 26px rgba(0,0,0,.45);border-color:#33415a;}
 .acc-card h4{margin:0 0 3px;font-size:14px;}.acc-card .meta{color:var(--muted);font-size:11.5px;display:flex;align-items:center;gap:5px;}
@@ -3695,6 +3741,9 @@ function Accounts({ data, persist, go, focus }) {
       {addC && <Modal title="Nouveau contact" onClose={() => setAddC(null)} wide><ContactForm contact={addC} accounts={accounts} contacts={contacts} sites={data.sites} known={collectKnownAddresses(data)} onSave={(x) => { saveContact(x); setAddC(null); }} /></Modal>}</>);
   }
   const isMulti = (a) => isGroupe(a);
+  // Anomalies d'identité (SIRET partagé, SIRET/SIREN incohérents, SIREN d'une autre enseigne) :
+  // triangle d'alerte sur les tuiles concernées, avec explication au survol.
+  const anoms = useMemo(() => computeIdentityAnomalies(data), [data]);
   const archivedAccounts = accounts.filter((a) => a.archived);
   const archivedIds = new Set(archivedAccounts.map((a) => a.id));
   const pdvSites = (data.sites || []).filter((s) => s.type === "pdv" && !s.archived && !archivedIds.has(s.accountId));
@@ -3731,7 +3780,7 @@ function Accounts({ data, persist, go, focus }) {
     {logosOpen && <LogosBulk data={data} persist={persist} onClose={() => setLogosOpen(false)} />}
     {horairesOpen && <HorairesBulk data={data} persist={persist} onClose={() => setHorairesOpen(false)} />}
     {dupOpen && <DoublonsModal data={data} persist={persist} onClose={() => setDupOpen(false)} />}
-    {(() => { const groupList = accounts.filter((a) => isMulti(a) && !a.archived).slice().sort((a, b) => (a.enseigne || "").localeCompare(b.enseigne || "")); return groupList.length === 0 ? <div className="empty">Aucun groupe. Créez un groupe (Cultura, King Jouet…) pour y rattacher des établissements.</div> : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(238px, 1fr))", gap: 10 }}>{groupList.map((a) => { const pc = principal(a.id); const sm = stageMeta(a.stage); const seg = networkSeg(a.magasins); return (<button key={a.id} className="tile" onClick={() => go("accounts", a.id)} style={{ textAlign: "left", border: "1px solid var(--line)", borderLeft: "3px solid #3F60AA", borderRadius: 12, padding: "11px 13px", display: "flex", flexDirection: "column", gap: 5, fontFamily: "inherit" }}><div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>{a.logo ? <img src={a.logo} alt="" style={{ width: 24, height: 24, borderRadius: 6, objectFit: "contain", background: "#fff", border: "1px solid var(--line)", flexShrink: 0 }} /> : <Building2 size={16} color="#3F60AA" style={{ flexShrink: 0 }} />}<span style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.2 }}>{a.enseigne || "Sans nom"}</span>{a.code && <span style={{ fontWeight: 800, fontSize: 10.5, letterSpacing: ".03em", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 6, padding: "1px 6px", color: "var(--muted)" }} className="tnum">{a.code}</span>}</div>{pc && <div className="meta"><User size={12} />{pc}</div>}<div className="meta"><Store size={12} />{magasinLabel(a.magasins)}</div><div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 5, marginTop: 2 }}><Badge color={seg.color}>{seg.label}</Badge><StageTag stage={sm} /></div>{(() => { const att = sumMontant((data.deals || []).filter((d) => d.accountId === a.id && isDevisEnAttente(d))); const ca = sumMontant((data.deals || []).filter((d) => d.accountId === a.id && isCaSigne(d))); return (<div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>{att > 0 && <div style={{ fontWeight: 700, color: "var(--blue)", fontSize: 13 }} className="tnum" title="CA HT en attente (devis)">{eur(att)}</div>}<div style={{ fontWeight: 700, color: ca > 0 ? "var(--green)" : "var(--muted)", fontSize: 13 }} className="tnum" title="Chiffre d'affaires HT généré (factures validées)">CA : {eur(ca)}</div></div>); })()}</button>); })}</div>; })()}
+    {(() => { const groupList = accounts.filter((a) => isMulti(a) && !a.archived).slice().sort((a, b) => (a.enseigne || "").localeCompare(b.enseigne || "")); return groupList.length === 0 ? <div className="empty">Aucun groupe. Créez un groupe (Cultura, King Jouet…) pour y rattacher des établissements.</div> : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(238px, 1fr))", gap: 10 }}>{groupList.map((a) => { const pc = principal(a.id); const sm = stageMeta(a.stage); const seg = networkSeg(a.magasins); return (<button key={a.id} className="tile" onClick={() => go("accounts", a.id)} style={{ textAlign: "left", border: "1px solid var(--line)", borderLeft: "3px solid #3F60AA", borderRadius: 12, padding: "11px 13px", display: "flex", flexDirection: "column", gap: 5, fontFamily: "inherit" }}><div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>{a.logo ? <img src={a.logo} alt="" style={{ width: 24, height: 24, borderRadius: 6, objectFit: "contain", background: "#fff", border: "1px solid var(--line)", flexShrink: 0 }} /> : <Building2 size={16} color="#3F60AA" style={{ flexShrink: 0 }} />}<span style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.2 }}>{a.enseigne || "Sans nom"}</span><WarnTip msgs={anoms["a:" + a.id]} />{a.code && <span style={{ fontWeight: 800, fontSize: 10.5, letterSpacing: ".03em", background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 6, padding: "1px 6px", color: "var(--muted)" }} className="tnum">{a.code}</span>}</div>{pc && <div className="meta"><User size={12} />{pc}</div>}<div className="meta"><Store size={12} />{magasinLabel(a.magasins)}</div><div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 5, marginTop: 2 }}><Badge color={seg.color}>{seg.label}</Badge><StageTag stage={sm} /></div>{(() => { const att = sumMontant((data.deals || []).filter((d) => d.accountId === a.id && isDevisEnAttente(d))); const ca = sumMontant((data.deals || []).filter((d) => d.accountId === a.id && isCaSigne(d))); return (<div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>{att > 0 && <div style={{ fontWeight: 700, color: "var(--blue)", fontSize: 13 }} className="tnum" title="CA HT en attente (devis)">{eur(att)}</div>}<div style={{ fontWeight: 700, color: ca > 0 ? "var(--green)" : "var(--muted)", fontSize: 13 }} className="tnum" title="Chiffre d'affaires HT généré (factures validées)">CA : {eur(ca)}</div></div>); })()}</button>); })}</div>; })()}
     <div style={{ marginTop: 22 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
         <h3 className="pu-display" style={{ margin: 0, fontSize: 16 }}>Tous les établissements <span style={{ color: "var(--muted)", fontWeight: 600 }}>({visibleRows.length}{nq && visibleRows.length !== pdvRows.length ? " / " + pdvRows.length : ""})</span></h3>
@@ -3744,7 +3793,7 @@ function Accounts({ data, persist, go, focus }) {
       </div>
       {pdvRows.length === 0 ? <div className="empty">Aucun point de vente enregistré.</div> : visibleRows.length === 0 ? <div className="empty">Aucun établissement ne correspond à la recherche.</div> : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(238px, 1fr))", gap: 10 }}>{visibleRows.map((r) => { const acc = r.acc; const st = acc ? stageMeta(acc.stage) : null; const adr = r.kind === "site" ? (r.site.adresse || "") : (acc && (acc.ville || acc.adressePostale) || ""); const surf = r.kind === "site" ? r.site.typeSurface : (acc && acc.typeSurface); const ens = r.kind === "site" && acc ? acc.enseigne : ""; return (
         <button key={r.key} className="tile" onClick={() => openStore(r)} style={{ textAlign: "left", border: "1px solid var(--line)", borderRadius: 12, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4, fontFamily: "inherit" }}>
-          {(() => { const img = r.kind === "site" ? (r.site.photo || (acc && acc.logo)) : (acc && acc.logo); return (<div style={{ display: "flex", alignItems: "center", gap: 7 }}>{img ? <img src={img} alt="" style={{ width: 22, height: 22, borderRadius: 6, objectFit: "contain", background: "#fff", border: "1px solid var(--line)", flexShrink: 0 }} /> : <Store size={15} color="var(--blue)" style={{ flexShrink: 0 }} />}<span style={{ fontWeight: 800, fontSize: 13.5, lineHeight: 1.2 }}>{storeName(r)}</span></div>); })()}
+          {(() => { const img = r.kind === "site" ? (r.site.photo || (acc && acc.logo)) : (acc && acc.logo); return (<div style={{ display: "flex", alignItems: "center", gap: 7 }}>{img ? <img src={img} alt="" style={{ width: 22, height: 22, borderRadius: 6, objectFit: "contain", background: "#fff", border: "1px solid var(--line)", flexShrink: 0 }} /> : <Store size={15} color="var(--blue)" style={{ flexShrink: 0 }} />}<span style={{ fontWeight: 800, fontSize: 13.5, lineHeight: 1.2 }}>{storeName(r)}</span><WarnTip msgs={r.kind === "site" ? anoms["s:" + r.site.id] : (acc ? anoms["a:" + acc.id] : null)} /></div>); })()}
           {ens && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{ens}</div>}
           {adr && <div style={{ fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{adr}</div>}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 5, marginTop: 2 }}>{surf && <Badge color="#3F60AA">{surf}</Badge>}{r.kind === "acc" && <Badge color="#9aa6bd">point de vente unique</Badge>}{st && <StageTag stage={st} />}</div>
@@ -6392,6 +6441,7 @@ Pour CHAQUE établissement, procède en trois temps :
 1) Identifie l'établissement physique (nom, enseigne, adresse réelle) via le web et les annuaires.
 1bis) Si l'établissement appartient à une enseigne ou un réseau (JouéClub, King Jouet, Cultura, La Grande Récré…), consulte AUSSI le site officiel de l'enseigne et sa page « trouver un magasin » (store locator), comme le ferait une recherche Google : la fiche magasin de l'enseigne est souvent la source la plus fiable pour l'adresse exacte, le téléphone, les horaires et parfois le courriel du point de vente (ex. pour « JouéClub Aix-en-Provence », la fiche du magasin sur le site joueclub.fr). Fais de même avec le site propre de l'établissement s'il en a un.
 2) Recherche l'identité légale de la société qui l'exploite dans les sources officielles : annuaire-entreprises.data.gouv.fr (Répertoire National des Entreprises / INSEE), pappers.fr, societe.com, infogreffe.fr, data.inpi.fr. Récupère si disponible : SIREN (9 chiffres, niveau société), SIRET de l'établissement (14 chiffres, propre à CET établissement précis, à l'adresse identifiée), raison sociale, forme juridique, et le représentant légal (dirigeant / gérant) avec sa fonction. Le SIRET doit correspondre à l'établissement situé à l'adresse de l'établissement trouvé, pas au siège social ni à un autre établissement ; si tu n'es pas certain de l'établissement exact, laisse le SIRET vide et ne garde que le SIREN.
+Règles de cohérence STRICTES sur l'identité légale : (a) le SIRET commence toujours par le SIREN fourni — sinon l'un des deux est faux, n'en garde qu'un ; (b) ne recopie JAMAIS l'identifiant d'un magasin d'une AUTRE enseigne, même situé dans la même ville ou la même zone commerciale (un SIRET King Jouet sur une fiche JouéClub est une erreur grave) ; (c) dans un réseau, le SIREN peut être celui de la centrale quand le magasin est une succursale intégrée (fréquent chez King Jouet), ou celui de la société propre de l'adhérent ou du franchisé (fréquent chez JouéClub : chaque adhérent a sa propre société) — donne le SIREN de la société qui exploite RÉELLEMENT ce magasin précis ; (d) au moindre doute, champ vide plutôt qu'un identifiant approximatif.
 
 Coordonnées du contact : cherche d'abord un courriel et un téléphone de l'interlocuteur dans les registres. Si absents (c'est fréquent), cherche ailleurs : site officiel de l'établissement, page contact, réseaux sociaux professionnels. En tout dernier recours, utilise les coordonnées publiques de la fiche Google Business de l'établissement (téléphone, et courriel s'il y figure). Indique toujours dans "contact.source" d'où vient l'information (ex. "RNE/INSEE", "site officiel", "Fiche Google"). N'invente jamais : si rien n'est trouvé, laisse vide.
 
@@ -6421,7 +6471,7 @@ async function aiAutofill({ kind, enseigne, ville, adresse, typesEtab }) {
   const cible = [enseigne, adresse, ville].filter(Boolean).join(", ");
   let user, schema;
   if (kind === "établissement") {
-    user = `Pour cet établissement précis : ${cible}.\nTrouve dans les sources officielles ou la fiche Google de l'établissement :\n- siret : SIRET (14 chiffres) de l'établissement situé EXACTEMENT à cette adresse et cette ville (ni le siège social, ni un autre établissement). Si tu n'es pas certain qu'il corresponde à cette adresse, laisse vide.\n- adresse : adresse postale complète et exacte de l'établissement (numéro, voie, code postal, ville).\n- telephone : numéro de téléphone fixe (standard / accueil) de CE magasin à cette adresse précise, au format français (ex. « 05 63 12 34 56 »). Vérifie qu'il correspond bien à cet établissement et pas au siège ou à un autre point de vente ; en cas de doute, laisse vide.\n- email : adresse e-mail générique de contact de CE magasin (accueil, commande), publiée sur le site officiel ou la fiche Google de l'établissement. Pas l'e-mail d'une personne. En cas de doute, laisse vide.\n- horaires : horaires d'ouverture habituels de l'établissement, en une ligne courte et lisible (ex. « Lun-Sam 10h-19h, Dim fermé »), depuis la fiche Google ou le site officiel. En cas de doute, laisse vide.\n- site : URL du site internet officiel de l'établissement ou de son enseigne (ex. « https://www.cultura.com »), trouvée sur le web. Privilégie le site officiel de la marque ; pas d'annuaire ni de page Google. En cas de doute, laisse vide.\n- typeEtablissement : choisis la valeur la plus juste UNIQUEMENT parmi cette liste : ${(typesEtab || []).join(" | ")}. Si aucune ne convient avec certitude, laisse vide.\n- note : une phrase factuelle décrivant l'établissement (univers de produits, implantation centre-ville ou périphérie). Aucun superlatif commercial.\nSi l'établissement appartient à une enseigne ou un réseau, consulte AUSSI le site officiel de l'enseigne et sa page « trouver un magasin » (store locator), comme le ferait une recherche Google : la fiche magasin de l'enseigne (ex. la fiche du magasin sur joueclub.fr pour un JouéClub) donne souvent l'adresse exacte, le téléphone, les horaires et le courriel du point de vente.\nAttention aux homonymes : ne retiens que l'établissement de la ville indiquée.`;
+    user = `Pour cet établissement précis : ${cible}.\nTrouve dans les sources officielles ou la fiche Google de l'établissement :\n- siret : SIRET (14 chiffres) de l'établissement situé EXACTEMENT à cette adresse et cette ville (ni le siège social, ni un autre établissement, et JAMAIS le SIRET d'un magasin d'une autre enseigne de la même zone). Si tu n'es pas certain qu'il corresponde à cette adresse, laisse vide.\n- adresse : adresse postale complète et exacte de l'établissement (numéro, voie, code postal, ville).\n- telephone : numéro de téléphone fixe (standard / accueil) de CE magasin à cette adresse précise, au format français (ex. « 05 63 12 34 56 »). Vérifie qu'il correspond bien à cet établissement et pas au siège ou à un autre point de vente ; en cas de doute, laisse vide.\n- email : adresse e-mail générique de contact de CE magasin (accueil, commande), publiée sur le site officiel ou la fiche Google de l'établissement. Pas l'e-mail d'une personne. En cas de doute, laisse vide.\n- horaires : horaires d'ouverture habituels de l'établissement, en une ligne courte et lisible (ex. « Lun-Sam 10h-19h, Dim fermé »), depuis la fiche Google ou le site officiel. En cas de doute, laisse vide.\n- site : URL du site internet officiel de l'établissement ou de son enseigne (ex. « https://www.cultura.com »), trouvée sur le web. Privilégie le site officiel de la marque ; pas d'annuaire ni de page Google. En cas de doute, laisse vide.\n- typeEtablissement : choisis la valeur la plus juste UNIQUEMENT parmi cette liste : ${(typesEtab || []).join(" | ")}. Si aucune ne convient avec certitude, laisse vide.\n- note : une phrase factuelle décrivant l'établissement (univers de produits, implantation centre-ville ou périphérie). Aucun superlatif commercial.\nSi l'établissement appartient à une enseigne ou un réseau, consulte AUSSI le site officiel de l'enseigne et sa page « trouver un magasin » (store locator), comme le ferait une recherche Google : la fiche magasin de l'enseigne (ex. la fiche du magasin sur joueclub.fr pour un JouéClub) donne souvent l'adresse exacte, le téléphone, les horaires et le courriel du point de vente.\nAttention aux homonymes : ne retiens que l'établissement de la ville indiquée.`;
     schema = '{"siret":"","adresse":"","telephone":"","email":"","horaires":"","site":"","typeEtablissement":"","note":"","confiance":"haute/moyenne/faible","source":""}';
   } else {
     user = `Pour l'entreprise qui exploite l'enseigne : ${cible}.\nTrouve dans les sources officielles :\n- siren : SIREN (9 chiffres) de la personne morale, ou numéro RNA (W + 9 chiffres) si c'est une association. NE METS PAS de SIRET ici.\n- raisonSociale, formeJuridique.\n- ville : ville du siège social ou de rattachement.\n- adresse : adresse postale complète du siège ou de l'établissement principal.\nAttention aux homonymes : si une ville est fournie, ne retiens que l'entité qui lui correspond.`;
@@ -6568,8 +6618,8 @@ async function aiEnrichProspect(p, persistUsage, instruction) {
   need(!grande && !has(p.site), "site", "URL du site web officiel de l'établissement");
   need(!grande && !has(p.facebook), "facebook", "URL de la page Facebook officielle");
   need(!grande && !has(p.instagram), "instagram", "URL du compte Instagram officiel");
-  need(!has(p.siret) && !has(out.siret), "siret", "SIRET (14 chiffres) de CET établissement à cette adresse — vide en cas de doute");
-  need(!has(p.siren) && !has(out.siren), "siren", "SIREN (9 chiffres) de la société exploitante (ou RNA « W… » pour une association)");
+  need(!has(p.siret) && !has(out.siret), "siret", "SIRET (14 chiffres) de CET établissement à cette adresse — il commence par le SIREN de la société exploitante ; JAMAIS le SIRET d'un magasin d'une AUTRE enseigne, même dans la même ville ou zone (un SIRET King Jouet sur une fiche JouéClub est une erreur grave) ; vide en cas de doute");
+  need(!has(p.siren) && !has(out.siren), "siren", "SIREN (9 chiffres) de la société qui exploite RÉELLEMENT ce magasin (ou RNA « W… » pour une association) — celui de la centrale seulement si succursale intégrée, sinon la société propre de l'adhérent/franchisé (fréquent chez JouéClub) ; jamais l'identifiant d'une autre enseigne ; vide en cas de doute");
   need(!has(p.raisonSociale) && !has(out.raisonSociale), "raisonSociale", "raison sociale (registres officiels)");
   need(!has(p.formeJuridique) && !has(out.formeJuridique), "formeJuridique", "forme juridique");
   need(!has(p.contactNom) && !has(out.contactNom), "contact", "dirigeant ou responsable identifié (prénom, nom, fonction, e-mail, téléphone, source de l'info)");
@@ -7026,29 +7076,38 @@ function Prospection({ data, persist, go }) {
       // Adresse seule = identité UNIQUEMENT avec un vrai numéro de voie : deux commerces d'une même ZAC
       // (sans n° de rue) ne sont pas fusionnés à tort.
       if (a.length >= 6 && sc) keys.push("A:" + a);
-      if (siren.length === 9 && ville) { keys.push("S:" + siren + "|" + ville); if (nameCore(p)) keys.push("S:" + siren + "|" + ville + "|" + nameCore(p)); }
+      // Pas de clé SIREN : dans un réseau (King Jouet, JouéClub…), le SIREN de la centrale est partagé
+      // par de nombreux magasins — seul le SIRET, propre à chaque établissement, identifie un doublon.
       if (sc && sc.split(" ").length >= 3) { if (loc) keys.push("R:" + sc + "|" + loc); else keys.push("R:" + sc); }
       // « site » pris comme nom uniquement s'il n'est pas une vraie URL (site officiel partagé exclu).
       [p.nom, p.enseigne, isUrlLike(p.site) ? "" : p.site].forEach((v) => { const toks = normSp(v).split(/\s+/).filter((t) => t.length > 1 && !GENERIC.has(t)); if (toks.length >= 2 && loc) keys.push("N:" + toks.join(" ") + "|" + loc); });
       // Signaux « évidents » : e-mail identique (hors boîtes génériques), téléphone identique, gérant + ville.
+      // Localité exigée : un téléphone de standard national ou un e-mail partagé par tout un réseau ne
+      // doit pas rapprocher deux magasins de villes différentes.
       const email = String(p.email || p.contactEmail || "").trim().toLowerCase();
       const em = email.match(/^([^@\s]+)@[^@\s]+\.[^@\s]+$/);
-      if (em && !GEN_MAIL.has(em[1].replace(/[._\-0-9]/g, ""))) keys.push("E:" + email);
+      if (em && !GEN_MAIL.has(em[1].replace(/[._\-0-9]/g, "")) && loc) keys.push("E:" + email + "|" + loc);
       const tel = digits(p.telephone || p.contactTel);
-      if (tel.length >= 9 && tel.length <= 15) keys.push("P:" + tel.slice(-9));
+      if (tel.length >= 9 && tel.length <= 15 && loc) keys.push("P:" + tel.slice(-9) + "|" + loc);
       const ger = normSp(p.contactNom).split(/\s+/).filter((t) => t.length > 1);
       if (ger.length && ville) keys.push("G:" + ger.join("") + "|" + ville);
       return keys;
     };
     const active = prospects.filter((p) => !p.accountId); // on ne propose pas de fusionner des fiches déjà converties
-    const parent = {}; active.forEach((p) => { parent[p.id] = p.id; });
+    const parent = {}; const byId = {}; active.forEach((p) => { parent[p.id] = p.id; byId[p.id] = p; });
     const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
     const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
+    // Garde-fou d'enseigne : deux fiches d'enseignes DIFFÉRENTES (King Jouet ≠ JouéClub) ne sont jamais
+    // des doublons, sauf adresse strictement identique. Vérifié à l'union ET au repartitionnement final
+    // (la transitivité de l'union-find pourrait sinon chaîner des enseignes incompatibles).
+    const brandOf = (p) => enseigneNorm(p.enseigne || "");
+    const brandCompat = (x, y) => { const bx = brandOf(x), by = brandOf(y); if (!bx || !by || bx === by) return true; const ax = norm(x.adresse), ay = norm(y.adresse); return !!(ax && ax.length >= 6 && ax === ay); };
     const byKey = {};
-    active.forEach((p) => { sigOf(p).forEach((k) => { if (byKey[k] != null) union(byKey[k], p.id); else byKey[k] = p.id; }); });
+    active.forEach((p) => { sigOf(p).forEach((k) => { const o = byKey[k]; if (o != null) { if (brandCompat(byId[o], p)) union(o, p.id); } else byKey[k] = p.id; }); });
     const clusters = {};
     active.forEach((p) => { const r = find(p.id); (clusters[r] = clusters[r] || []).push(p); });
-    return Object.values(clusters).filter((g) => g.length > 1);
+    const splitByBrand = (g) => { const brands = new Set(g.map(brandOf).filter(Boolean)); if (brands.size <= 1) return [g]; const sub = {}; g.forEach((p) => { const b = brandOf(p) || "·sans"; (sub[b] = sub[b] || []).push(p); }); return Object.values(sub); };
+    return Object.values(clusters).flatMap(splitByBrand).filter((g) => g.length > 1);
   };
   const PROS_FIELDS = ["nom", "enseigne", "type", "format", "adresse", "ville", "cp", "departement", "region", "telephone", "site", "email", "potentiel", "siren", "siret", "raisonSociale", "formeJuridique", "contactPrenom", "contactNom", "contactFonction", "contactEmail", "contactTel", "contactSource", "source", "lat", "lng"];
   const prosScore = (p) => (p.accountId ? 1000 : 0) + PROS_FIELDS.reduce((n, k) => n + (p[k] ? 1 : 0), 0);
@@ -7180,10 +7239,13 @@ function Prospection({ data, persist, go }) {
     } catch (e) { setSirMsg({ ok: false, t: "Registre officiel indisponible (" + ((e && e.message) || e) + "). Réessaie." }); }
     finally { setSirBusy(false); }
   };
+  // Anomalies d'identité (SIRET partagé, SIRET/SIREN incohérents, SIREN d'une autre enseigne) :
+  // triangle d'alerte sur les fiches concernées, avec explication au survol.
+  const anoms = useMemo(() => computeIdentityAnomalies(data), [data]);
   const card = (p) => { const tm = PROSPECT_TYPES[p.type] || PROSPECT_TYPES.autre; const sm = PROSPECT_STATUT[p.statut] || PROSPECT_STATUT.a_qualifier; const pm = POTENTIEL_META[p.potentiel]; const picked = selIds.has(p.id); return (
     <div key={p.id} ref={(el) => { if (el) cardRefs.current[p.id] = el; }} className={cx("card", "tile", flashIds && flashIds.has(p.id) && "prospect-flash")} style={{ display: "flex", flexDirection: "column", gap: 8, outline: picked ? "2px solid var(--blue)" : "none", outlineOffset: -1 }} onClick={() => selMode ? toggleSel(p.id) : setEdit(p)}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-        <div style={{ minWidth: 0, display: "flex", alignItems: "flex-start", gap: 8 }}>{selMode && <input type="checkbox" checked={picked} onChange={() => toggleSel(p.id)} onClick={(e) => e.stopPropagation()} style={{ width: 16, height: 16, marginTop: 2, flexShrink: 0 }} />}<div style={{ minWidth: 0 }}><div style={{ fontWeight: 800, fontSize: 14.5 }} className="pu-display">{p.nom}</div>{p.enseigne && p.enseigne !== p.nom && <div style={{ fontSize: 12, color: "var(--muted)" }}>{p.enseigne}</div>}</div></div>
+        <div style={{ minWidth: 0, display: "flex", alignItems: "flex-start", gap: 8 }}>{selMode && <input type="checkbox" checked={picked} onChange={() => toggleSel(p.id)} onClick={(e) => e.stopPropagation()} style={{ width: 16, height: 16, marginTop: 2, flexShrink: 0 }} />}<div style={{ minWidth: 0 }}><div style={{ fontWeight: 800, fontSize: 14.5, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }} className="pu-display">{p.nom}<WarnTip msgs={anoms["p:" + p.id]} /></div>{p.enseigne && p.enseigne !== p.nom && <div style={{ fontSize: 12, color: "var(--muted)" }}>{p.enseigne}</div>}</div></div>
         {pm && <Badge color={pm.color}>{pm.label}</Badge>}
       </div>
       <div style={{ fontSize: 12.5, color: "var(--muted)", display: "flex", alignItems: "flex-start", gap: 6 }}><MapPin size={14} style={{ flexShrink: 0, marginTop: 1 }} /><span>{[p.adresse, ((p.cp || "") + " " + (p.ville || "")).trim()].filter(Boolean).join(", ")}</span></div>
