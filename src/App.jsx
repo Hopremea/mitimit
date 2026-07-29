@@ -8052,7 +8052,9 @@ function Prospection({ data, persist, go }) {
     const removeIds = new Set(); const mergedById = {}; let groups = 0, extra = 0;
     (selected || []).forEach((g) => {
       if (!g || g.length < 2) return;
-      const sorted = g.slice().sort((a, b) => prosScore(b) - prosScore(a));
+      // Contrat : la fiche à CONSERVER est en tête du groupe (choisie dans la fenêtre de revue, qui
+      // propose la plus complète par défaut). On ne re-trie donc pas ici, sous peine d'ignorer ce choix.
+      const sorted = g.slice();
       const base = { ...sorted[0] };
       sorted.slice(1).forEach((o) => {
         // On complète les champs vides depuis les autres fiches. Exception « site » : on n'y recopie
@@ -8649,16 +8651,22 @@ function ProspectMailing({ data, persist, onClose }) {
 function ProspectDupModal({ clusters, crossMatches = [], bestOf, onConfirm, onClose }) {
   const [sel, setSel] = useState(() => clusters.map(() => true));
   const [selX, setSelX] = useState(() => crossMatches.map(() => true));
+  // Fiche conservée par groupe : proposée (la plus complète) mais librement changeable — c'est elle
+  // qui absorbe les autres, le choix n'est donc pas anodin.
+  const [keepIds, setKeepIds] = useState(() => clusters.map((g) => (bestOf(g) || g[0]).id));
+  const setKeep = (i, id) => setKeepIds((s) => s.map((v, j) => j === i ? id : v));
   const toggle = (i) => setSel((s) => s.map((v, j) => j === i ? !v : v));
   const toggleX = (i) => setSelX((s) => s.map((v, j) => j === i ? !v : v));
   const allOn = sel.every(Boolean) && selX.every(Boolean);
   const setAll = (v) => { setSel(clusters.map(() => v)); setSelX(crossMatches.map(() => v)); };
-  const selectedClusters = clusters.filter((g, i) => sel[i]);
+  // La fiche conservée est placée en tête : c'est le contrat attendu par la fusion.
+  const orderKeepFirst = (g, i) => { const id = keepIds[i]; const k = g.find((p) => p.id === id) || g[0]; return [k, ...g.filter((p) => p.id !== k.id)]; };
+  const selectedClusters = clusters.map(orderKeepFirst).filter((g, i) => sel[i]);
   const selectedCross = crossMatches.filter((m, i) => selX[i]);
   const fichesToRemove = clusters.reduce((n, g, i) => n + (sel[i] ? g.length - 1 : 0), 0) + selectedCross.length;
   return (<Modal title="Doublons détectés" onClose={onClose} xl guard={false}>
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
-      <p style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 0, flex: 1, minWidth: 240 }}>Cochez les fusions à appliquer. Entre prospects, la fiche <strong style={{ color: "var(--green)" }}>conservée</strong> (la plus complète) absorbe les autres. Un prospect rapproché d'un <strong>établissement existant</strong> est fusionné dans celui-ci (l'établissement l'emporte, ses champs vides sont complétés) puis supprimé côté prospection.</p>
+      <p style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 0, flex: 1, minWidth: 240 }}>Cochez les fusions à appliquer, et choisissez dans chaque groupe la fiche à <strong style={{ color: "var(--green)" }}>conserver</strong> : elle absorbe les autres (ses champs vides sont complétés depuis elles), qui sont supprimées. La plus complète est proposée par défaut. Un prospect rapproché d'un <strong>établissement existant</strong> est fusionné dans celui-ci (l'établissement l'emporte, ses champs vides sont complétés) puis supprimé côté prospection.</p>
       <button className="btn btn-ghost btn-s" onClick={() => setAll(!allOn)}>{allOn ? "Tout décocher" : "Tout cocher"}</button>
     </div>
     <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: "55vh", overflowY: "auto", paddingRight: 4 }}>
@@ -8672,15 +8680,19 @@ function ProspectDupModal({ clusters, crossMatches = [], bestOf, onConfirm, onCl
           </div>
         </div>); })}
       {clusters.length > 0 && crossMatches.length > 0 && <div style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3, marginTop: 4 }}>Doublons entre prospects</div>}
-      {clusters.map((g, i) => { const keep = bestOf(g); return (
+      {clusters.map((g, i) => { const suggested = (bestOf(g) || g[0]).id; return (
         <div key={i} className="card" style={{ borderLeft: "3px solid " + (sel[i] ? "var(--blue)" : "var(--line)"), background: sel[i] ? "var(--blue-l)" : "var(--bg)" }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 800, fontSize: 13.5, cursor: "pointer", marginBottom: 8 }}><input type="checkbox" checked={sel[i]} onChange={() => toggle(i)} style={{ width: "auto" }} /> Fusionner ce groupe <span style={{ fontWeight: 600, color: "var(--muted)" }}>({g.length} fiches)</span></label>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{g.map((p) => { const isKeep = p.id === keep.id; return (
-            <div key={p.id} style={{ fontSize: 12.5, padding: "6px 9px", borderRadius: 8, background: isKeep ? "rgba(43,182,115,.10)" : "var(--card)", border: "1px solid " + (isKeep ? "rgba(43,182,115,.35)" : "var(--line)") }}>
-              <div style={{ fontWeight: 700 }}>{p.nom || p.enseigne || "Sans nom"}{isKeep && <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 800, color: "var(--green)" }}>● conservée</span>}</div>
-              <div style={{ color: "var(--muted)" }}>{[p.adresse, ((p.cp || "") + " " + (p.ville || "")).trim()].filter(Boolean).join(", ") || "—"}</div>
-              {(p.siren || p.siret) && <div style={{ color: "var(--muted)", fontSize: 11.5 }} className="tnum">{[p.siren && ("SIREN " + p.siren), p.siret && ("SIRET " + p.siret)].filter(Boolean).join(" · ")}</div>}
-            </div>); })}</div>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 800, fontSize: 13.5, cursor: "pointer", marginBottom: 4 }}><input type="checkbox" checked={sel[i]} onChange={() => toggle(i)} style={{ width: "auto" }} /> Fusionner ce groupe <span style={{ fontWeight: 600, color: "var(--muted)" }}>({g.length} fiches)</span></label>
+          {sel[i] && <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 7 }}>Cliquez la fiche à <strong>conserver</strong> : elle absorbe les autres, qui sont supprimées.</div>}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{g.map((p) => { const isKeep = keepIds[i] === p.id; return (
+            <label key={p.id} style={{ display: "flex", alignItems: "flex-start", gap: 9, fontSize: 12.5, padding: "6px 9px", borderRadius: 8, cursor: sel[i] ? "pointer" : "default", background: isKeep ? "rgba(43,182,115,.10)" : "var(--card)", border: "1px solid " + (isKeep ? "rgba(43,182,115,.35)" : "var(--line)") }}>
+              <input type="radio" name={"keep-" + i} checked={isKeep} disabled={!sel[i]} onChange={() => setKeep(i, p.id)} style={{ width: "auto", marginTop: 3, flexShrink: 0 }} title="Conserver cette fiche" />
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontWeight: 700, display: "block" }}>{p.nom || p.enseigne || "Sans nom"}{isKeep && <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 800, color: "var(--green)" }}>● conservée</span>}{!isKeep && sel[i] && <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 800, color: "#b4261e" }}>● supprimée</span>}{p.id === suggested && !isKeep && <span style={{ marginLeft: 6, fontSize: 10.5, color: "var(--muted)" }}>(la plus complète)</span>}</span>
+                <span style={{ color: "var(--muted)", display: "block" }}>{[p.adresse, ((p.cp || "") + " " + (p.ville || "")).trim()].filter(Boolean).join(", ") || "—"}</span>
+                {(p.siren || p.siret) && <span style={{ color: "var(--muted)", fontSize: 11.5, display: "block" }} className="tnum">{[p.siren && ("SIREN " + p.siren), p.siret && ("SIRET " + p.siret)].filter(Boolean).join(" · ")}</span>}
+              </span>
+            </label>); })}</div>
         </div>); })}
     </div>
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 12, flexWrap: "wrap", borderTop: "1px solid var(--line)", paddingTop: 12 }}>
