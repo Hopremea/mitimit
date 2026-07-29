@@ -8853,7 +8853,7 @@ function ProspectMailing({ data, persist, onClose }) {
     if (!/pdf$/i.test(file.type || "") && !/\.pdf$/i.test(file.name || "")) { setPieceErr("Seuls les PDF sont acceptés."); return; }
     setPieceBusy(true);
     try {
-      const dep = await fetch("/api/piece", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ name: file.name }) });
+      const dep = await fetch("/api/outils", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "piece", name: file.name }) });
       const dt = await dep.json().catch(() => ({}));
       if (dep.ok && dt.path && dt.token && supabase) {
         // Le serveur a délivré une autorisation d'écriture signée (clé de service configurée).

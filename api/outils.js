@@ -1,6 +1,7 @@
 import { verifyToken } from "@clerk/backend";
 import dns from "node:dns/promises";
 import net from "node:net";
+import { BUCKET, storageAdmin, cheminValide, creerDepot, supprimerDepot } from "../lib/depot.js";
 
 // ===== Routeur d'outils =====
 // Quatre services regroupés derriere UN SEUL point d'entree, pilotes par le champ « action » :
@@ -8,6 +9,7 @@ import net from "node:net";
 //   isochrone : zone atteignable en N minutes (OpenRouteService, cle ORS_API_KEY)
 //   suivi     : suivi d'un colis Colissimo / La Poste (cle LAPOSTE_API_KEY)
 //   batch:*   : lots de requetes Claude, factures 50 % moins cher (cle ANTHROPIC_API_KEY)
+//   piece     : depot d'une piece jointe volumineuse, hors du corps de requete (stockage Supabase)
 //
 // Le regroupement n'est pas cosmetique : Vercel compte chaque fichier de api/ comme une fonction
 // serverless, et le plan Hobby en autorise 12 par deploiement. Quatre fichiers separes faisaient
@@ -189,10 +191,30 @@ export default async function handler(req, res) {
     if (action === "suivi") return await actionSuivi(body, res);
     // ---------- Lots Claude ----------
     if (action.startsWith("batch:")) return await actionBatch(action.slice(6), body, res);
+    // ---------- Depot d'une piece jointe volumineuse ----------
+    if (action === "piece") return await actionPiece(body, res);
     res.status(400).json({ error: "Action inconnue : " + action });
   } catch (e) {
     res.status(502).json({ error: "Service indisponible : " + (e && e.message ? e.message : String(e)) });
   }
+}
+
+async function actionPiece(body, res) {
+  // Sans cle de service, ce n'est pas une panne : le navigateur possede sa propre session Supabase
+  // (cle anon + jeton Clerk) et peut deposer le fichier lui-meme, puis en fournir une URL signee que
+  // le serveur relira. On le lui dit plutot que d'echouer.
+  const sb = storageAdmin();
+  if (!sb) { res.status(200).json({ mode: "client", bucket: BUCKET }); return; }
+  // Suppression apres usage.
+  if (body.del) {
+    const path = cheminValide(body.path);
+    if (!path) { res.status(400).json({ error: "Chemin invalide." }); return; }
+    try { await supprimerDepot(sb, path); res.status(200).json({ ok: true }); }
+    catch (e) { res.status(502).json({ error: "Suppression impossible : " + ((e && e.message) || String(e)) }); }
+    return;
+  }
+  try { res.status(200).json(await creerDepot(sb, body.name)); }
+  catch (e) { res.status(502).json({ error: "Depot indisponible : " + ((e && e.message) || String(e)) }); }
 }
 
 async function actionScrape(body, res) {
