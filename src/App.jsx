@@ -6499,7 +6499,7 @@ function Carte({ data, persist, go, focus }) {
     if (!LF || !mapInst.current) return;
     setIsoBusy(true); setIsoMsg(null);
     try {
-      const r = await fetch("/api/ors", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ lat, lng, minutes: isoMin }) });
+      const r = await fetch("/api/outils", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "isochrone", lat, lng, minutes: isoMin }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((j && j.error) || ("erreur " + r.status));
       const feat = (j.features || [])[0];
@@ -7154,7 +7154,7 @@ function telCoherent(tel, cp) {
 // ne peut pas lire un site tiers). Zéro token, zéro recherche web facturée.
 async function scrapeContact(url) {
   const u = String(url || "").trim(); if (!u) return null;
-  const res = await fetch("/api/scrape-contact", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ url: u }) });
+  const res = await fetch("/api/outils", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "scrape", url: u }) });
   if (!res.ok) return null;
   const j = await res.json();
   return { email: (j && j.email) || "", telephone: (j && j.telephone) || "", telephones: (j && j.telephones) || [] };
@@ -7574,9 +7574,9 @@ function enrichProspectAppliquer(p, out, text) {
 // Extrait le texte d'une réponse Claude (blocs « text » uniquement, hors blocs d'outil).
 const claudeText = (data) => (data && data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
 // ===== Client de l'API Batch (traitement par lot, 50 % moins cher sur les tokens) =====
-const BATCH_URL = "/api/claude-batch";
+const BATCH_URL = "/api/outils";
 async function batchCall(action, payload) {
-  const res = await fetch(BATCH_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action, ...payload }) });
+  const res = await fetch(BATCH_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "batch:" + action, ...payload }) });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((j && j.error) || ("API " + res.status));
   return j;
@@ -11239,7 +11239,7 @@ function SuiviColis({ numero }) {
   const suivre = async () => {
     setBusy(true); setErr(null); setRes(null);
     try {
-      const r = await fetch("/api/suivi", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ numero: num }) });
+      const r = await fetch("/api/outils", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "suivi", numero: num }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((j && j.error) || ("erreur " + r.status));
       if (j.introuvable) { setErr(j.error || "Numéro inconnu du service de suivi."); return; }
