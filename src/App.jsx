@@ -666,15 +666,19 @@ function mergeSites(p, loserId, winnerId) {
   const reassign = (arr) => (arr || []).map((x) => x.siteId === loserId ? { ...x, siteId: winnerId } : x);
   return { ...p, sites: p.sites.filter((s) => s.id !== loserId).map((s) => s.id === winnerId ? merged : s), contacts: reassign(p.contacts), interactions: reassign(p.interactions), events: reassign(p.events), deals: (p.deals || []).map((d) => d.livraisonSiteId === loserId ? { ...d, livraisonSiteId: winnerId } : d) };
 }
-// Suivi de la dépense réelle des appels à l'API Claude faits PAR l'application (tarif Claude Sonnet 4).
-const CLAUDE_PRICE_USD = { in: 3, out: 15 }; // dollars par million de tokens (entrée / sortie)
+// Suivi de la dépense réelle des appels à l'API Claude faits PAR l'application (tarif Claude Haiku 4.5,
+// le modèle effectivement utilisé par tous les appels de l'app — au plus près de la facture Anthropic).
+const CLAUDE_PRICE_USD = { in: 1, out: 5 }; // dollars par million de tokens (entrée / sortie)
 const CLAUDE_WEB_SEARCH_USD = 0.01; // dollars par recherche web (outil web_search : 10 $ / 1000 recherches)
 const CLAUDE_USD_EUR = 0.952; // taux sécurisé PEN'UP (spot +7%)
 // Nombre de recherches web facturées renvoyé par l'API (présent quand l'outil web_search a été utilisé).
 const usageWebSearches = (usage) => (usage && usage.server_tool_use && usage.server_tool_use.web_search_requests) || 0;
-function addUsage(u, usage) { const it = (usage && usage.input_tokens) || 0; const ot = (usage && usage.output_tokens) || 0; const ws = usageWebSearches(usage); const base = u || { calls: 0, inputTokens: 0, outputTokens: 0 }; const today = TODAY(); const pd = (base.day && base.day.date === today) ? base.day : { date: today, calls: 0, inputTokens: 0, outputTokens: 0, webSearches: 0 }; return { ...base, calls: (base.calls || 0) + 1, inputTokens: (base.inputTokens || 0) + it, outputTokens: (base.outputTokens || 0) + ot, webSearches: (base.webSearches || 0) + ws, day: { date: today, calls: (pd.calls || 0) + 1, inputTokens: (pd.inputTokens || 0) + it, outputTokens: (pd.outputTokens || 0) + ot, webSearches: (pd.webSearches || 0) + ws } }; }
-// Usage du jour courant (sinon zéro si la journée enregistrée n'est pas aujourd'hui).
-function usageToday(u) { const d = u && u.day; return (d && d.date === TODAY()) ? d : { calls: 0, inputTokens: 0, outputTokens: 0, webSearches: 0 }; }
+function addUsage(u, usage) { const it = (usage && usage.input_tokens) || 0; const ot = (usage && usage.output_tokens) || 0; const ws = usageWebSearches(usage); const base = u || { calls: 0, inputTokens: 0, outputTokens: 0 }; const today = TODAY(); const pd = (base.day && base.day.date === today) ? base.day : { date: today, calls: 0, inputTokens: 0, outputTokens: 0, webSearches: 0 };
+  // Historique PAR JOUR (pour la courbe de coûts de l'onglet Intégrations) — borné à ~2 ans glissants.
+  const days = { ...(base.days || {}) }; const de = days[today] || { calls: 0, inputTokens: 0, outputTokens: 0, webSearches: 0 };
+  days[today] = { calls: (de.calls || 0) + 1, inputTokens: (de.inputTokens || 0) + it, outputTokens: (de.outputTokens || 0) + ot, webSearches: (de.webSearches || 0) + ws };
+  const keys = Object.keys(days).sort(); while (keys.length > 740) delete days[keys.shift()];
+  return { ...base, calls: (base.calls || 0) + 1, inputTokens: (base.inputTokens || 0) + it, outputTokens: (base.outputTokens || 0) + ot, webSearches: (base.webSearches || 0) + ws, days, day: { date: today, calls: (pd.calls || 0) + 1, inputTokens: (pd.inputTokens || 0) + it, outputTokens: (pd.outputTokens || 0) + ot, webSearches: (pd.webSearches || 0) + ws } }; }
 function claudeUsd(u) { if (!u) return 0; return ((u.inputTokens || 0) / 1e6) * CLAUDE_PRICE_USD.in + ((u.outputTokens || 0) / 1e6) * CLAUDE_PRICE_USD.out; }
 function claudeEur(u) { return claudeUsd(u) * CLAUDE_USD_EUR; }
 // Nombre TOTAL de recherches web (estimation rétroactive figée + comptage exact depuis l'activation).
@@ -682,6 +686,57 @@ const webSearchCount = (u) => ((u && u.webSearchesPast) || 0) + ((u && u.webSear
 const webSearchUsd = (n) => (n || 0) * CLAUDE_WEB_SEARCH_USD;
 // Coût total estimé (tokens + recherche web), en € — au plus près de la facture réelle.
 function claudeTotalEur(u) { return claudeEur(u) + webSearchUsd(webSearchCount(u)) * CLAUDE_USD_EUR; }
+// Coût € d'une seule journée d'usage (tokens + recherches web) — alimente la courbe des Intégrations.
+function usageDayEur(d) { return claudeEur(d || {}) + webSearchUsd((d && d.webSearches) || 0) * CLAUDE_USD_EUR; }
+// Panneau « coûts Claude par période » de l'onglet Intégrations : sélecteur Jour / Semaine / Mois /
+// Depuis création + courbe journalière, dans le même style que la courbe de CA du tableau de bord.
+function ClaudeCostChart({ usage }) {
+  const [period, setPeriod] = useState("semaine");
+  const days = (usage && usage.days) || {};
+  const dayKeys = Object.keys(days).sort();
+  const today = TODAY();
+  const spanAll = dayKeys.length ? Math.max(1, Math.round((new Date(today) - new Date(dayKeys[0])) / 86400000) + 1) : 1;
+  const span = period === "jour" ? 1 : period === "semaine" ? 7 : period === "mois" ? 30 : spanAll;
+  const series = []; const tot = { calls: 0, inputTokens: 0, outputTokens: 0, webSearches: 0 }; let totEur = 0;
+  for (let i = span - 1; i >= 0; i--) {
+    const d = new Date(new Date(today).getTime() - i * 86400000); const key = d.toISOString().slice(0, 10);
+    const e = days[key] || { calls: 0, inputTokens: 0, outputTokens: 0, webSearches: 0 };
+    const eur = usageDayEur(e);
+    totEur += eur; tot.calls += e.calls || 0; tot.inputTokens += e.inputTokens || 0; tot.outputTokens += e.outputTokens || 0; tot.webSearches += e.webSearches || 0;
+    series.push({ label: span === 1 ? "Aujourd'hui" : d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }), eur: Math.round(eur * 10000) / 10000 });
+  }
+  const fmt = (x) => x.toLocaleString("fr-FR", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+  const PERIODS = [["jour", "Jour"], ["semaine", "Semaine"], ["mois", "Mois"], ["tout", "Depuis création"]];
+  const seg = ([id, label]) => (
+    <button key={id} onClick={() => setPeriod(id)} style={{ display: "inline-flex", alignItems: "center", cursor: "pointer", border: "1px solid var(--line)", background: period === id ? "var(--green)" : "var(--card)", color: period === id ? "#fff" : "var(--muted)", borderRadius: 8, padding: "5px 11px", fontWeight: 700, fontSize: 12, fontFamily: "inherit", transition: "background .25s, color .25s" }}>{label}</button>
+  );
+  return (<div className="card" style={{ marginTop: 14, borderLeft: "4px solid var(--green)" }}>
+    <div className="sec-h"><h3 className="pu-display">Crédits Claude — par période</h3><div style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>{PERIODS.map(seg)}</div></div>
+    <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+      <div style={{ fontSize: 30, fontWeight: 800, color: "var(--green)" }} className="tnum">{fmt(totEur)} €</div>
+      <div style={{ fontSize: 13, color: "var(--muted)" }} className="tnum">≈ {fmt(totEur / CLAUDE_USD_EUR)} $</div>
+    </div>
+    <div style={{ display: "flex", gap: 22, flexWrap: "wrap", marginTop: 10, fontSize: 12.5 }}>
+      <div><div style={{ color: "var(--muted)" }}>Appels</div><div style={{ fontWeight: 700 }} className="tnum">{num(tot.calls)}</div></div>
+      <div><div style={{ color: "var(--muted)" }}>Tokens entrée</div><div style={{ fontWeight: 700 }} className="tnum">{num(tot.inputTokens)}</div></div>
+      <div><div style={{ color: "var(--muted)" }}>Tokens sortie</div><div style={{ fontWeight: 700 }} className="tnum">{num(tot.outputTokens)}</div></div>
+      <div><div style={{ color: "var(--muted)" }}>Recherches web</div><div style={{ fontWeight: 700 }} className="tnum">{num(tot.webSearches)}</div></div>
+    </div>
+    {span > 1 && <div style={{ marginTop: 14 }}>
+      <ResponsiveContainer width="100%" height={200}>
+        <AreaChart data={series} margin={{ left: 2, right: 12, top: 8 }}>
+          <defs><linearGradient id="gclaude" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#2bb673" stopOpacity={0.35} /><stop offset="100%" stopColor="#2bb673" stopOpacity={0} /></linearGradient></defs>
+          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eef1f7" />
+          <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#6b7589" }} axisLine={false} tickLine={false} />
+          <YAxis tick={{ fontSize: 11, fill: "#6b7589" }} axisLine={false} tickLine={false} width={52} tickFormatter={(v) => v.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} />
+          <Tooltip formatter={(v) => [v.toLocaleString("fr-FR", { minimumFractionDigits: 4, maximumFractionDigits: 4 }) + " €", "Coût du jour"]} contentStyle={{ borderRadius: 12, border: "1px solid #e7ecf5" }} />
+          <Area type="monotone" dataKey="eur" stroke="#2bb673" strokeWidth={2.5} fill="url(#gclaude)" />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>}
+    <p style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 12, lineHeight: 1.5 }}>Coût par jour (tokens au tarif Claude Haiku 4.5 : {CLAUDE_PRICE_USD.in} $/M entrée, {CLAUDE_PRICE_USD.out} $/M sortie + recherche web ≈ 10 $ / 1000, convertis à 1 $ = {CLAUDE_USD_EUR} €). L'historique journalier est enregistré depuis la mise en place de ce suivi : les dépenses antérieures figurent uniquement dans le cumul ci-dessus.</p>
+  </div>);
+}
 
 const RAW = [
   ["PU3D-FIL-BEIGE","Bobines Fil'Up Beige X3",32,9.99],["PU3D-FIL-BLANC","Bobines Fil'Up Blanc X3",85,9.99],
@@ -2773,7 +2828,7 @@ async function resolveLogoUrl(domain) {
 }
 // Recherche web (via Claude) du domaine du site officiel d'une enseigne, pour en déduire le logo.
 async function webFindDomain(query, persistUsage) {
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 300, tools: [{ type: "web_search_20250305", name: "web_search" }], messages: [{ role: "user", content: "Donne le domaine du site web officiel de l'enseigne ou de l'entreprise : \"" + query + "\". Réponds UNIQUEMENT par un objet JSON sans texte ni Markdown : {\"domaine\":\"exemple.fr\"}. Si tu n'es pas sûr, mets une chaîne vide." }] }) });
+  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 300, tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }], messages: [{ role: "user", content: "Donne le domaine du site web officiel de l'enseigne ou de l'entreprise : \"" + query + "\". Réponds UNIQUEMENT par un objet JSON sans texte ni Markdown : {\"domaine\":\"exemple.fr\"}. Si tu n'es pas sûr, mets une chaîne vide." }] }) });
   if (!res.ok) throw new Error("API " + res.status);
   const dt = await res.json();
   if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
@@ -2792,7 +2847,7 @@ function smartLink(a) {
 }
 // Recherche web (via Claude) de la présence en ligne officielle : site web, Facebook, Instagram.
 async function aiFindLinks(query, persistUsage) {
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 600, tools: [{ type: "web_search_20250305", name: "web_search" }], messages: [{ role: "user", content: "Recherche la présence en ligne officielle de cet établissement ou enseigne : \"" + query + "\". Donne, uniquement si tu les trouves de façon fiable : l'URL du site web officiel, l'URL de la page Facebook officielle, l'URL du compte Instagram officiel. N'invente RIEN : laisse une chaîne vide si tu n'es pas certain. Réponds UNIQUEMENT par un objet JSON sans texte ni Markdown : {\"site\":\"\",\"facebook\":\"\",\"instagram\":\"\"}." }] }) });
+  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 600, tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }], messages: [{ role: "user", content: "Recherche la présence en ligne officielle de cet établissement ou enseigne : \"" + query + "\". Donne, uniquement si tu les trouves de façon fiable : l'URL du site web officiel, l'URL de la page Facebook officielle, l'URL du compte Instagram officiel. N'invente RIEN : laisse une chaîne vide si tu n'es pas certain. Réponds UNIQUEMENT par un objet JSON sans texte ni Markdown : {\"site\":\"\",\"facebook\":\"\",\"instagram\":\"\"}." }] }) });
   if (!res.ok) throw new Error("API " + res.status);
   const dt = await res.json();
   if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
@@ -2811,7 +2866,7 @@ async function aiFindHoraires(query, persistUsage) {
     "Le champ horaires liste les 7 jours, un par jour, séparés par des points-virgules, au format français : " +
     "\"Lun 10h-19h; Mar 10h-19h; Mer 10h-19h; Jeu 10h-19h; Ven 10h-19h; Sam 10h-19h; Dim fermé\". " +
     "Pour une coupure méridienne, donne les deux plages : \"Lun 9h30-12h30 et 14h-19h\". Jour de fermeture : \"Dim fermé\".";
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 600, tools: [{ type: "web_search_20250305", name: "web_search" }], messages: [{ role: "user", content: prompt }] }) });
+  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 600, tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }], messages: [{ role: "user", content: prompt }] }) });
   if (!res.ok) throw new Error("API " + res.status);
   const dt = await res.json();
   if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
@@ -2821,6 +2876,22 @@ async function aiFindHoraires(query, persistUsage) {
   // On conserve dès que le texte ressemble à des horaires (présence d'une heure) : s'il n'est pas
   // parfaitement interprétable en grille, l'affichage retombe proprement sur le texte brut.
   return h && /\d\s*[h:]/.test(h) ? h : "";
+}
+// Présence en ligne + horaires en UN SEUL appel IA (au lieu de deux appels parallèles, chacun avec ses
+// propres recherches web) : divise par deux le coût de la recherche IA d'une fiche établissement.
+async function aiFindLinksHoraires(query, persistUsage, wantHoraires) {
+  const prompt = "Recherche la présence en ligne officielle de cet établissement ou enseigne : \"" + query + "\" — site web officiel, page Facebook officielle, compte Instagram officiel" +
+    (wantHoraires ? ", AINSI QUE les horaires d'ouverture habituels de CE magasin (fiche Google Business / site officiel), au format français jour par jour, séparés par des points-virgules (ex. \"Lun 10h-19h; Mar 10h-19h; …; Dim fermé\" ; coupure méridienne : \"Lun 9h30-12h30 et 14h-19h\")" : "") +
+    ". N'invente RIEN : laisse une chaîne vide si tu n'es pas certain. Réponds UNIQUEMENT par un objet JSON sans texte ni Markdown : {\"site\":\"\",\"facebook\":\"\",\"instagram\":\"\"" + (wantHoraires ? ",\"horaires\":\"\"" : "") + "}.";
+  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 700, tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }], messages: [{ role: "user", content: prompt }] }) });
+  if (!res.ok) throw new Error("API " + res.status);
+  const dt = await res.json();
+  if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
+  const text = (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+  const m = text.match(/\{[\s\S]*\}/); let o = {}; try { o = m ? JSON.parse(m[0]) : {}; } catch (e) {}
+  const clean = (v) => (typeof v === "string" ? v.trim() : "");
+  const h = clean(o.horaires);
+  return { site: clean(o.site), facebook: clean(o.facebook), instagram: clean(o.instagram), horaires: h && /\d\s*[h:]/.test(h) ? h : "" };
 }
 // Encart photo / logo éditable : téléversement, URL, logo automatique (web) ou logo du groupe.
 function EntityPhoto({ value, onChange, initials: ini, bg, round, size = 64, enseigne, groupLogo, fallback, linkedinHref, persistUsage }) {
@@ -3767,10 +3838,9 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
     const usage = (u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }));
     const q = [s.label, acc && acc.enseigne, s.adresse || (acc && acc.ville)].filter(Boolean).join(" ");
     try {
-      const [links, horaires] = await Promise.all([
-        aiFindLinks(q, usage),
-        String(s.horaires || "").trim() ? Promise.resolve("") : aiFindHoraires(q, usage).catch(() => ""),
-      ]);
+      // Un seul appel IA pour liens + horaires (au lieu de deux) : moitié moins de recherches web payantes.
+      const links = await aiFindLinksHoraires(q, usage, !String(s.horaires || "").trim());
+      const horaires = links.horaires || "";
       const patch = {}; const got = [];
       if (links.site && !s.site) { patch.site = links.site; got.push("site web"); }
       if (links.facebook && !s.facebook) { patch.facebook = links.facebook; got.push("Facebook"); }
@@ -5127,7 +5197,7 @@ function Fiche({ c, account, data, myEmail, settings, deals, interactions, onBac
     if (!fullName(c) || fullName(c) === "Contact") { setEnrMsg("Renseignez d'abord le prénom et le nom."); return; }
     setEnr(true); setEnrMsg(null);
     try {
-      const text = await callClaude({ model: "claude-haiku-4-5", max_tokens: 700, tools: [{ type: "web_search_20250305", name: "web_search" }], messages: [{ role: "user", content: "Recherche sur le web l'URL publique du profil LinkedIn de " + (c.prenom + " " + c.nom).trim() + (ens ? (", qui travaille chez " + ens + (c.fonction ? (" comme " + c.fonction) : "")) : "") + ", ainsi que sa ville si trouvable. Renvoie UNIQUEMENT un objet JSON sans texte ni Markdown: {\"linkedin\":\"url ou vide\",\"ville\":\"ville ou vide\",\"confiance\":\"haute/moyenne/faible\"}. Ne devine pas: si tu n'es pas sur, laisse vide." }] });
+      const text = await callClaude({ model: "claude-haiku-4-5", max_tokens: 700, tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }], messages: [{ role: "user", content: "Recherche sur le web l'URL publique du profil LinkedIn de " + (c.prenom + " " + c.nom).trim() + (ens ? (", qui travaille chez " + ens + (c.fonction ? (" comme " + c.fonction) : "")) : "") + ", ainsi que sa ville si trouvable. Renvoie UNIQUEMENT un objet JSON sans texte ni Markdown: {\"linkedin\":\"url ou vide\",\"ville\":\"ville ou vide\",\"confiance\":\"haute/moyenne/faible\"}. Ne devine pas: si tu n'es pas sur, laisse vide." }] });
       const m = text.match(/\{[\s\S]*\}/); const o = m ? JSON.parse(m[0]) : {};
       const patch = {}; if (o.linkedin && !c.linkedin) patch.linkedin = o.linkedin; if (o.ville && !c.ville) patch.ville = o.ville;
       if (Object.keys(patch).length) { onSaveContact({ ...c, ...patch }); setEnrMsg("Proposition (confiance " + (o.confiance || "?") + ") ajoutée. À vérifier avant de vous y fier."); }
@@ -6336,7 +6406,7 @@ Renvoie UNIQUEMENT un tableau JSON valide (aucun texte ni balise autour). Chaque
 Si la requête est une zone, donne entre 6 et 10 établissements ; si c'est un établissement ou une enseigne précis, ne renvoie que la ou les fiches correspondantes (ne complète pas avec d'autres établissements). Toujours des adresses réelles : mieux vaut moins de fiches mais fiables.`;
   const res = await fetch(CLAUDE_URL, {
     method: "POST", headers: await claudeHeaders(),
-    body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 3000, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search" }] }),
+    body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 3000, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 12 }] }),
   });
   if (!res.ok) throw new Error("API " + res.status);
   const data = await res.json();
@@ -6360,7 +6430,7 @@ async function aiAutofill({ kind, enseigne, ville, adresse, typesEtab }) {
   user += `\n\nRenvoie UNIQUEMENT un objet JSON valide, sans aucun texte ni balise autour, avec EXACTEMENT ces clés :\n${schema}\n"source" = nom de la source officielle utilisée. Tout champ non trouvé reste une chaîne vide.`;
   const res = await fetch(CLAUDE_URL, {
     method: "POST", headers: await claudeHeaders(),
-    body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1200, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search" }] }),
+    body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1200, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }] }),
   });
   if (!res.ok) throw new Error("API " + res.status);
   const data = await res.json();
@@ -6426,49 +6496,130 @@ async function lookupSirene(query) {
     mono,
   };
 }
+// Grandes enseignes nationales : le site web et les réseaux sociaux sont ceux de la MARQUE, pas du
+// magasin — on ne paie pas de recherches web pour les retrouver fiche par fiche.
+const GRANDES_ENSEIGNES = ["leclerc", "joueclub", "king jouet", "la grande recre", "grande recre", "cultura", "fnac", "darty", "auchan", "carrefour", "intermarche", "super u", "hyper u", "systeme u", "casino", "monoprix", "picwictoys", "picwic", "maxi toys", "action", "gifi", "b&m", "centrakor", "foir fouille", "foirfouille", "stokomani", "noz", "oxybul", "nature et decouvertes", "toys r us", "lidl", "aldi"];
+function isGrandeEnseigne(p) {
+  const t = String((p && p.type) || "");
+  if (t === "chaine" || t === "cooperative" || t === "gss") return true;
+  const n = stripAccentsLow([p && p.nom, p && p.enseigne].filter(Boolean).join(" ")).replace(/['’-]/g, " ");
+  return GRANDES_ENSEIGNES.some((e) => n.includes(e));
+}
+// Département déduit du code postal (approximation Corse 2A/2B, outre-mer sur 3 chiffres) — gratuit, sans IA.
+function cpToDepartement(cp) {
+  const c = String(cp || "").replace(/\D/g, ""); if (c.length !== 5) return "";
+  if (c.startsWith("97") || c.startsWith("98")) return c.slice(0, 3);
+  if (c.startsWith("20")) return +c < 20200 ? "2A" : "2B";
+  return c.slice(0, 2);
+}
+const REGIONS_DEPTS = {
+  "Auvergne-Rhône-Alpes": ["01", "03", "07", "15", "26", "38", "42", "43", "63", "69", "73", "74"],
+  "Bourgogne-Franche-Comté": ["21", "25", "39", "58", "70", "71", "89", "90"],
+  "Bretagne": ["22", "29", "35", "56"],
+  "Centre-Val de Loire": ["18", "28", "36", "37", "41", "45"],
+  "Corse": ["2A", "2B"],
+  "Grand Est": ["08", "10", "51", "52", "54", "55", "57", "67", "68", "88"],
+  "Hauts-de-France": ["02", "59", "60", "62", "80"],
+  "Île-de-France": ["75", "77", "78", "91", "92", "93", "94", "95"],
+  "Normandie": ["14", "27", "50", "61", "76"],
+  "Nouvelle-Aquitaine": ["16", "17", "19", "23", "24", "33", "40", "47", "64", "79", "86", "87"],
+  "Occitanie": ["09", "11", "12", "30", "31", "32", "34", "46", "48", "65", "66", "81", "82"],
+  "Pays de la Loire": ["44", "49", "53", "72", "85"],
+  "Provence-Alpes-Côte d'Azur": ["04", "05", "06", "13", "83", "84"],
+  "Guadeloupe": ["971"], "Martinique": ["972"], "Guyane": ["973"], "La Réunion": ["974"], "Mayotte": ["976"],
+};
+const DEPT_REGION = {}; Object.entries(REGIONS_DEPTS).forEach(([r, ds]) => ds.forEach((d) => { DEPT_REGION[d] = r; }));
 async function aiEnrichProspect(p, persistUsage, instruction) {
-  // Recherche « en produit en croix » : on identifie l'établissement à partir de N'IMPORTE quel signal
-  // disponible sur la fiche (nom, mais aussi SIRET/SIREN, adresse, téléphone, e-mail, site…) et on
-  // complète les champs manquants — Y COMPRIS le nom, qui peut être reconstitué depuis les autres infos.
-  const cible = [p.nom, p.enseigne && p.enseigne !== p.nom ? p.enseigne : "", p.adresse, [p.cp, p.ville].filter(Boolean).join(" ")].filter(Boolean).join(" · ") || "(nom non renseigné — à identifier depuis les données ci-dessous)";
-  const sys = "Tu enrichis la fiche d'un point de vente français (jouets / loisirs créatifs) à partir du web et des registres officiels (annuaire-entreprises.data.gouv.fr / RNE / INSEE, pappers.fr, societe.com, infogreffe.fr, data.inpi.fr), du site officiel et de la fiche Google. Tu fonctionnes comme un produit en croix : à partir de N'IMPORTE quelle donnée déjà connue (nom, SIRET, SIREN, adresse, téléphone, e-mail, site web…), tu retrouves et complètes TOUTES les autres, y compris le nom commercial de l'établissement s'il manque. Tu n'inventes JAMAIS une donnée (identifiant, adresse, courriel, nom) : en cas de doute, tu laisses le champ vide. Tu réponds UNIQUEMENT par du JSON valide.";
-  const known = [p.siret ? "SIRET : " + p.siret : "", p.siren ? "SIREN : " + p.siren : "", p.raisonSociale ? "Raison sociale : " + p.raisonSociale : "", p.adresse ? "Adresse : " + p.adresse : "", [p.cp, p.ville].filter(Boolean).join(" ") ? "Ville : " + [p.cp, p.ville].filter(Boolean).join(" ") : "", (p.telephone || p.contactTel) ? "Téléphone : " + (p.telephone || p.contactTel) : "", (p.email || p.contactEmail) ? "E-mail : " + (p.email || p.contactEmail) : "", p.site ? "Site : " + p.site : "", p.facebook ? "Facebook : " + p.facebook : "", p.instagram ? "Instagram : " + p.instagram : ""].filter(Boolean).join(" ; ");
-  const user = `Établissement à enrichir : ${cible}.${known ? "\nDonnées déjà connues (sers-t'en comme point de départ du produit en croix) : " + known + "." : ""}
-Recherche ses informations vérifiables. Attention aux homonymes : ne retiens que l'établissement correspondant aux données connues (même SIRET/SIREN, même adresse, même téléphone…).
-Sonde systématiquement les sites liés à la fiche, comme le ferait une recherche Google : le site web déjà renseigné, les pages Facebook/Instagram connues, et surtout, si l'établissement appartient à une enseigne ou un réseau (JouéClub, King Jouet, Cultura…), le site officiel de l'enseigne et sa page « trouver un magasin » (store locator) : la fiche magasin de l'enseigne (ex. pour « JouéClub Aix-en-Provence », la fiche du magasin sur joueclub.fr) donne souvent l'adresse exacte, le téléphone, les horaires et le courriel du point de vente.
-Si le nom n'est pas renseigné, reconstitue-le (enseigne + ville, ou raison sociale) à partir des autres données ; sinon laisse "nom" vide.
+  // Enrichissement ÉCONOME en trois temps :
+  // 1) SIRENE / annuaire-entreprises (GRATUIT) pour toute l'identité légale (SIREN, SIRET, raison
+  //    sociale, forme juridique, dirigeant, adresse si société mono-établissement) ;
+  // 2) département + région déduits localement du code postal (GRATUIT) ;
+  // 3) l'IA (payante : tokens + recherches web) UNIQUEMENT pour les champs encore manquants —
+  //    et, pour les grandes enseignes, sans chercher le site web ni les réseaux sociaux.
+  const has = (v) => Boolean(String(v || "").trim());
+  const out = { nom: "", site: "", facebook: "", instagram: "", siren: "", siret: "", raisonSociale: "", formeJuridique: "", adresse: "", cp: "", ville: "", departement: "", region: "", telephone: "", email: "", contactPrenom: "", contactNom: "", contactFonction: "", contactEmail: "", contactTel: "", contactSource: "", notes: "", confiance: "?", source: "", usage: null };
+  // 1) Registre officiel SIRENE — gratuit, sans crédit IA.
+  try {
+    const qs = (p.siret || p.siren || [p.raisonSociale || p.nom || p.enseigne, p.ville].filter(Boolean).join(" ")).trim();
+    if (qs) {
+      const r = await lookupSirene(qs);
+      if (r) {
+        out.siren = r.siren || ""; out.raisonSociale = r.raisonSociale || ""; out.formeJuridique = r.formeJuridique || "";
+        if (r.mono) { out.siret = r.siret || ""; out.adresse = r.adresse || ""; out.cp = r.cp || ""; out.ville = r.ville || ""; }
+        out.contactNom = r.dirigeantNom || ""; out.contactPrenom = r.dirigeantPrenom || ""; out.contactFonction = r.dirigeantFonction || "";
+        if (r.dirigeantNom) out.contactSource = "RNE/INSEE (annuaire-entreprises)";
+        out.source = "SIRENE (annuaire-entreprises)"; out.confiance = "haute";
+      }
+    }
+  } catch (e) { /* registre indisponible : l'IA prendra le relais pour ces champs */ }
+  // 2) Département + région depuis le code postal — gratuit, sans IA.
+  const dep = cpToDepartement(p.cp || out.cp);
+  if (dep && !has(p.departement)) { out.departement = dep; if (!has(p.region)) out.region = DEPT_REGION[dep] || ""; }
+  // 3) Champs restants → IA. Grandes enseignes : ni site web ni réseaux sociaux (ceux de la marque).
+  const grande = isGrandeEnseigne(p);
+  const misses = [];
+  const need = (cond, key, desc) => { if (cond) misses.push({ key, desc }); };
+  need(!has(p.nom) && !has(out.nom), "nom", "nom commercial de CE point de vente (ex. « King Jouet Cahors »), reconstitué depuis les autres données");
+  need(!has(p.adresse) && !has(out.adresse), "adresse", "adresse postale complète de l'établissement");
+  need(!has(p.cp) && !has(out.cp), "cp", "code postal");
+  need(!has(p.ville) && !has(out.ville), "ville", "ville");
+  need(!has(p.telephone) && !has(p.contactTel), "telephone", "téléphone du magasin, format français");
+  need(!has(p.email) && !has(p.contactEmail), "email", "adresse e-mail GÉNÉRIQUE du magasin (accueil, contact), publiée sur le site officiel, la fiche magasin de l'enseigne ou la fiche Google — PAS celle d'une personne");
+  need(!grande && !has(p.site), "site", "URL du site web officiel de l'établissement");
+  need(!grande && !has(p.facebook), "facebook", "URL de la page Facebook officielle");
+  need(!grande && !has(p.instagram), "instagram", "URL du compte Instagram officiel");
+  need(!has(p.siret) && !has(out.siret), "siret", "SIRET (14 chiffres) de CET établissement à cette adresse — vide en cas de doute");
+  need(!has(p.siren) && !has(out.siren), "siren", "SIREN (9 chiffres) de la société exploitante (ou RNA « W… » pour une association)");
+  need(!has(p.raisonSociale) && !has(out.raisonSociale), "raisonSociale", "raison sociale (registres officiels)");
+  need(!has(p.formeJuridique) && !has(out.formeJuridique), "formeJuridique", "forme juridique");
+  need(!has(p.contactNom) && !has(out.contactNom), "contact", "dirigeant ou responsable identifié (prénom, nom, fonction, e-mail, téléphone, source de l'info)");
+  need(!has(p.notes), "notes", "une phrase factuelle (univers produits, implantation)");
+  const consigne = (instruction || "").trim();
+  if (!misses.length && !consigne) return out; // tout est couvert par les sources gratuites : zéro appel IA
+  const schemaObj = {};
+  misses.forEach((m) => { if (m.key === "contact") schemaObj.contact = { prenom: "", nom: "", fonction: "", email: "", telephone: "", source: "" }; else schemaObj[m.key] = ""; });
+  if (consigne) schemaObj.notes = schemaObj.notes || "";
+  schemaObj.confiance = "haute/moyenne/faible"; schemaObj.source = "";
+  const cible = [p.nom, p.enseigne && p.enseigne !== p.nom ? p.enseigne : "", p.adresse || out.adresse, [p.cp || out.cp, p.ville || out.ville].filter(Boolean).join(" ")].filter(Boolean).join(" · ") || "(nom non renseigné — à identifier depuis les données ci-dessous)";
+  const sys = "Tu enrichis la fiche d'un point de vente français (jouets / loisirs créatifs) à partir du web : site officiel, fiche Google, store locator de l'enseigne, et registres officiels si besoin. Tu ne recherches QUE les champs demandés — les autres sont déjà connus. Tu n'inventes JAMAIS une donnée (identifiant, adresse, courriel, nom) : en cas de doute, tu laisses le champ vide. Tu réponds UNIQUEMENT par du JSON valide.";
+  const knownVals = { SIRET: p.siret || out.siret, SIREN: p.siren || out.siren, "Raison sociale": p.raisonSociale || out.raisonSociale, Adresse: p.adresse || out.adresse, Ville: [p.cp || out.cp, p.ville || out.ville].filter(Boolean).join(" "), "Téléphone": p.telephone || p.contactTel, "E-mail": p.email || p.contactEmail, Site: p.site, Facebook: p.facebook, Instagram: p.instagram };
+  const known = Object.entries(knownVals).filter(([, v]) => has(v)).map(([k, v]) => k + " : " + v).join(" ; ");
+  const user = `Établissement : ${cible}.${known ? "\nDonnées déjà connues (sers-t'en pour identifier l'établissement, ne les recherche pas) : " + known + "." : ""}
+Recherche UNIQUEMENT les informations suivantes, vérifiables (attention aux homonymes : ne retiens que l'établissement correspondant aux données connues) :
+${misses.map((m) => "- " + m.key + " : " + m.desc).join("\n")}
+Si l'établissement appartient à une enseigne ou un réseau (JouéClub, King Jouet, Cultura…), consulte en priorité la fiche magasin du site officiel de l'enseigne (store locator) : elle donne souvent l'adresse exacte, le téléphone et le courriel du point de vente.
 Renvoie UNIQUEMENT un objet JSON valide (aucun texte ni balise autour) avec EXACTEMENT ces clés :
-{"nom":"","site":"","facebook":"","instagram":"","siren":"","siret":"","raisonSociale":"","formeJuridique":"","adresse":"","cp":"","ville":"","departement":"","region":"","telephone":"","email":"","contact":{"prenom":"","nom":"","fonction":"","email":"","telephone":"","source":""},"notes":"","confiance":"haute/moyenne/faible","source":""}
-- nom : nom commercial / enseigne de CE point de vente (ex. « King Jouet Cahors »), reconstitué depuis les autres données si absent.
-- site / facebook / instagram : URLs officielles (sinon vide).
-- siren : 9 chiffres de la société (ou RNA « W… » pour une association) ; siret : 14 chiffres de CET établissement à cette adresse (sinon vide).
-- adresse : complète ; telephone : du magasin, format français.
-- email : adresse e-mail GÉNÉRIQUE du magasin (accueil, contact), publiée sur le site officiel, la fiche magasin de l'enseigne ou la fiche Google — PAS celle d'une personne (celle-là va dans contact.email). Vide en cas de doute.
-- contact : dirigeant ou responsable identifié, coordonnées issues de la meilleure source publique ; "source" = d'où vient l'info.
-- notes : une phrase factuelle (univers produits, implantation) ; "source" = registre / source principale.${instruction && instruction.trim() ? "\n\nPRIORITÉ DEMANDÉE PAR L'UTILISATEUR (concentre ta recherche là-dessus, sans rien inventer, et résume les trouvailles dans \"notes\") :\n" + instruction.trim() : ""}`;
-  const body = { model: "claude-haiku-4-5", max_tokens: 1500, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search" }] };
+${JSON.stringify(schemaObj)}
+"source" = registre / source principale utilisée. Tout champ non trouvé reste une chaîne vide.${consigne ? "\n\nPRIORITÉ DEMANDÉE PAR L'UTILISATEUR (concentre ta recherche là-dessus, sans rien inventer, et résume les trouvailles dans \"notes\") :\n" + consigne : ""}`;
+  const body = { model: "claude-haiku-4-5", max_tokens: 1000, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }] };
   const onlyNum = (v) => (typeof v === "string" ? v.replace(/[^0-9A-Za-z]/g, "") : "");
-  let lastErr;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify(body) });
-      if (!res.ok) throw new Error("API " + res.status);
-      const data = await res.json();
-      const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
-      const o = parseJsonObject(text); const c = o.contact || {};
-      if (data.usage && persistUsage) persistUsage(data.usage);
-      return {
-        nom: (o.nom || "").trim(),
-        site: (o.site || "").trim(), facebook: (o.facebook || "").trim(), instagram: (o.instagram || "").trim(),
-        siren: onlyNum(o.siren), siret: onlyNum(o.siret), raisonSociale: (o.raisonSociale || "").trim(), formeJuridique: (o.formeJuridique || "").trim(),
-        adresse: (o.adresse || "").trim(), cp: onlyNum(o.cp), ville: (o.ville || "").trim(), departement: (o.departement || "").trim(), region: (o.region || "").trim(),
-        telephone: (o.telephone || "").trim(), email: (o.email || "").trim(),
-        contactPrenom: (c.prenom || "").trim(), contactNom: (c.nom || "").trim(), contactFonction: (c.fonction || "").trim(), contactEmail: (c.email || "").trim(), contactTel: (c.telephone || "").trim(), contactSource: (c.source || "").trim(),
-        notes: (o.notes || "").trim(), confiance: o.confiance || "?", source: (o.source || "").trim(), usage: data.usage || null,
-      };
-    } catch (e) { lastErr = e; }
+  try {
+    const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify(body) });
+    if (!res.ok) throw new Error("API " + res.status);
+    const data = await res.json();
+    if (data.usage && persistUsage) persistUsage(data.usage);
+    out.usage = data.usage || null;
+    const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+    const o = parseJsonObject(text); const c = o.contact || {};
+    const take = (k, v) => { if (has(v) && !has(out[k])) out[k] = v; };
+    take("nom", (o.nom || "").trim());
+    take("site", (o.site || "").trim()); take("facebook", (o.facebook || "").trim()); take("instagram", (o.instagram || "").trim());
+    take("siren", onlyNum(o.siren)); take("siret", onlyNum(o.siret)); take("raisonSociale", (o.raisonSociale || "").trim()); take("formeJuridique", (o.formeJuridique || "").trim());
+    take("adresse", (o.adresse || "").trim()); take("cp", onlyNum(o.cp)); take("ville", (o.ville || "").trim());
+    take("telephone", (o.telephone || "").trim()); take("email", (o.email || "").trim());
+    take("contactPrenom", (c.prenom || "").trim()); take("contactNom", (c.nom || "").trim()); take("contactFonction", (c.fonction || "").trim()); take("contactEmail", (c.email || "").trim()); take("contactTel", (c.telephone || "").trim()); take("contactSource", (c.source || "").trim());
+    take("notes", (o.notes || "").trim());
+    if (o.confiance) out.confiance = out.confiance === "haute" ? "haute" : o.confiance;
+    if (o.source) out.source = out.source ? out.source + " + " + String(o.source).trim() : String(o.source).trim();
+    // Le code postal a pu arriver via l'IA : re-déduire département / région localement si besoin.
+    const dep2 = cpToDepartement(p.cp || out.cp);
+    if (dep2 && !has(out.departement) && !has(p.departement)) { out.departement = dep2; if (!has(p.region)) out.region = DEPT_REGION[dep2] || ""; }
+    return out;
+  } catch (e) {
+    // Si le registre gratuit a déjà apporté quelque chose, on le conserve plutôt que de tout perdre.
+    if (out.source) return out;
+    throw e;
   }
-  throw lastErr;
 }
 // Import de prospects (Excel/CSV ou liste texte). Reconnaissance souple des colonnes par leur intitulé.
 // Champs SPÉCIFIQUES en tête (siret, siren, contact…) pour qu'ils l'emportent sur les génériques (site,
@@ -6547,7 +6698,9 @@ function createDraftsWithDedup(drafts, data) {
   return { created, skipped };
 }
 function ProspectImportModal({ onClose, onImport }) {
-  const [text, setText] = useState(""); const [drafts, setDrafts] = useState([]); const [enrich, setEnrich] = useState(true); const [msg, setMsg] = useState(null);
+  // La recherche web IA post-import est OPT-IN (décochée par défaut) : c'est le poste de dépense n°1
+  // de l'application — on ne la lance plus silencieusement sur chaque import.
+  const [text, setText] = useState(""); const [drafts, setDrafts] = useState([]); const [enrich, setEnrich] = useState(false); const [msg, setMsg] = useState(null);
   const [mode, setMode] = useState("add"); const [overwrite, setOverwrite] = useState(false); const [addUnmatched, setAddUnmatched] = useState(false);
   const fileRef = useRef(null);
   const applyText = (t) => { setText(t); setDrafts(parseProspectText(t)); setMsg(null); };
@@ -6578,7 +6731,7 @@ function ProspectImportModal({ onClose, onImport }) {
     {isUpd ? <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
       <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 600 }}><input type="checkbox" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} style={{ width: 15, height: 15 }} /> Écraser les valeurs déjà présentes <span style={{ color: "var(--muted)", fontWeight: 500 }}>(par défaut : on ne remplit que les champs vides)</span></label>
       <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 600 }}><input type="checkbox" checked={addUnmatched} onChange={(e) => setAddUnmatched(e.target.checked)} style={{ width: 15, height: 15 }} /> Ajouter les lignes sans correspondance comme nouveaux prospects</label>
-    </div> : <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 600, marginTop: 12 }}><input type="checkbox" checked={enrich} onChange={(e) => setEnrich(e.target.checked)} style={{ width: 15, height: 15 }} /> Lancer la recherche web IA sur les prospects importés (adresse, SIRET, contact…)</label>}
+    </div> : <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 600, marginTop: 12, flexWrap: "wrap" }}><input type="checkbox" checked={enrich} onChange={(e) => setEnrich(e.target.checked)} style={{ width: 15, height: 15 }} /> Lancer la recherche web IA sur les prospects importés (adresse, SIRET, contact…)<span style={{ color: "var(--muted)", fontWeight: 500 }}>— optionnel : l'identité légale (SIREN, dirigeant…) est d'abord cherchée gratuitement dans SIRENE ; l'IA ne complète que le reste (coût estimé ≈ 0,03–0,06 € / fiche{drafts.length > 1 ? ", soit ~" + (drafts.length * 0.05).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " € pour " + drafts.length + " fiches" : ""}).</span></label>}
     <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}><button className="btn btn-g" onClick={onClose}>Annuler</button><button className="btn btn-p" disabled={!drafts.length} onClick={() => onImport(drafts, enrich, mode, { overwrite, addUnmatched })}><Upload size={15} /> {isUpd ? "Mettre à jour" : "Importer"} {drafts.length || ""}</button></div>
   </Modal>);
 }
@@ -6663,7 +6816,7 @@ function Prospection({ data, persist, go }) {
     if (aiJobs.has("prospects:enrich")) { setEnrichMsg({ ok: false, t: "Un enrichissement est déjà en cours." }); return; }
     if (!queue || !queue.length) { setEnrichMsg({ ok: false, t: "Aucune fiche enrichissable." }); return; }
     const consigne = (instruction || "").trim();
-    appConfirm("Enrichir " + queue.length + " fiche(s) prospect via recherche web IA" + (consigne ? ", selon votre consigne" : ", en priorité les e-mails et téléphones manquants") + " ? Cela peut prendre plusieurs minutes et consomme des crédits. Rien n'est inventé, à vérifier ensuite.", { title: "Enrichir les fiches", confirmLabel: "Lancer" }).then((ok) => {
+    appConfirm("Enrichir " + queue.length + " fiche(s) prospect via recherche web IA" + (consigne ? ", selon votre consigne" : ", en priorité les e-mails et téléphones manquants") + " ? L'identité légale est d'abord cherchée GRATUITEMENT dans le registre SIRENE ; l'IA ne complète que les champs restants. Coût estimé : ~" + (queue.length * 0.05).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " € maximum. Cela peut prendre plusieurs minutes. Rien n'est inventé, à vérifier ensuite.", { title: "Enrichir les fiches", confirmLabel: "Lancer" }).then((ok) => {
       if (!ok) return;
       let nMail = 0, nTel = 0;
       setEnrichMsg(null);
@@ -8020,25 +8173,10 @@ function Connexions({ data, persist, autoBackup }) {
             <div><div style={{ color: "var(--muted)" }}>Tokens sortie</div><div style={{ fontWeight: 700 }} className="tnum">{num(u.outputTokens)}</div></div>
             <div><div style={{ color: "var(--muted)" }}>Recherches web</div><div style={{ fontWeight: 700 }} className="tnum">{num(wsN)}</div></div>
           </div>
-          <p style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 12, lineHeight: 1.5 }}>Cumul estimé des appels que <strong>cette application</strong> adresse à l'API Claude (recherche IA, reformulation, synchro Gmail…), au tarif Claude Sonnet 4 (3 $/M tokens entrée, 15 $/M sortie) + l'<strong>outil de recherche web</strong> (≈ 10 $ / 1000 recherches), convertis à 1 $ = {CLAUDE_USD_EUR} €. Les recherches web sont comptées <strong>exactement</strong> depuis l'activation de cette estimation ; celles effectuées <strong>avant</strong> sont estimées d'après les prospects trouvés par l'IA (~1 recherche pour 2 prospects) — estimation basse. Ne reflète pas vos autres usages d'Anthropic. Facturation réelle et complète : console Anthropic.</p>
+          <p style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 12, lineHeight: 1.5 }}>Cumul estimé des appels que <strong>cette application</strong> adresse à l'API Claude (recherche IA, reformulation, synchro Gmail…), au tarif Claude Haiku 4.5 — le modèle réellement utilisé par l'application ({CLAUDE_PRICE_USD.in} $/M tokens entrée, {CLAUDE_PRICE_USD.out} $/M sortie) + l'<strong>outil de recherche web</strong> (≈ 10 $ / 1000 recherches), convertis à 1 $ = {CLAUDE_USD_EUR} €. Les recherches web sont comptées <strong>exactement</strong> depuis l'activation de cette estimation ; celles effectuées <strong>avant</strong> sont estimées d'après les prospects trouvés par l'IA (~1 recherche pour 2 prospects) — estimation basse. Ne reflète pas vos autres usages d'Anthropic. Facturation réelle et complète : console Anthropic.</p>
           <div style={{ marginTop: 8 }}><button className="btn btn-g btn-s" onClick={reset}><RefreshCw size={13} /> Réinitialiser le compteur</button></div>
         </div>
-        {(() => { const du = usageToday(data.claudeUsage); const dTokEur = claudeEur(du), dTokUsd = claudeUsd(du); const dWs = du.webSearches || 0; const dWsUsd = webSearchUsd(dWs), dWsEur = dWsUsd * CLAUDE_USD_EUR; const dTotEur = dTokEur + dWsEur, dTotUsd = dTokUsd + dWsUsd; const fmt = (x) => x.toLocaleString("fr-FR", { minimumFractionDigits: 4, maximumFractionDigits: 4 }); return (
-        <div className="card" style={{ marginTop: 14, borderLeft: "4px solid var(--green)" }}>
-          <div className="sec-h"><h3 className="pu-display">Crédits Claude — aujourd'hui</h3><span style={{ textTransform: "capitalize" }}>{new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</span></div>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ fontSize: 30, fontWeight: 800, color: "var(--green)" }} className="tnum">{fmt(dTotEur)} €</div>
-            <div style={{ fontSize: 13, color: "var(--muted)" }} className="tnum">≈ {fmt(dTotUsd)} $</div>
-          </div>
-          {dWs > 0 && <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4 }}>dont <span className="tnum">{fmt(dTokEur)} €</span> de tokens · <span className="tnum">{fmt(dWsEur)} €</span> de recherche web</div>}
-          <div style={{ display: "flex", gap: 22, flexWrap: "wrap", marginTop: 10, fontSize: 12.5 }}>
-            <div><div style={{ color: "var(--muted)" }}>Appels</div><div style={{ fontWeight: 700 }} className="tnum">{num(du.calls)}</div></div>
-            <div><div style={{ color: "var(--muted)" }}>Tokens entrée</div><div style={{ fontWeight: 700 }} className="tnum">{num(du.inputTokens)}</div></div>
-            <div><div style={{ color: "var(--muted)" }}>Tokens sortie</div><div style={{ fontWeight: 700 }} className="tnum">{num(du.outputTokens)}</div></div>
-            <div><div style={{ color: "var(--muted)" }}>Recherches web</div><div style={{ fontWeight: 700 }} className="tnum">{num(dWs)}</div></div>
-          </div>
-          <p style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 12, lineHeight: 1.5 }}>Consommation (tokens + recherche web) de l'API Claude par cette application <strong>depuis minuit</strong>, au même tarif que le cumul. Repart à zéro au changement de date ; non affecté par la réinitialisation du cumul.</p>
-        </div>); })()}
+        <ClaudeCostChart usage={data.claudeUsage} />
       </>
       ); })()}
     </div>
