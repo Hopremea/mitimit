@@ -1524,6 +1524,37 @@ function computeIdentityAnomalies(data) {
   });
   return out;
 }
+// Doublons de CONTACTS du répertoire : même personne saisie plusieurs fois (import, conversion de
+// prospect, saisie manuelle). Signaux retenus, du plus sûr au plus faible : adresse électronique
+// identique (hors boîtes génériques, qui sont celles du magasin et non d'une personne), téléphone
+// identique, puis nom complet identique. Le nom seul ne suffit jamais entre deux comptes différents :
+// deux homonymes chez deux enseignes sont deux personnes. Aucune fusion n'est faite ici — la liste
+// passe par une revue.
+function computeContactDupClusters(contacts) {
+  const digits = (s) => String(s || "").replace(/\D/g, "");
+  const GEN_LOCAL = new Set(["contact", "info", "infos", "standard", "accueil", "service", "serviceclient", "commande", "commandes", "direction", "secretariat", "magasin", "boutique", "hello", "bonjour"]);
+  const nameOf = (c) => normStr((c.prenom || "") + (c.nom || ""));
+  const mailOf = (c) => { const e = String(c.email || "").trim().toLowerCase(); const m = e.match(/^([^@\s]+)@[^@\s]+\.[^@\s]+$/); return (m && !GEN_LOCAL.has(m[1].replace(/[._\-0-9]/g, ""))) ? e : ""; };
+  const telOf = (c) => { const t = digits(c.mobile || c.fixe); return (t.length >= 9 && t.length <= 15) ? t.slice(-9) : ""; };
+  const active = (contacts || []).filter((c) => c && !c.archived);
+  const parent = {}; const byId = {}; active.forEach((c) => { parent[c.id] = c.id; byId[c.id] = c; });
+  const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
+  // Deux fiches d'un même nom mais rattachées à des comptes différents ne sont rapprochées que si une
+  // coordonnée personnelle (courriel ou téléphone) les relie réellement.
+  const compat = (x, y, viaCoord) => { if (viaCoord) return true; const ax = x.accountId || "", ay = y.accountId || ""; return !ax || !ay || ax === ay; };
+  const byKey = {};
+  active.forEach((c) => {
+    const keys = [];
+    const m = mailOf(c); if (m) keys.push(["E:" + m, true]);
+    const t = telOf(c); if (t) keys.push(["P:" + t, true]);
+    const n = nameOf(c); if (n.length >= 4) keys.push(["N:" + n, false]);
+    keys.forEach(([k, viaCoord]) => { const o = byKey[k]; if (o != null) { if (compat(byId[o], c, viaCoord)) union(o, c.id); } else byKey[k] = c.id; });
+  });
+  const clusters = {};
+  active.forEach((c) => { const r = find(c.id); (clusters[r] = clusters[r] || []).push(c); });
+  return Object.values(clusters).filter((g) => g.length > 1).sort((a, b) => b.length - a.length);
+}
 // Doublons d'ÉVÉNEMENTS en attente : une même relance recréée plusieurs fois pour le même interlocuteur
 // finit par saturer la file « En retard ». On regroupe les événements non faits qui visent le même
 // compte / contact et dont les intitulés se recouvrent largement (mêmes mots significatifs), même
@@ -5466,10 +5497,61 @@ function EmailTemplatesModal({ templates, onClose, persist }) {
     ))}</div>}
   </Modal>);
 }
+// Revue des doublons de contacts : chaque groupe conserve la fiche choisie (la plus complète est
+// proposée), qui absorbe les autres — coordonnées manquantes complétées, et surtout échanges, rendez-
+// vous et rattachements réaffectés vers elle, de sorte qu'aucun historique n'est perdu.
+function ContactDupModal({ clusters, accName, onConfirm, onClose }) {
+  const score = (c) => ["email", "mobile", "fixe", "fonction", "linkedin", "ville", "adresse", "photo", "notes"].filter((k) => String(c[k] || "").trim()).length;
+  const best = (g) => g.slice().sort((a, b) => score(b) - score(a))[0];
+  const [sel, setSel] = useState(() => clusters.map(() => true));
+  const [keepIds, setKeepIds] = useState(() => clusters.map((g) => best(g).id));
+  const toggle = (i) => setSel((s) => s.map((v, j) => j === i ? !v : v));
+  const setKeep = (i, id) => setKeepIds((s) => s.map((v, j) => j === i ? id : v));
+  const allOn = sel.every(Boolean);
+  const nbSuppr = clusters.reduce((n, g, i) => n + (sel[i] ? g.length - 1 : 0), 0);
+  const apply = () => onConfirm(clusters.map((g, i) => { const k = g.find((c) => c.id === keepIds[i]) || g[0]; return [k, ...g.filter((c) => c.id !== k.id)]; }).filter((g, i) => sel[i]));
+  return (<Modal title="Doublons de contacts" onClose={onClose} xl guard={false}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+      <p style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 0, flex: 1, minWidth: 240, lineHeight: 1.55 }}>Cochez les fusions à appliquer, et choisissez dans chaque groupe la fiche à <strong style={{ color: "var(--green)" }}>conserver</strong> : elle récupère les coordonnées manquantes des autres, ainsi que leurs échanges, rendez-vous et rattachements. Les fiches absorbées sont supprimées. La plus complète est proposée par défaut.</p>
+      <button className="btn btn-ghost btn-s" onClick={() => setSel(clusters.map(() => !allOn))}>{allOn ? "Tout décocher" : "Tout cocher"}</button>
+    </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: "55vh", overflowY: "auto", paddingRight: 4 }}>
+      {clusters.map((g, i) => { const suggested = best(g).id; return (
+        <div key={i} className="card" style={{ borderLeft: "3px solid " + (sel[i] ? "var(--blue)" : "var(--line)"), background: sel[i] ? "var(--blue-l)" : "var(--bg)" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 800, fontSize: 13.5, cursor: "pointer", marginBottom: 4 }}><input type="checkbox" checked={sel[i]} onChange={() => toggle(i)} style={{ width: "auto" }} /> Fusionner ce groupe <span style={{ fontWeight: 600, color: "var(--muted)" }}>({g.length} fiches)</span></label>
+          {sel[i] && <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 7 }}>Cliquez la fiche à <strong>conserver</strong>.</div>}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{g.map((c) => { const isKeep = keepIds[i] === c.id; return (
+            <label key={c.id} style={{ display: "flex", alignItems: "flex-start", gap: 9, fontSize: 12.5, padding: "6px 9px", borderRadius: 8, cursor: sel[i] ? "pointer" : "default", background: isKeep ? "rgba(43,182,115,.10)" : "var(--card)", border: "1px solid " + (isKeep ? "rgba(43,182,115,.35)" : "var(--line)") }}>
+              <input type="radio" name={"ckeep-" + i} checked={isKeep} disabled={!sel[i]} onChange={() => setKeep(i, c.id)} style={{ width: "auto", marginTop: 3, flexShrink: 0 }} title="Conserver cette fiche" />
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontWeight: 700, display: "block" }}>{fullName(c) || "Sans nom"}{c.fonction ? " — " + c.fonction : ""}{isKeep && <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 800, color: "var(--green)" }}>● conservée</span>}{!isKeep && sel[i] && <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 800, color: "#b4261e" }}>● supprimée</span>}{c.id === suggested && !isKeep && <span style={{ marginLeft: 6, fontSize: 10.5, color: "var(--muted)" }}>(la plus complète)</span>}</span>
+                <span style={{ color: "var(--muted)", display: "block" }}>{[accName(c.accountId), c.email, c.mobile || c.fixe, c.ville].filter(Boolean).join(" · ") || "—"}</span>
+              </span>
+            </label>); })}</div>
+        </div>); })}
+    </div>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 12, flexWrap: "wrap", borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+      <span style={{ fontSize: 12, color: "var(--muted)" }}>{clusters.filter((g, i) => sel[i]).length} fusion(s) · {nbSuppr} fiche(s) supprimée(s)</span>
+      <div style={{ display: "flex", gap: 8 }}><button className="btn btn-ghost" onClick={onClose}>Annuler</button><button className="btn btn-p" disabled={!nbSuppr} onClick={apply}><Copy size={15} /> Fusionner la sélection</button></div>
+    </div>
+  </Modal>);
+}
 function Repertoire({ data, persist, go, focus }) {
   const { contacts, accounts, deals, interactions, settings } = data;
   const [openId, setOpenId] = useState(null); const [q, setQ] = useState(""); const [filt, setFilt] = useState("tous"); const [editC, setEditC] = useState(null); const [grp, setGrp] = useState("alpha"); const [dir, setDir] = useState("asc"); const [view, setView] = useState("actifs"); const [tplOpen, setTplOpen] = useState(false);
   const unarchiveContact = (id) => persist((p) => ({ ...p, contacts: p.contacts.map((c) => c.id === id ? { ...c, archived: false } : c) }));
+  // Doublons du répertoire : détection permanente (le bouton n'apparaît que s'il y en a), revue et
+  // fusion vers la fiche choisie, qui hérite des échanges et rendez-vous des fiches absorbées.
+  const [dupOpen, setDupOpen] = useState(false);
+  const [dupMsg, setDupMsg] = useState(null);
+  const dupClusters = useMemo(() => computeContactDupClusters(data.contacts), [data.contacts]);
+  const applyContactMerges = (groups) => {
+    let removed = 0;
+    persist((p) => { let np = p; (groups || []).forEach((g) => { const w = g[0]; g.slice(1).forEach((c) => { np = mergeContacts(np, c.id, w.id); removed++; }); }); return np; });
+    setDupOpen(false);
+    setDupMsg(removed + " fiche(s) fusionnée(s) · échanges, rendez-vous et rattachements reportés sur la fiche conservée.");
+    setTimeout(() => setDupMsg(null), 7000);
+  };
   const archivedContacts = contacts.filter((c) => c.archived);
   const dwell = useDwellPreview();
   useEffect(() => { if (focus && focus.id) setOpenId(focus.id); }, [focus && focus.n]);
@@ -5492,9 +5574,10 @@ function Repertoire({ data, persist, go, focus }) {
       <div style={{ position: "relative", flex: 1, minWidth: 200 }}><Search size={15} style={{ position: "absolute", left: 11, top: 11, color: "var(--muted)" }} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un contact, une fonction, un courriel…" style={{ width: "100%", padding: "9px 11px 9px 32px", border: "1px solid var(--line)", borderRadius: 11, fontFamily: "inherit", fontSize: 13.5 }} /></div>
       <GroupBar value={grp} onChange={setGrp} dir={dir} onToggleDir={() => setDir((d) => d === "asc" ? "desc" : "asc")} options={[{ id: "alpha", label: "A → Z" }, { id: "enseigne", label: "groupe / établissement" }, { id: "role", label: "rôle" }, { id: "ville", label: "ville" }, { id: "departement", label: "département" }]} />
       <button className="btn btn-ghost" onClick={() => downloadCSV(contacts.map((c) => { const acc = accounts.find((a) => a.id === c.accountId); return { Prenom: c.prenom, Nom: c.nom, Fonction: c.fonction, Role: (ROLE_META[c.role] || { label: c.role }).label, Email: c.email, Mobile: c.mobile, Fixe: c.fixe, Ville: contactLocality(c, data).ville, Departement: contactLocality(c, data).departement, LinkedIn: c.linkedin, Enseigne: acc ? acc.enseigne : "", Principal: c.principal ? "oui" : "" }; }), "contacts-penup3d-" + new Date().toISOString().slice(0, 10) + ".csv")} title="Exporter en CSV"><FileDown size={15} /> CSV</button>
-      <button className="btn btn-g" onClick={() => setTplOpen(true)} title="Bibliothèque de modèles d'e-mails / réponses réutilisables (à copier-coller)"><Mail size={15} /> Modèles d'e-mails</button>
+      {dupClusters.length > 0 && <button className="btn btn-g" onClick={() => setDupOpen(true)} title="Détecter et fusionner les contacts saisis plusieurs fois (même adresse, même téléphone, ou même nom dans le même compte)"><GitBranch size={15} /> Doublons ({dupClusters.reduce((n, g) => n + g.length - 1, 0)})</button>}<button className="btn btn-g" onClick={() => setTplOpen(true)} title="Bibliothèque de modèles d'e-mails / réponses réutilisables (à copier-coller)"><Mail size={15} /> Modèles d'e-mails</button>
       <button className="btn btn-p" onClick={() => setEditC({ id: "c_" + Date.now(), accountId: accounts[0]?.id || "", prenom: "", nom: "", fonction: "", role: "autre", email: "", mobile: "", fixe: "", linkedin: "", ville: "", departement: "", adresse: "", principal: false, notes: "", createdAt: TODAY() })}><Plus size={16} /> Nouveau contact</button>
     </div>
+    {dupMsg && <div className="card" style={{ borderLeft: "4px solid var(--green)", marginBottom: 12, fontSize: 12.5 }}>{dupMsg}</div>}
     <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
       <span style={{ fontSize: 12.5, color: "var(--muted)", fontWeight: 700 }}>Filtrer par enseigne :</span>
       <select value={filt} onChange={(e) => setFilt(e.target.value)} style={{ padding: "7px 10px", border: "1px solid var(--line)", borderRadius: 9, fontSize: 13, fontFamily: "inherit", background: "var(--card)", minWidth: 220, maxWidth: "100%" }}>
@@ -5511,6 +5594,7 @@ function Repertoire({ data, persist, go, focus }) {
       return groupList([...list].sort((a, b) => (a.nom || a.prenom || "").localeCompare(b.nom || b.prenom || "", "fr") || (a.prenom || "").localeCompare(b.prenom || "", "fr")), gd, dir).map((g) => { const m = gd.meta ? gd.meta(g.key) : null; return (<div key={g.key} style={{ marginBottom: 18 }}><GroupHeader label={m ? m.label : g.key} color={m ? m.color : "#9aa6bd"} count={g.items.length} />{g.items.map(row)}</div>); });
     })()}
     </>)}
+    {dupOpen && <ContactDupModal clusters={dupClusters} accName={(id) => (accounts.find((a) => a.id === id) || {}).enseigne || ""} onConfirm={applyContactMerges} onClose={() => setDupOpen(false)} />}
     {editC && !openId && <Modal title={contacts.some((x) => x.id === editC.id) ? "Modifier le contact" : "Nouveau contact"} onClose={() => setEditC(null)} wide><ContactForm contact={editC} accounts={accounts} contacts={contacts} sites={data.sites} known={collectKnownAddresses(data)} onSave={(x) => { saveContact(x); setEditC(null); }} /></Modal>}
     {tplOpen && <EmailTemplatesModal templates={data.emailTemplates} onClose={() => setTplOpen(false)} persist={persist} />}
     {dwell.node}
