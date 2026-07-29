@@ -8809,10 +8809,12 @@ function Prospection({ data, persist, go }) {
 // personnalisés (angles vrais), aperçus éditables, et création de BROUILLONS Gmail (jamais d'envoi).
 function ProspectMailing({ data, persist, onClose }) {
   const prospects = data.prospects || [];
-  const DEFAULT_TYPES = ["cooperative", "chaine", "franchise", "independant", "specialiste"];
   // Tous les états du volet passent par useWaveState / useWaveCards : on peut fermer le volet pendant
   // la génération (qui continue) et le rouvrir sur exactement la même page, mails rédigés compris.
-  const [types, setTypes] = useWaveState("types", () => new Set(DEFAULT_TYPES));
+  // Aucun type coché au départ : le ciblage est un choix explicite. Une présélection pousse à lancer
+  // une vague sur un périmètre qu'on n'a pas décidé, et le mailing engage la marque auprès de vrais
+  // magasins. Ensemble vide = aucun prospect listé, jamais « tous ».
+  const [types, setTypes] = useWaveState("types", () => new Set());
   // « Autre » : recherche libre par nom / enseigne (ex. « JouéClub » sélectionne tous les JouéClub,
   // tous types confondus). Active seulement quand la puce « Autre » est cochée et le champ rempli.
   const [nameQuery, setNameQuery] = useWaveState("nameQuery", "");
@@ -9040,7 +9042,7 @@ function ProspectMailing({ data, persist, onClose }) {
       <span style={{ fontSize: 11, color: "var(--muted)" }}>Joint à <strong>tous</strong> les brouillons de la vague (catalogue, plaquette…). Maximum 3 Mo. Le document reste sélectionné si vous fermez le volet, mais pas après un rechargement de la page.</span>
     </div>
     <div style={{ border: "1px solid var(--line)", borderRadius: 12, maxHeight: 240, overflowY: "auto", margin: "6px 0 10px" }}>
-      {filtered.length === 0 ? <div className="empty" style={{ padding: 16 }}>Aucun prospect ne correspond aux filtres.</div> : filtered.map(({ p, a, deja }) => { const on = sel.has(p.id); const mailTo = prospectMailAddress(p); const noMail = !mailTo; return (
+      {filtered.length === 0 ? <div className="empty" style={{ padding: 16 }}>{(!types.size && !nameQ) ? "Choisissez un ou plusieurs types de commerce ci-dessus pour afficher les prospects à cibler." : "Aucun prospect ne correspond aux filtres."}</div> : filtered.map(({ p, a, deja }) => { const on = sel.has(p.id); const mailTo = prospectMailAddress(p); const noMail = !mailTo; return (
         <label key={p.id} className="hrow" style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 11px", borderBottom: "1px solid var(--line)", cursor: "pointer", opacity: (a.risque === "bloquant" || deja) ? 0.6 : 1 }}>
           <input type="checkbox" checked={on} onChange={() => toggleSel(p.id)} style={{ width: "auto" }} />
           <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{p.nom || p.enseigne || "Sans nom"} <span style={{ fontWeight: 500, color: "var(--muted)" }}>· {p.ville || "—"} · {(PROSPECT_TYPES[p.type] || {}).label || "—"}</span></div><div style={{ fontSize: 11.5, color: "var(--muted)", display: "flex", gap: 8, flexWrap: "wrap" }}><span style={{ color: a.objectif_type === "referencement" ? "var(--green)" : "#7c5cf0", fontWeight: 700 }}>{a.objectif_type === "referencement" ? "→ référencement" : "→ trouver le contact centrale"}</span><span>angle : {ANGLE_LBL[a.bestAngle]}</span><span style={{ color: noMail ? "var(--red)" : "var(--muted)" }} title={!noMail && !(p.email || "").trim() ? "Adresse du contact identifié (pas d'e-mail magasin renseigné)" : "E-mail du magasin"}>{noMail ? "✉ aucune adresse" : "✉ " + mailTo}</span>{a.risque === "bloquant" && <span style={{ color: "var(--red)", fontWeight: 700 }}>⚠ à revoir</span>}{deja && <span style={{ color: "#b45309", fontWeight: 800 }} title={deja.source + (deja.quoi ? " — " + deja.quoi : "")}>✔ déjà contacté{deja.date ? " le " + deja.date : ""}</span>}</div></div>
