@@ -4986,8 +4986,17 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
   // ouvre bien un brouillon vierge, au lieu de restituer le message destiné au précédent.
   const scope = "compose:" + ((account && account.id) || "") + ":" + ((site && site.id) || "") + ":" + (defaultContactId || (contact && contact.id) || "");
   const [recipientId, setRecipientId] = useKept(scope, "recipientId", pickDefault);
-  const recipient = fullList.find((c) => c.id === recipientId) || list[0] || STD;
-  const isStd = !!(recipient && recipient.__standard);
+  const recipientBase = fullList.find((c) => c.id === recipientId) || list[0] || STD;
+  const isStd = !!(recipientBase && recipientBase.__standard);
+  // Adresse d'envoi : celle du contact (nominative) ou celle du magasin (générique). Utile quand le
+  // contact n'a pas d'adresse personnelle, ou pour passer volontairement par l'accueil du point de
+  // vente. L'adresse du magasin vient de l'établissement, à défaut du compte.
+  const storeMail = ((site && (site.email || site.contactMail)) || (account && account.email) || "").trim();
+  const [addrMode, setAddrMode] = useKept(scope, "addrMode", "auto");
+  // « auto » : l'adresse nominative si elle existe, sinon celle du magasin — jamais de fenêtre sans
+  // destinataire possible alors qu'une adresse est disponible.
+  const useStoreMail = isStd || addrMode === "magasin" || (addrMode === "auto" && !(recipientBase.email || "").trim() && !!storeMail);
+  const recipient = (useStoreMail && storeMail && !isStd) ? { ...recipientBase, email: storeMail } : recipientBase;
   const [canal, setCanal] = useKept(scope, "canal", "email");
   const [sousCanal, setSousCanal] = useKept(scope, "sousCanal", "");
   const [type, setType] = useKept(scope, "type", "prospection");
@@ -5026,9 +5035,12 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
     if (forceSegment === "retail") c.emetteur = RETAIL;
     else if (forceSegment === "institutionnel") c.emetteur = INSTIT;
     if (isStd) c.destinataire = { civilite: "", nom: "Standard / accueil", fonction: "Standard téléphonique", email: "", typeAdresse: "generique" };
+    // Envoi sur l'adresse du magasin : le message reste adressé à la personne, mais l'adresse est
+    // générique — la règle de rédaction ajoute alors la ligne de routage « À l'attention de… ».
+    else if (useStoreMail && storeMail && c.destinataire) c.destinataire = { ...c.destinataire, email: storeMail, typeAdresse: typeAdresseOf(storeMail, (account && account.enseigne) || estabName) };
     excluded.forEach((k) => { delete c[k]; });
     return c;
-  }, [fullCtx, forceSegment, excluded, isStd]);
+  }, [fullCtx, forceSegment, excluded, isStd, useStoreMail, storeMail]);
   const charCount = useMemo(() => JSON.stringify(effCtx).length, [effCtx]);
   const applyResult = (r) => {
     setSubject(r.objet || (canal === "email" ? ("PEN'UP 3D — " + estabName) : ""));
@@ -5115,7 +5127,14 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
     </div>
     <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 10, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
       <span>{canal === "sms" ? (recMobile ? "📱 " + recMobile : "Aucun mobile renseigné") : canal === "email" ? (recMail ? "✉️ " + recipient.email : "Aucune adresse e-mail") : (recipient && recipient.linkedin ? "Profil LinkedIn renseigné" : "Recherche LinkedIn")}</span>
-      {canal === "email" && effCtx.destinataire && <span>Adresse : <strong>{effCtx.destinataire.typeAdresse === "generique" ? "générique (routage ajouté)" : "nominative"}</strong></span>}
+      {canal === "email" && !isStd && <label style={{ display: "inline-flex", alignItems: "center", gap: 5 }} title="Choisir l'adresse d'envoi : celle de la personne, ou l'adresse générique du point de vente.">Adresse :
+        <select value={addrMode} onChange={(e) => setAddrMode(e.target.value)} style={{ padding: "3px 6px", border: "1px solid var(--line)", borderRadius: 7, fontFamily: "inherit", fontSize: 11, background: "var(--card)" }}>
+          <option value="auto">Automatique</option>
+          <option value="nominative" disabled={!(recipientBase.email || "").trim()}>Nominative{(recipientBase.email || "").trim() ? "" : " — aucune adresse"}</option>
+          <option value="magasin" disabled={!storeMail}>Magasin{storeMail ? " (" + storeMail + ")" : " — aucune adresse"}</option>
+        </select></label>}
+      {canal === "email" && effCtx.destinataire && <span>Type : <strong>{effCtx.destinataire.typeAdresse === "generique" ? "générique (routage ajouté)" : "nominative"}</strong></span>}
+      {canal === "email" && addrMode === "nominative" && !(recipientBase.email || "").trim() && storeMail && <span style={{ color: "var(--red)", fontWeight: 700 }}>Aucune adresse nominative : choisissez « Magasin ».</span>}
       {canal === "linkedin" && <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}><input type="checkbox" checked={sousCanal === "invitation"} onChange={(e) => setSousCanal(e.target.checked ? "invitation" : "")} style={{ width: "auto" }} /> Invitation (≤ 280 car.)</label>}
     </div>
     <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
