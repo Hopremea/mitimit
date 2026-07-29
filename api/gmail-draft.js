@@ -38,7 +38,22 @@ async function decodeAttachments(list) {
     const nom = String((a && a.filename) || "").trim().replace(/[\r\n"\\/]/g, "").slice(0, 120);
     if (!nom) throw new Error("Pièce jointe sans nom de fichier.");
     const mime = String((a && a.mimeType) || "application/octet-stream").replace(/[\r\n;"]/g, "").slice(0, 100);
-    // Voie normale : le document a été déposé dans le stockage, on le relit ici.
+    // Voie sans clé de service : le navigateur a déposé le document avec sa propre session et nous
+    // transmet une URL signée, à durée limitée. Le serveur n'a alors besoin d'aucun accès Supabase.
+    const url = String((a && a.storageUrl) || "").trim();
+    if (url) {
+      if (!/^https:\/\//i.test(url)) throw new Error("URL de document invalide.");
+      const r = await fetch(url);
+      if (!r.ok) throw new Error("Document « " + nom + " » introuvable dans le dépôt (renvoyez-le).");
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (!buf.length) throw new Error("Document « " + nom + " » vide.");
+      if (buf.length > MAX_PIECE) throw new Error("« " + nom + " » dépasse 25 Mo (" + (buf.length / 1048576).toFixed(1) + " Mo), la limite de Gmail.");
+      total += buf.length;
+      if (total > MAX_TOTAL) throw new Error("Pièces jointes trop volumineuses au total (max 25 Mo, limite de Gmail).");
+      out.push({ filename: nom, mimeType: mime, content: buf });
+      continue;
+    }
+    // Voie avec clé de service : le document a été déposé via une autorisation signée, on le relit ici.
     const chemin = String((a && a.storagePath) || "").replace(/^\/+/, "");
     if (chemin) {
       if (!sb) throw new Error("Stockage non configuré côté serveur : impossible de relire « " + nom + " ».");
