@@ -1805,13 +1805,18 @@ Pas d'apposition bancale non plus : jamais un nom collé à une proposition ind�
 <regles_or>
 Treize règles qui priment sur tout le reste de ce prompt, sur la consigne de vague et sur le ton demandé.
 
-1. JAMAIS « biocompatible ». Le filament est NON TOXIQUE et CONFORME À LA NORME EN 71. « Biocompatible » est un terme médical inexact et une allégation risquée sur un produit destiné aux enfants. Ni « biodégradable », ni « compostable », ni « biosourcé ».
+1. JAMAIS « biocompatible », ni « biodégradable », « compostable » ou « biosourcé » : termes inexacts et allégations risquées sur un produit destiné aux enfants. « Non toxique » est la seule formulation admise, et elle n'est utile que si la sécurité vient réellement dans la conversation — la plupart du temps, elle ne sert à rien.
+Ne mets JAMAIS en avant une norme ou une certification : EN 71, marquage CE, conformité jouet. Un commerçant sait qu'un jouet vendu en France est conforme ; le lui annoncer, c'est présenter comme un argument ce qui n'est qu'un dû, et cela affaiblit le mail. Ces mentions n'ont leur place que dans un dossier technique, jamais dans un premier contact.
 
 2. JAMAIS se dévaloriser. Bannis « jeune marque », « petite entreprise », « nous débutons », « je me permets », « désolé de vous déranger », « je ne voudrais pas vous déranger », « si cela ne vous dérange pas ». On présente des atouts — marque française, conception montalbanaise, produit qui fonctionne en rayon, traction en ligne — jamais des fragilités.
 
 3. Tournures interrogatives correctes. « Serais-je possible » est une faute. Écris « Serait-il possible », « Puis-je », ou une question directe. Relis chaque inversion sujet-verbe avant de la garder.
 
-4. Des FAITS COMMERCIALEMENT UTILES, pas des qualités abstraites ni des promesses de résultat. « Ludique et pédagogique » ne dit rien à un vendeur. Ce qu'il peut vérifier et exploiter : la bobine Fil'Up est un consommable qui se rachète, le stylo se démontre en magasin, la marque est française et joignable, la gamme comprend des coffrets prêts à offrir. Ce qu'il faut se garder d'écrire : ce que le produit va PRODUIRE chez lui (ventes, trafic, fidélisation, effet en rayon). Tu énonces le fait, il en tire la conclusion — c'est son métier, pas le tien (règle d'or 14).
+4. PARS DE L'INTÉRÊT DU COMMERÇANT, pas des qualités abstraites du produit. « Ludique et pédagogique » ne dit rien à un vendeur. Deux arguments, et dans cet ordre d'importance :
+- LE RÉACHAT, argument central : la bobine Fil'Up est un consommable, elle se rachète. C'est ce qui distingue ce produit d'un jouet vendu une fois.
+- LA DÉMONSTRATION : le stylo se prête à une démonstration ou à un atelier en magasin.
+Tout le reste (coffrets prêts à offrir, coloris, origine montalbanaise) est secondaire et ne se cite que s'il sert l'un des deux.
+Énonce ces deux arguments comme des FAITS, jamais comme des promesses de résultat : « la bobine est un consommable, elle se rachète » est un fait vérifiable ; « ces recharges feront revenir vos clients », « vous fidéliserez les familles », « votre rayon sera animé » sont des prédictions sur SON commerce, qu'il est seul à pouvoir faire (règle d'or 14). Tu poses le fait, il en tire la conclusion.
 
 5. Une demande de rendez-vous PRÉCISE, qui appelle une réponse. Proscris « Qu'en pensez-vous ? ». Écris « Seriez-vous disponible cette semaine ? », « Quel créneau vous arrange ? », « Puis-je passer vous faire une démonstration ? ».
 
@@ -1827,7 +1832,7 @@ Treize règles qui priment sur tout le reste de ce prompt, sur la consigne de va
 
 11. UN ARGUMENT, UNE SEULE FOIS. Chaque idée n'apparaît que dans un seul paragraphe. En particulier, les recharges Fil'Up et le réachat forment UN argument : s'il est développé au deuxième paragraphe, il ne doit pas revenir au troisième. Avant de rendre le mail, relis-le et supprime toute idée qui figure deux fois, même reformulée.
 
-12. UNE SEULE ACTION FINALE, en UNE SEULE question. Un appel et une visio sont une même proposition (contact_mode « appel_visio ») et peuvent figurer dans la même question. En revanche ne mélange jamais un passage en magasin avec un appel ou une visio, et n'enchaîne jamais deux questions (« Puis-je passer ? … Seriez-vous disponible ? »). Après la question, une courte phrase est admise à condition d'apporter une idée NEUVE, jamais de reformuler un argument déjà écrit plus haut.
+12. UNE SEULE QUESTION FINALE, mais souple sur le mode. Appel, visio et passage en magasin peuvent être proposés ensemble dans cette question : contact_mode indique lequel citer en premier, pas lequel interdire. Ce qui reste proscrit, c'est d'enchaîner DEUX questions (« Puis-je passer ? … Seriez-vous disponible ? ») : une seule interrogation, qui appelle une réponse. Après elle, une courte phrase est admise si elle apporte une idée NEUVE, jamais la reformulation d'un argument déjà écrit plus haut.
 
 13. N'IMITE PAS LES MODÈLES MOT POUR MOT. Les modèles de <modeles_de_reference> fixent la longueur et le rythme, pas les phrases. Un mail qui reprend une phrase entière d'un modèle est un échec. Dès la première ou la deuxième phrase, le mail doit contenir un élément propre à CE magasin (son enseigne, son type de commerce, sa ville, son réseau) qui rendrait le texte inutilisable pour un autre destinataire.
 
@@ -1844,9 +1849,9 @@ Ce qu'il ne sait PAS, et qui mérite d'être écrit : ce qu'est concrètement le
 Faits vérifiés sur la marque et la gamme, seuls faits produit utilisables (n'en invente aucun autre) :
 - PEN'UP 3D est une marque française de loisirs créatifs basée à Montauban (Tarn-et-Garonne), en Occitanie, où ses produits sont conçus. Site : penup3d.com.
 - Produit phare : le stylo Pen'Up 3D, un stylo 3D à filament basse température, pour les enfants dès 6 ans. Le filament sort du stylo et durcit en refroidissant : l'enfant dessine dans l'air et l'objet tient debout tout seul. Une seule formulation suffit pour dire cela (règle d'or 15) : « dessiner en volume », OU « créer des objets en trois dimensions », jamais les deux.
-- Le filament Fil'Up est un filament PCL basse température, NON TOXIQUE et CONFORME EN 71 (jamais « biocompatible », jamais « biodégradable »), décliné en de nombreux coloris et effets (unis, pastel, phosphorescent, magique, galaxie, nature…). Ce sont les recharges qui ramènent les familles en magasin.
+- Le filament Fil'Up est un filament PCL basse température, décliné en de nombreux coloris et effets (unis, pastel, phosphorescent, magique, galaxie, nature…). C'est le CONSOMMABLE de la gamme : la bobine se rachète, et c'est l'argument central du mail (règle d'or 4). Il est non toxique et conforme EN 71 : information vraie, mais qui ne s'écrit PAS dans un premier contact (règle d'or 1) — la conformité est un dû, pas un argument.
 - La gamme se construit autour du stylo : Pack Découverte et Pack Complet (coffrets prêts à offrir), recharges de bobines Fil'Up en lots de 3, 4 ou 12, pochoirs Pad'Up, livrets pédagogiques (Découverte, Expert 3D). Prix publics conseillés TTC : stylo seul 49,99 €, Pack Découverte 69,99 €, Pack Complet 99,99 €, recharges dès 9,99 €.
-- Intérêt pour le point de vente, à formuler en FAITS et jamais en promesses : le produit se prête à la démonstration et à l'atelier, et la bobine Fil'Up est un consommable, donc un motif de retour en magasin. Ne va pas au-delà : ne prédis ni les ventes, ni l'effet en rayon, ni la réaction des clients.
+- Intérêt pour le point de vente, à formuler en FAITS et jamais en promesses : la bobine Fil'Up est un consommable qui se rachète (argument central), et le stylo se prête à la démonstration et à l'atelier. Ne va pas au-delà : ne prédis ni les ventes, ni l'effet en rayon, ni la réaction des clients.
 - Les supports pédagogiques ont été développés avec l'appui du Réseau Canopé (formulation exacte, voir interdits).
 - Livraison depuis la France ; franco de port en France métropolitaine à partir de 300 € HT de commande.
 - Disponibilité : l'entrée de gamme n'est pas réapprovisionnée avant août. Tout démarrage se cale sur la rentrée. Ne JAMAIS annoncer un stock, une disponibilité immédiate ni une date de livraison.
@@ -1922,7 +1927,8 @@ Ne les écris jamais, même suggérés par les données.
 - "Made in France", "fabriqué en France", ou toute allégation d'origine française du PRODUIT. La production est en Chine.
 - En revanche "marque française" est autorisé : il décrit l'entreprise, dont le siège est à Montauban, ce qui est vrai.
 - "Agrément Éducation Nationale" ou allégation d'agrément public. Formulation admise : "supports pédagogiques développés avec l'appui du Réseau Canopé".
-- "Biocompatible", "biodégradable", "compostable" ou "biosourcé" pour le filament. Employer "non toxique" et "conforme EN 71" (règle d'or 1).
+- "Biocompatible", "biodégradable", "compostable" ou "biosourcé" pour le filament : seul "non toxique" est admis, et rarement utile (règle d'or 1).
+- Toute mise en avant d'une norme ou d'une certification : "EN 71", "norme européenne", "marquage CE", "conforme à la réglementation jouet". C'est un dû, pas un argument (règle d'or 1).
 - Tout prix, remise, condition commerciale ou délai absent de <connaissance_marque> : seuls les prix publics conseillés et le franco listés y sont utilisables.
 - Toute présentation du Kit Mécanique comme disponible : sa certification n'est pas obtenue.
 - Toute mention d'un mode haute température du stylo : il n'existe plus.
@@ -1955,38 +1961,38 @@ Les crochets sont des variables à remplacer. La formule de politesse finale est
 [MODÈLE 1 — peps mesuré]
 Objet : Pen'Up 3D, un stylo 3D pour enfants et ses recharges
 Bonjour Monsieur/Madame [NOM],
-Matthis-Anaël, de Pen'Up 3D, une marque française basée à Montauban. Notre stylo 3D permet aux enfants dès 6 ans de dessiner en volume, en toute sécurité : le filament sort tiède et durcit en refroidissant.
-Plusieurs revendeurs de la région s'y intéressent déjà, et j'aimerais beaucoup vous le présenter pour [VILLE/MAGASIN].
-Un court appel ou une visio cette semaine ? Je vous montre le stylo en action, et les recharges Fil'Up, qui sont le consommable de la gamme.
+Matthis-Anaël, de Pen'Up 3D, une marque française basée à Montauban. Notre stylo 3D permet aux enfants dès 6 ans de dessiner en volume : le filament sort tiède et durcit en refroidissant.
+Le filament Fil'Up, décliné en de nombreux coloris, est le consommable de la gamme : la bobine se rachète. Plusieurs revendeurs de la région s'y intéressent déjà, et j'aimerais beaucoup vous présenter tout ça pour [VILLE/MAGASIN].
+Un court appel, une visio ou un passage en magasin cette semaine ? Je vous montre le stylo en action.
 
 [MODÈLE 2 — peps + image d'accroche]
 Objet : Un stylo qui dessine dans les airs, conçu à Montauban
 Bonjour Monsieur/Madame [NOM],
 Matthis-Anaël, de Pen'Up 3D, une marque montalbanaise. Notre stylo permet aux enfants de dessiner non pas sur le papier, mais dans les airs : le filament sort tiède, durcit en refroidissant, et l'objet tient debout tout seul. Dès 6 ans, sans risque de brûlure.
 Plusieurs revendeurs de la région l'ont déjà repéré, et j'aimerais vraiment vous le faire découvrir pour [VILLE/MAGASIN].
-On s'appelle cette semaine, ou on cale une visio ? Je vous montre le stylo en action, et les recharges Fil'Up, ce moteur de réachat qui ramène vos clients en rayon.
+On s'appelle cette semaine, ou je passe vous voir ? Je vous montre le stylo en action, et les recharges Fil'Up : le consommable, c'est là que se joue le réachat.
 
 [MODÈLE 3 — peps chaleureux]
 Objet : Un stylo 3D pour enfants, conçu à Montauban
 Bonjour Monsieur/Madame [NOM],
 Matthis-Anaël, de Pen'Up 3D ! Nous sommes une marque française basée à Montauban, et nous avons créé un stylo 3D pour les enfants dès 6 ans : ils dessinent en volume, en toute sécurité, grâce à un filament basse température.
 Le filament Fil'Up existe en de nombreux coloris et effets, et c'est un consommable : la bobine se rachète. Plusieurs revendeurs de la région s'y sont déjà mis, et j'aimerais beaucoup faire découvrir la gamme à [VILLE/MAGASIN].
-Un petit créneau cette semaine pour un appel ou une visio ? Je vous montre tout ça en action.
+Un petit créneau cette semaine, par appel, en visio ou sur place ? Je vous montre tout ça en action.
 
 [MODÈLE 4 — resserré, structure de base]
 Objet : Pen'Up 3D, marque française basée à Montauban
 Bonjour Monsieur/Madame [NOM],
 Matthis-Anaël, de Pen'Up 3D. Nous concevons à Montauban des stylos 3D créatifs pour enfants, et j'ai le sentiment que ce produit aurait sa place dans votre magasin.
-Notre stylo permet aux enfants dès 6 ans de dessiner en volume, en toute sécurité (filament basse température, aucun risque de brûlure).
+Notre stylo permet aux enfants dès 6 ans de dessiner en volume, sans risque de brûlure (filament basse température). Les recharges Fil'Up sont le consommable de la gamme : la bobine se rachète.
 Plusieurs revendeurs de la région s'y intéressent déjà, et j'aimerais beaucoup vous le présenter pour [VILLE/MAGASIN].
-Un court appel ou une visio cette semaine ? Je vous montre le stylo en action, et les recharges Fil'Up, qui sont le consommable de la gamme.
+Un court appel, une visio ou un passage en magasin cette semaine ? Je vous montre le stylo en action.
 
 [MODÈLE 5 — démonstration en magasin ; à privilégier quand contact_mode vaut "visite"]
 Objet : Pen'Up 3D, un stylo créatif conçu à Montauban
 Bonjour Monsieur/Madame [NOM],
 Je m'appelle Matthis-Anaël Prevedello, de Pen'Up 3D, marque française basée à Montauban. Nous concevons un stylo 3D à filament basse température : dès 6 ans, les enfants dessinent en volume, sans risque de brûlure.
-Le filament Fil'Up est non toxique, conforme EN 71, et décliné en de nombreux coloris et effets. C'est un consommable : la bobine se rachète. Nous travaillons déjà avec plusieurs revendeurs de votre région.
-Puis-je passer vous en faire la démonstration cette semaine, à [VILLE/MAGASIN] ? Le stylo est bien plus parlant en action qu'en photo.
+Le filament Fil'Up se décline en de nombreux coloris et effets, et c'est le consommable de la gamme : la bobine se rachète. Nous travaillons déjà avec plusieurs revendeurs de votre région.
+Puis-je passer vous en faire la démonstration cette semaine à [VILLE/MAGASIN], ou préférez-vous un appel ? Le stylo est bien plus parlant en action qu'en photo.
 </modeles_de_reference>
 <format_sortie>
 Réponds UNIQUEMENT par un objet JSON valide, sans texte ni balises autour.
@@ -2039,7 +2045,9 @@ function verifyProspectMail(parsed, angles, magasin) {
   // prompt n'est jamais garantie. Une carte signalée passe en « à revoir » et sort de la création de
   // brouillons en lot, donc rien ne part sans relecture. Comparaison sans accents (voir `norm`).
   const FAUTES = [
-    [/bio-?compatible|biod[ée]gradable|compostable|bio-?sourc[ée]/, "Allégation interdite sur le filament (règle 1) : écrire « non toxique », « conforme EN 71 »."],
+    [/bio-?compatible|biod[ée]gradable|compostable|bio-?sourc[ée]/, "Allégation interdite sur le filament (règle 1) : seul « non toxique » est admis."],
+    // Règle d'or 1 : la conformité est un dû, pas un argument de vente.
+    [/\ben ?71\b|marquage ce\b|norme europ[ée]enne|aux normes (europ[ée]ennes|jouet|en vigueur)|certifi[ée] (ce|jouet)|conforme [àa] la r[ée]glementation/, "Norme ou certification mise en avant (règle 1) : c'est un dû, pas un argument. À retirer du mail."],
     [/jeune marque|petite entreprise|petite structure|nous d[ée]butons|on d[ée]bute|je me permets|d[ée]sol[ée] de vous d[ée]ranger|vous d[ée]ranger/, "Formulation qui dévalorise la marque (règle 2)."],
     [/serais-je possible|serai-je possible/, "Tournure interrogative fautive (règle 3) : « Serait-il possible »."],
     [/qu'en pensez-vous/, "Question trop molle pour appeler une réponse (règle 5) : proposer un créneau."],
@@ -2051,7 +2059,7 @@ function verifyProspectMail(parsed, angles, magasin) {
     [/en volume[^.!?]*en trois dimensions|en trois dimensions[^.!?]*en volume/, "Pléonasme (règle 15) : « en volume » et « en trois dimensions » disent la même chose, n'en garder qu'un."],
     // Règle d'or 14 : ne rien apprendre au commerçant sur son propre métier.
     [/attire l'?(oeil|œil)|s'anime des qu'on|aimant en rayon|se demontre et attire|libert[ée] d'assort|libre d'assortir|libre de (choisir|referencer|r[ée]f[ée]rencer)|comme vous l'entendez|vous savez mieux que/, "Phrase qui n'apprend rien au commerçant (règle 14) : son métier, son statut ou l'effet supposé en rayon."],
-    [/fait revenir vos clients|fera revenir vos clients|fidelisera|dopera vos ventes|boostera|augmentera votre (trafic|chiffre)|briller les yeux/, "Promesse de résultat chez le commerçant (règle 4) : énoncer le fait, pas la conséquence."],
+    [/(fait|fera|feront|font|ramene|ramenera|rameneront|ramenent) (revenir )?(vos|les) clients|fidelisera|fideliseront|dopera vos ventes|boostera|augmentera votre (trafic|chiffre)|briller les yeux|animera votre rayon/, "Promesse de résultat chez le commerçant (règle 4) : énoncer le fait, pas la conséquence."],
   ];
   FAUTES.forEach(([re, msg]) => { if (re.test(text)) { alertes.push(msg); confiance = "a_revoir"; } });
   // Salutation : un premier contact s'adresse par la civilité et le nom, jamais par le prénom (seul ou
