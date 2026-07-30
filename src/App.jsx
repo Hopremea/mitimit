@@ -5767,7 +5767,12 @@ function ContactDupModal({ clusters, accName, onConfirm, onClose }) {
               <input type="radio" name={"ckeep-" + i} checked={isKeep} disabled={!sel[i]} onChange={() => setKeep(i, c.id)} style={{ width: "auto", marginTop: 3, flexShrink: 0 }} title="Conserver cette fiche" />
               <span style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ fontWeight: 700, display: "block" }}>{fullName(c) || "Sans nom"}{c.fonction ? " — " + c.fonction : ""}{isKeep && <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 800, color: "var(--green)" }}>● conservée</span>}{!isKeep && sel[i] && <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 800, color: "#b4261e" }}>● supprimée</span>}{c.id === suggested && !isKeep && <span style={{ marginLeft: 6, fontSize: 10.5, color: "var(--muted)" }}>(la plus complète)</span>}</span>
-                <span style={{ color: "var(--muted)", display: "block" }}>{[accName(c.accountId), c.email, c.mobile || c.fixe, c.ville].filter(Boolean).join(" · ") || "—"}</span>
+                <span style={{ color: "var(--muted)", display: "block", fontSize: 12, marginTop: 4 }}>{accName(c.accountId)}{c.ville ? " · " + c.ville : ""}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 12, marginTop: 5, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>{c.email ? <CheckCircle2 size={14} style={{ color: "var(--green)", flexShrink: 0 }} /> : <X size={14} style={{ color: "var(--muted)", flexShrink: 0 }} />}<span style={{ color: c.email ? "var(--text)" : "var(--muted)" }}>Mail</span></div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>{c.mobile || c.fixe ? <CheckCircle2 size={14} style={{ color: "var(--green)", flexShrink: 0 }} /> : <X size={14} style={{ color: "var(--muted)", flexShrink: 0 }} />}<span style={{ color: c.mobile || c.fixe ? "var(--text)" : "var(--muted)" }}>Téléphone</span></div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, color: (c.prenom && c.nom) ? "var(--text)" : "var(--muted)" }}>{(c.prenom && c.nom) ? <CheckCircle2 size={14} style={{ color: "var(--green)", flexShrink: 0 }} /> : <X size={14} style={{ color: "var(--muted)", flexShrink: 0 }} />}<span>{c.prenom && c.nom ? c.prenom + " " + c.nom : "Contact non identifié"}</span></div>
+                </div>
               </span>
             </label>); })}</div>
         </div>); })}
