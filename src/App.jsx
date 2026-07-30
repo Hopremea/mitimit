@@ -2714,7 +2714,11 @@ body{background:var(--bg);}
 .pu-root{font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:var(--ink);min-height:100vh;display:flex;font-size:14px;background:radial-gradient(1100px 560px at 100% -8%,rgba(63,96,170,.10),transparent 55%),radial-gradient(900px 520px at -8% 6%,rgba(255,210,18,.22),transparent 55%),radial-gradient(820px 520px at 112% 116%,rgba(255,90,69,.14),transparent 55%),var(--bg);}
 .pu-display{font-family:'Bricolage Grotesque','Plus Jakarta Sans',sans-serif;letter-spacing:-.01em;}
 .tnum{font-variant-numeric:tabular-nums;}
-.sb{width:240px;flex:0 0 240px;padding:22px 16px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:6px;background:linear-gradient(180deg,#fffdf8,#fffaf0);border-right:1px solid var(--line);overflow-y:auto;}
+/* Volet de navigation ancré à la fenêtre : il reste visible quel que soit le défilement de la page.
+   « position:sticky » ne suffisait pas, car il cesse d'agir dès qu'un ancêtre crée un contexte de
+   défilement (un « overflow » posé plus haut suffit) ; « fixed » ne dépend d'aucun ancêtre. Le volet
+   étant alors hors du flux, c'est « .main » qui réserve sa largeur par une marge à gauche. */
+.sb{width:240px;flex:0 0 240px;padding:22px 16px;position:fixed;top:0;left:0;height:100vh;z-index:60;display:flex;flex-direction:column;gap:6px;background:linear-gradient(180deg,#fffdf8,#fffaf0);border-right:1px solid var(--line);overflow-y:auto;}
 .brand{display:flex;flex-direction:column;align-items:flex-start;gap:9px;padding:2px 6px 16px;}
 .brand img{width:100%;max-width:178px;height:auto;display:block;}
 .brand-accent{height:5px;width:100%;border-radius:6px;border:1px solid rgba(22,32,58,.10);background:linear-gradient(90deg,var(--blue) 0 33.33%,#ffffff 33.33% 66.66%,var(--red) 66.66% 100%);}
@@ -2732,9 +2736,12 @@ body{background:var(--bg);}
 .sb-brandfoot img{width:100%;max-width:160px;height:auto;display:block;margin:0 auto;transition:opacity .15s;}
 .sb-brandfoot:hover img{opacity:.78;}
 .sb-foot{padding:12px 8px 0;border-top:1px solid var(--line);color:var(--muted);font-size:11px;}
-.main{flex:1;min-width:0;padding:26px 30px 60px;position:relative;z-index:1;}
+.main{flex:1;min-width:0;margin-left:240px;padding:26px 30px 60px;position:relative;z-index:1;}
 .main::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;background-image:radial-gradient(currentColor 0.5px,transparent 0.6px);background-size:22px 22px;opacity:.028;}
-.sb{position:relative;z-index:2;}
+/* Cette règle posait autrefois « position:relative » pour passer le volet au-dessus du motif de fond.
+   Elle écrasait silencieusement le positionnement déclaré plus haut, et c'est ce qui empêchait le
+   volet de rester en place au défilement. Seul l'empilement est conservé ici. */
+.sb{z-index:60;}
 .pu-root::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;background-repeat:repeat;}
 ${THEME_BG_CSS}
 ${DARK_BG_TEXT}
@@ -2999,7 +3006,8 @@ ${ACCENT_CSS}
   .pu-root.nav-open .sb{transform:translateX(0);}
   .sb-scrim{display:block;position:fixed;inset:0;background:rgba(20,32,58,.5);z-index:85;opacity:0;pointer-events:none;transition:opacity .26s;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);}
   .pu-root.nav-open .sb-scrim{opacity:1;pointer-events:auto;}
-  .main{padding:0 14px 54px;min-height:100vh;}
+  /* Le volet redevient un tiroir escamotable : plus de largeur à lui réserver. */
+  .main{margin-left:0;padding:0 14px 54px;min-height:100vh;}
   .mobilebar{display:flex;align-items:center;gap:11px;position:sticky;top:0;z-index:40;background:var(--bg);margin:0 -14px 12px;padding:9px 12px;border-bottom:1px solid var(--line);}
   .mobilebar .mtitle{flex:1;min-width:0;font-weight:800;font-size:16px;font-family:'Bricolage Grotesque','Plus Jakarta Sans',sans-serif;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .navarrows-d{display:none;}
