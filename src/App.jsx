@@ -10882,8 +10882,11 @@ function estimateSalaire({ tauxBase, h25, h50, prime, commission = 0, part = SAL
   const hs50 = (Number(h50) || 0) * t50;
   const hs = hs25 + hs50;
   const pr = Number(prime) || 0;
+  // La commission commerciale n'entre PAS dans l'estimation : elle n'est ni acquise ni versée avec le
+  // salaire du mois (elle dépend du règlement des factures). Elle reste renvoyée, pour être affichée
+  // à titre indicatif, mais ne pèse ni sur le brut, ni sur les cotisations, ni sur le net.
   const comm = Number(commission) || 0;
-  const brut = base + hs + pr + comm;
+  const brut = base + hs + pr;
   const seuil = part > 0 ? base * (79 / part) : base; // 79 % du SMIC (la base vaut « part » % du SMIC)
   const excess = Math.max(0, brut - seuil);
   const cotisVar = SAL_COTIS_EXCESS * excess;
@@ -10966,7 +10969,7 @@ function SalaireRH({ data, persist }) {
     <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--blue)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
       <div>
         <div style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3 }}>Estimation du net à payer · <span style={{ textTransform: "capitalize" }}>{monthName}</span></div>
-        <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3, lineHeight: 1.5 }}>Base {SAL_BASE_HOURS} h + {totHS} h sup. ({h25} h à +25 % · {h50} h à +50 %) + prime (indemnités km) {eur2(prime)}{(Number(comm) || 0) > 0 ? " + commission " + eur2(comm) : ""}, cotisations apprenti déduites.</div>
+        <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3, lineHeight: 1.5 }}>Base {SAL_BASE_HOURS} h + {totHS} h sup. ({h25} h à +25 % · {h50} h à +50 %) + prime (indemnités km) {eur2(prime)}, cotisations apprenti déduites.{(Number(comm) || 0) > 0 ? " Commission commerciale de " + eur2(comm) + " affichée à part, non comprise dans ce montant." : ""}</div>
       </div>
       <div className="pu-display tnum" style={{ fontSize: 34, color: "var(--blue)", fontWeight: 900 }}>{eur2(r.net)}</div>
     </div>
@@ -10980,7 +10983,7 @@ function SalaireRH({ data, persist }) {
         </div>
         <div style={{ marginBottom: 8, fontSize: 11.5, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><span style={{ color: otTouched ? "var(--muted)" : "var(--green)", fontWeight: 700 }}>{otTouched ? "Valeurs saisies manuellement" : "↻ Réparti automatiquement depuis le pointage (" + autoOT.h25 + " h + " + autoOT.h50 + " h)"}</span>{otTouched && <button className="btn btn-g btn-s" onClick={() => setOtTouched(false)} title="Reprendre la répartition automatique du pointage">↻ Auto</button>}</div>
         <div className="fld"><label style={{ textTransform: "capitalize" }}>Prime — indemnités kilométriques · {monthName} (€)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.01" min="0" value={prime} onChange={(e) => { setKmTouched(true); setPrime(e.target.value); }} />{kmTouched && <button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setKmTouched(false)} title="Reprendre la prime (50 % des frais kilométriques du mois)">↻ {eur2(autoKm)}</button>}</div><span style={{ fontSize: 11, color: "var(--muted)" }}>Domicile-travail : 50 % de {eur2(fraisKmMois)} = {eur2(domicilePrime)}{deplTotalMois > 0 ? " · Déplacements ponctuels remboursés à 100 % = " + eur2(deplTotalMois) : ""}. Total prime : {eur2(autoKm)}.</span></div>
-        <div className="fld" style={{ marginTop: 8 }}><label style={{ textTransform: "capitalize" }}>Commission commerciale · {monthName} (€)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.01" min="0" value={comm} onChange={(e) => { setCommTouched(true); setComm(e.target.value); }} />{commTouched && <button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setCommTouched(false)} title="Reprendre la commission calculée sur les factures du mois">↻ {eur2(autoComm)}</button>}</div><span style={{ fontSize: 11, color: "var(--muted)" }}>Calculée sur les factures du mois : 4 % sur la 1re facture d'un établissement (référencement), 2 % en réassort. {num(commRows.length)} facture{commRows.length > 1 ? "s" : ""} ce mois.</span></div>
+        <div className="fld" style={{ marginTop: 8 }}><label style={{ textTransform: "capitalize" }}>Commission commerciale · {monthName} (€)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.01" min="0" value={comm} onChange={(e) => { setCommTouched(true); setComm(e.target.value); }} />{commTouched && <button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setCommTouched(false)} title="Reprendre la commission calculée sur les factures du mois">↻ {eur2(autoComm)}</button>}</div><span style={{ fontSize: 11, color: "var(--muted)" }}>Calculée sur les factures du mois : 4 % sur la 1re facture d'un établissement (référencement), 2 % en réassort. {num(commRows.length)} facture{commRows.length > 1 ? "s" : ""} ce mois. <strong>Affichée pour information : elle n'entre pas dans le salaire estimé.</strong></span></div>
         <div style={{ marginTop: 10 }}><button className="btn btn-g btn-s" onClick={memoriser}><Save size={13} /> Mémoriser mon taux horaire</button></div>
         <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 10, lineHeight: 1.5 }}>Statut apprenti : rémunération à {part} % du SMIC, exonération de cotisations salariales jusqu'à 79 % du SMIC, mutuelle {eur2(mutuelle)}. Les heures sup. sont reprises du pointage et réparties par semaine (8 h à +25 %, au-delà à +50 %). Estimation calibrée sur vos bulletins (~1 € près).</div>
       </div>
@@ -10990,7 +10993,7 @@ function SalaireRH({ data, persist }) {
           <Line l="Heures sup. +25 %" sub={"(" + h25 + " h × " + eur2(r.t25) + ")"} v={eur2(r.hs25)} color="var(--green)" />
           <Line l="Heures sup. +50 %" sub={"(" + h50 + " h × " + eur2(r.t50) + ")"} v={eur2(r.hs50)} color="var(--green)" />
           {(!kmTouched && deplTotalMois > 0) ? <Line l="Prime domicile-travail (50 %)" v={eur2(domicilePrime)} color="var(--green)" /> : <Line l="Prime (indemnités km)" v={eur2(r.prime)} color="var(--green)" />}
-          {(Number(comm) || 0) > 0 && <Line l="Commission commerciale" sub="(4 % référencement / 2 % réassort)" v={eur2(r.commission)} color="var(--green)" />}
+          {(Number(comm) || 0) > 0 && <Line l="Commission commerciale" sub="(4 % référencement / 2 % réassort · hors estimation)" v={eur2(r.commission)} color="var(--muted)" />}
           <div style={{ borderTop: "1px solid var(--line)", margin: "6px 0" }} />
           <Line l="Salaire brut" v={eur2(r.brut)} strong />
           <Line l="Mutuelle santé" v={"− " + eur2(r.mutuelle)} color="var(--muted)" />
@@ -10999,7 +11002,7 @@ function SalaireRH({ data, persist }) {
         </div>
         <div className="card" style={{ borderTop: "3px solid var(--blue)" }}>
           <div className="calc-out" style={{ background: "#eef2fb" }}><span className="l">Net à payer estimé</span><span className="b pu-display tnum" style={{ color: "var(--blue)" }}>{eur2(r.net)}</span></div>
-          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8, lineHeight: 1.5 }}>Avant impôt sur le revenu (prélèvement à la source à 0 % pour un apprenti sous le seuil) et hors acomptes déjà versés.</div>
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8, lineHeight: 1.5 }}>Avant impôt sur le revenu (prélèvement à la source à 0 % pour un apprenti sous le seuil), hors acomptes déjà versés et <strong>hors commission commerciale</strong>.</div>
         </div>
       </div>
     </div>
