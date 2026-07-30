@@ -2174,6 +2174,28 @@ function verifyProspectMail(parsed, angles, magasin) {
 // En-tête de courrier administratif (« À l'attention de Monsieur Ponce, Gérant. ») : on écrit à un
 // commerçant, pas à une administration. La ligne est retirée si le modèle la produit malgré tout, et
 // la fonction est effacée quand elle a été accolée à la salutation.
+// Temporalité inventée : le modèle ne sait pas quand l'échange a eu lieu, et « ce matin » écrit à
+// quelqu'un qu'on a eu l'après-midi se voit immédiatement. On ne devine pas le bon moment, on retire
+// simplement la mention : « notre échange de ce matin » devient « notre échange ».
+const TEMPORALITE_INVENTEE = /(\s*,)?\s*\b(?:de\s+|d'|du\s+)?(?:ce matin|cet apr[èe]s-midi|ce midi|ce soir|hier soir|avant-hier|hier|tout [àa] l'heure|[àa] l'instant|(?:la\s+|cette\s+)?semaine derni[èe]re|(?:le\s+|ce\s+)?mois dernier|il y a (?:quelques|plusieurs|un|une|deux|trois) \w+)\b/gi;
+function sansTemporaliteInventee(t) {
+  return String(t || "").replace(TEMPORALITE_INVENTEE, "").replace(/ {2,}/g, " ").replace(/\s+([,.;:!?])/g, "$1").replace(/\bde\s+\./g, ".");
+}
+// Salutation : sans civilité connue, un premier jet s'adresse trop souvent par le prénom seul
+// (« Bonjour Delphine, »), ce qui sonne comme un publipostage. On retombe alors sur « Bonjour, ».
+function salutationCorrigee(t, dest) {
+  const forme = dest && dest.formeAppel;
+  if (forme !== "nom") return t;                       // « prenom » est un choix assumé, on n'y touche pas
+  const civ = String((dest && dest.civilite) || "").trim();
+  const prenom = String((dest && dest.prenom) || "").trim();
+  if (civ || !prenom) return t;
+  const lignes = String(t || "").split("\n");
+  const i = lignes.findIndex((l) => l.trim());
+  if (i < 0) return t;
+  const re = new RegExp("^bonjour\\s+" + prenom.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*[,!.]?\\s*$", "i");
+  if (re.test(lignes[i].trim())) lignes[i] = "Bonjour,";
+  return lignes.join("\n");
+}
 function sansEnTeteAdministratif(t) {
   const lignes = String(t || "").replace(/\r/g, "").split("\n");
   while (lignes.length && (!lignes[0].trim() || /^[àa]\s+l'attention\s+de\b/i.test(lignes[0].trim()))) {
@@ -5344,6 +5366,13 @@ Privilégie la première personne du singulier (« je ») plutôt que le « nous
    - Champ absent (destinataire inconnu ou standard d'accueil) : adresse générique sobre, "Bonjour,".
    Écris le nom de famille en casse normale ("Dupont"), même s'il est fourni tout en majuscules.
 9. Ton de courriel, jamais de courrier administratif. Bannis "À l'attention de", "Objet de la présente", "Je soussigné", "Veuillez trouver ci-joint", "par la présente", "Monsieur le Gérant", "Madame la Directrice". La fonction du destinataire ne s'écrit nulle part dans le message : il la connaît.
+
+10. N'INVENTE AUCUNE TEMPORALITÉ. Tu ne sais ni le jour, ni l'heure, ni le moment de la journée où un échange a eu lieu : seules les dates figurant dans <contexte> existent. N'écris JAMAIS "ce matin", "cet après-midi", "hier", "tout à l'heure", "la semaine dernière", "il y a quelques jours", ni aucune durée écoulée, si l'information ne figure pas explicitement dans <contexte>. Emploie une référence neutre : "suite à notre échange", "comme convenu", "après notre conversation". Une temporalité inventée est immédiatement démentie par le destinataire, qui sait quand il vous a parlé.
+
+11. LE DESTINATAIRE CONNAÎT DÉJÀ LA MARQUE, sauf en premier contact. Le champ <type> indique la nature du message :
+   - "prospection" (premier contact) : c'est le SEUL cas où l'on présente PEN'UP 3D et le produit.
+   - tout autre type ("catalogue" après appel, "relance", "relance_devis", "rdv", "remerciement", "nouveautes", "reassort") : un échange a déjà eu lieu, la marque et le produit ont déjà été présentés, souvent de vive voix. NE LES RÉEXPLIQUE PAS. Pas de description du stylo, pas de "nous proposons le Pen'Up 3D, un stylo qui…", pas d'argumentaire sur le filament, pas de rappel de ce qu'est la marque. Reprends le fil là où il s'est arrêté et va directement à l'objet du message : le document envoyé, la question posée, l'étape suivante. Une nouveauté produit précise (type "nouveautes") se décrit, mais la gamme connue ne se re-présente jamais.
+   Réexpliquer à quelqu'un ce qu'il vient d'entendre au téléphone donne le sentiment de ne pas avoir écouté.
 </regles_de_fond>
 
 ${INTERDITS_MARQUE}
@@ -5389,7 +5418,9 @@ async function generateMessage({ contexte, consigne, mode, canal, sousCanal, typ
     "<contexte>\n" + JSON.stringify(contexte, null, 2) + "\n</contexte>",
     "<consigne mode=\"" + (mode || "consigne") + "\">\n" + (consigne || "") + "\n</consigne>",
     "<canal>" + canal + (sousCanal ? (" (sousCanal=" + sousCanal + ")") : "") + "</canal>",
-    "<type>" + (type || "") + "</type>",
+    // La clé ET l'objectif du type : le modèle doit savoir à quel moment de la relation il écrit,
+    // pour ne pas re-présenter la marque à quelqu'un qui vient de l'avoir au téléphone (règle 11).
+    "<type>" + (type || "") + ((MSG_TYPES.find((t) => t.key === type) || {}).obj ? ("\nObjectif de ce type de message : " + MSG_TYPES.find((t) => t.key === type).obj) : "") + "</type>",
     "<ton>" + (ton || "") + "</ton>",
   ];
   if (mode === "retouche" && precedent) parts.push("<message_precedent>\n" + precedent + "\n</message_precedent>");
@@ -5507,8 +5538,11 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
     // Objet normalisé comme pour les mails de prospection : préfixe unique « PEN'UP 3D : », jamais
     // doublé. Seul le canal e-mail porte un objet ; LinkedIn et SMS n'en ont pas.
     setSubject(canal === "email" ? objetNormalise(r.objet || "", { nom: estabName }) : sansTiretLong(r.objet || ""));
-    setOut(sansEnTeteAdministratif(sansTiretLong(canal === "email" ? stripSignature(r.corps || "") : (r.corps || "")))); // Gmail ajoute la signature
-    setShortOut(sansEnTeteAdministratif(sansTiretLong(canal === "email" ? stripSignature(r.variante_courte || "") : (r.variante_courte || ""))));
+    // Nettoyages déterministes, dans l'ordre : signature (Gmail la rajoute), tirets longs, en-tête
+    // administratif, temporalité inventée, puis salutation par le prénom seul.
+    const nettoie = (txt) => salutationCorrigee(sansTemporaliteInventee(sansEnTeteAdministratif(sansTiretLong(canal === "email" ? stripSignature(txt || "") : (txt || "")))), (effCtx && effCtx.destinataire) || null);
+    setOut(nettoie(r.corps));
+    setShortOut(nettoie(r.variante_courte));
     setUsedCtx(Array.isArray(r.contexte_utilise) ? r.contexte_utilise : []);
     const al = Array.isArray(r.alertes) ? r.alertes.slice() : [];
     if (r.creneauxNonVerifies && r.creneauxNonVerifies.length) al.unshift("Créneau non vérifié, à contrôler : " + r.creneauxNonVerifies.join(" ; "));
