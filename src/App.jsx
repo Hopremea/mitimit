@@ -2337,7 +2337,7 @@ function convertProspectData(d, p, opts = {}) {
   const mkContact = (accountId, sid, cid, principal) => ({ id: cid, accountId, siteId: sid, prenom: p.contactPrenom || "", nom: (p.contactNom || "").toUpperCase(), fonction: p.contactFonction || "", role: contactRole((p.contactFonction || "").toLowerCase()), email: p.contactEmail || p.email || "", mobile: p.contactTel || "", fixe: "", linkedin: "", ville: p.ville || "", departement: p.departement || "", adresse: p.adresse || "", principal, notes: p.contactSource ? ("Identité issue de : " + p.contactSource + " · à vérifier") : "", createdAt: TODAY() });
   // Cas 1 : un groupe correspondant existe → fiche établissement rattachée à ce groupe.
   if (grp) {
-    const sid = uid("s_"); const cid = uid("c_");
+    const sid = opts.siteId || uid("s_"); const cid = uid("c_");
     const site = { id: sid, accountId: grp.id, label: p.nom, type: "pdv", typeSurface: p.format || "", siret: p.siret || "", adresse: adr, adresseLivraison: "", livraisonIdentique: true, lat: null, lng: null, contactId: hasContact ? cid : "", notes: "Établissement issu de la prospection, rattaché au groupe " + (grp.enseigne || "") + "." + extra };
     const out = { ...d, sites: [...(d.sites || []), site], prospects: d.prospects.map((x) => x.id === p.id ? { ...x, statut: "converti", accountId: grp.id } : x) };
     const cnt = (out.sites || []).filter((s) => s.accountId === grp.id && (s.type === "pdv" || s.type === "decision")).length;
@@ -2346,7 +2346,7 @@ function convertProspectData(d, p, opts = {}) {
     return { data: out, accountId: grp.id, siteId: sid, contactId: hasContact ? cid : "" };
   }
   // Cas 2 : aucun groupe correspondant → nouveau compte (groupe ou établissement selon la nature).
-  const accId = uid("acc_"); const kind = isCentraleOuChaine({ nature, magasins: 1 }) ? "groupe" : "établissement";
+  const accId = opts.accountId || uid("acc_"); const kind = isCentraleOuChaine({ nature, magasins: 1 }) ? "groupe" : "établissement";
   const code = buildClientCode(d.accounts, nature);
   const notesParts = [p.nom, p.adresse, ((p.cp || "") + " " + (p.ville || "")).trim(), p.region, p.telephone, p.site].filter(Boolean);
   if (p.raisonSociale || p.siren || p.siret) notesParts.push("Société : " + [p.raisonSociale, p.formeJuridique, p.siren && ("SIREN " + p.siren), p.siret && ("SIRET " + p.siret)].filter(Boolean).join(", "));
@@ -2354,7 +2354,7 @@ function convertProspectData(d, p, opts = {}) {
   if (p.email) notesParts.push("Courriel : " + p.email);
   if (p.notes) notesParts.push(p.notes);
   if (opts.extraNote) notesParts.push(opts.extraNote);
-  const cid = uid("c_"); const sid = "s_" + accId;
+  const cid = uid("c_"); const sid = opts.siteId || ("s_" + accId);
   const acc = { id: accId, enseigne: p.enseigne || p.nom, kind, stage: "prospect", magasins: 1, nature, code, siren: p.siren || "", formeJuridique: p.formeJuridique || "", typeSurface: p.format || "", ville: p.ville, lat: null, lng: null, pipeline: 0, prochaineAction: "Prise de contact", dateAction: "", notes: notesParts.join(" · "), adressePostale: adr, adresseLivraison: "", livraisonIdentique: true, stageLog: [{ stage: "prospect", date: TODAY() }] };
   const site = { id: sid, accountId: accId, label: p.nom, type: "pdv", typeSurface: p.format || "", siret: p.siret || "", adresse: adr, adresseLivraison: "", livraisonIdentique: true, lat: null, lng: null, contactId: hasContact ? cid : "", notes: "Point de vente issu de la prospection." + extra };
   const out = { ...d, accounts: [...d.accounts, acc], sites: [...(d.sites || []), site], prospects: d.prospects.map((x) => x.id === p.id ? { ...x, statut: "converti", accountId: accId } : x) };
@@ -4513,7 +4513,7 @@ function Accounts({ data, persist, go, focus }) {
   const rowHay = (r) => normStr([storeName(r), ensName(r), adrName(r), surfName(r)].join(" "));
   const stageRank = (r) => { const i = STAGES.findIndex((s) => r.acc && s.id === r.acc.stage); return i < 0 ? 99 : i; };
   const nq = normStr(q);
-  const visibleRows = pdvRows.filter((r) => !nq || rowHay(r).includes(nq)).sort((x, y) => sortPdv === "enseigne" ? (ensName(x).localeCompare(ensName(y)) || storeName(x).localeCompare(storeName(y))) : sortPdv === "ville" ? (adrName(x).localeCompare(adrName(y)) || storeName(x).localeCompare(storeName(y))) : sortPdv === "etape" ? (stageRank(x) - stageRank(y) || storeName(x).localeCompare(storeName(y))) : storeName(x).localeCompare(storeName(y)));
+  const visibleRows = pdvRows.filter((r) => !nq || rowHay(r).includes(nq)).sort((x, y) => sortPdv === "enseigne" ? (ensName(x).localeCompare(ensName(y)) || storeName(x).localeCompare(storeName(y))) : sortPdv === "ville" ? (adrName(x).localeCompare(adrName(y)) || storeName(x).localeCompare(storeName(y))) : sortPdv === "type" ? ((surfName(x) || "\uffff").localeCompare(surfName(y) || "\uffff") || storeName(x).localeCompare(storeName(y))) : sortPdv === "etape" ? (stageRank(x) - stageRank(y) || storeName(x).localeCompare(storeName(y))) : storeName(x).localeCompare(storeName(y)));
   return (<div className="fade">
     <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}><button className={cx("btn", "btn-s", view === "actifs" ? "btn-p" : "btn-g")} onClick={() => setView("actifs")}>Actifs ({accounts.length - archivedAccounts.length})</button><button className={cx("btn", "btn-s", view === "archive" ? "btn-p" : "btn-g")} onClick={() => setView("archive")}><Archive size={14} /> Archivés ({archivedAccounts.length + archivedSites.length})</button></div>
     {view === "archive" ? (<div>
@@ -4541,7 +4541,7 @@ function Accounts({ data, persist, go, focus }) {
       <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>Chaque établissement, tous groupes confondus. Cliquez pour ouvrir sa fiche.</div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
         <div style={{ position: "relative" }}><Search size={14} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", pointerEvents: "none" }} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un établissement…" style={{ padding: "7px 26px 7px 28px", border: "1px solid var(--line)", borderRadius: 9, fontSize: 13, width: 210, fontFamily: "inherit" }} />{q && <button className="iconbtn" onClick={() => setQ("")} title="Effacer" style={{ position: "absolute", right: 2, top: "50%", transform: "translateY(-50%)", width: 22, height: 22 }}><X size={13} /></button>}</div>
-        <select value={sortPdv} onChange={(e) => setSortPdv(e.target.value)} style={{ padding: "7px 10px", border: "1px solid var(--line)", borderRadius: 9, fontSize: 13, fontFamily: "inherit", background: "#fff" }} title="Trier les établissements"><option value="nom">Tri : nom</option><option value="enseigne">Tri : groupe / établissement</option><option value="ville">Tri : ville / adresse</option><option value="etape">Tri : étape</option></select>
+        <select value={sortPdv} onChange={(e) => setSortPdv(e.target.value)} style={{ padding: "7px 10px", border: "1px solid var(--line)", borderRadius: 9, fontSize: 13, fontFamily: "inherit", background: "#fff" }} title="Trier les établissements"><option value="nom">Tri : nom</option><option value="enseigne">Tri : groupe / établissement</option><option value="ville">Tri : ville / adresse</option><option value="type">Tri : type de commerce</option><option value="etape">Tri : étape</option></select>
       </div>
       {pdvRows.length === 0 ? <div className="empty">Aucun point de vente enregistré.</div> : visibleRows.length === 0 ? <div className="empty">Aucun établissement ne correspond à la recherche.</div> : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(238px, 1fr))", gap: 10 }}>{visibleRows.map((r) => { const acc = r.acc; const st = acc ? stageMeta(acc.stage) : null; const adr = r.kind === "site" ? (r.site.adresse || "") : (acc && (acc.ville || acc.adressePostale) || ""); const surf = r.kind === "site" ? r.site.typeSurface : (acc && acc.typeSurface); const ens = r.kind === "site" && acc ? acc.enseigne : ""; return (
         <button key={r.key} className="tile" onClick={() => openStore(r)} style={{ textAlign: "left", border: "1px solid var(--line)", borderRadius: 12, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4, fontFamily: "inherit" }}>
@@ -8935,7 +8935,16 @@ function Prospection({ data, persist, go }) {
     setDupMsg({ ok: !!parts.length, t: parts.length ? parts.join(" · ") + "." : "Aucune fusion appliquée." }); setTimeout(() => setDupMsg(null), 8000);
   };
   // Conversion manuelle : logique partagée avec la conversion automatique après envoi Gmail confirmé.
-  const convert = (p) => { persist((d) => convertProspectData(d, p).data); setEdit(null); };
+  // Les deux branches de la conversion (rattachement à un groupe existant, ou création d'un compte)
+  // produisent toujours un ÉTABLISSEMENT. On pré-génère son identifiant pour pouvoir ouvrir sa fiche
+  // aussitôt : le résultat de `persist` n'est pas disponible dans la foulée, l'updater n'étant appelé
+  // qu'au rendu suivant.
+  const convert = (p) => {
+    const siteId = uid("s_"), accountId = uid("acc_");
+    persist((d) => convertProspectData(d, p, { siteId, accountId }).data);
+    setEdit(null);
+    go("accounts", null, siteId);
+  };
   const mapsUrl = (p) => "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent([p.nom, p.adresse, p.cp, p.ville].filter(Boolean).join(" "));
   const runAI = () => {
     if (aiJobs.has("prospects:search")) return;
