@@ -4849,7 +4849,7 @@ function ChannelPreview({ canal, recipient, estabName, subject, setSubject, out,
   if (canal === "email") {
     return (<div style={{ border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden", background: "var(--card)" }}>
       <div style={{ background: "var(--blue-l)", borderBottom: "1px solid var(--line)", padding: "6px 12px", fontSize: 12.5 }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0", borderBottom: "1px solid var(--line)" }}><span style={{ color: "var(--muted)", width: 46, flexShrink: 0 }}>À</span><span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{recipient && recipient.email ? recipient.email : (recipient ? fullName(recipient) : "—")}</span></div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0", borderBottom: "1px solid var(--line)" }}><span style={{ color: "var(--muted)", width: 46, flexShrink: 0 }}>À</span><a href={recipient && recipient.email ? "https://mail.google.com/mail/?view=cm&fs=1&to=" + encodeURIComponent(recipient.email) : "#"} target="_blank" rel="noreferrer" style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)", textDecoration: "none", cursor: "pointer" }}>{recipient && recipient.email ? recipient.email : (recipient ? fullName(recipient) : "—")}</a></div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0" }}><span style={{ color: "var(--muted)", width: 46, flexShrink: 0 }}>Objet</span><input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Objet de l'e-mail" style={{ border: 0, padding: 0, fontSize: 13, fontWeight: 700, background: "transparent", borderRadius: 0 }} /></div>
       </div>
       <textarea rows={11} value={out} onChange={(e) => setOut(e.target.value)} style={{ width: "100%", border: 0, borderRadius: 0, resize: "vertical", fontSize: 13.5 }} />
@@ -5413,7 +5413,10 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
         <span style={{ fontSize: 11, color: "var(--muted)", marginRight: "auto" }}>Brouillon conservé : vous pouvez fermer cette fenêtre et la rouvrir sur le même message.</span>
         <button className="btn btn-ghost btn-s" onClick={async () => { const ok = await appConfirm("Effacer ce brouillon et repartir d'une page vierge ?", { title: "Effacer le brouillon", confirmLabel: "Effacer" }); if (ok) clearDraft(); }} title="Vide le message conservé pour ce destinataire"><X size={14} /> Effacer le brouillon</button>
-        {canal === "email" && recMail && <button className="btn btn-p" onClick={sendViaGmail} disabled={sending}><Send size={15} className={sending ? "spin" : ""} /> {sending ? "Envoi…" : "Envoyer via Gmail"}</button>}
+        {canal === "email" && recMail && <>
+          <a className="btn btn-g" href={"https://mail.google.com/mail/?view=cm&fs=1&to=" + encodeURIComponent(recMail) + "&subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(out)} target="_blank" rel="noreferrer" title="Ouvrir Gmail avec ce brouillon (sans envoyer)"><Mail size={15} /> Ouvrir Gmail</a>
+          <button className="btn btn-p" onClick={sendViaGmail} disabled={sending}><Send size={15} className={sending ? "spin" : ""} /> {sending ? "Envoi…" : "Envoyer via Gmail"}</button>
+        </>}
         {canal === "sms" && smsHref && <a className="btn btn-p" href={smsHref}><MessageSquare size={15} /> Ouvrir l'app SMS</a>}
         {canal === "linkedin" && <a className="btn btn-p" href={recipient && recipient.linkedin ? ensureHttp(recipient.linkedin) : linkedinSearch(recipient || {}, account && account.enseigne)} target="_blank" rel="noreferrer"><Linkedin size={15} /> Ouvrir LinkedIn</a>}
         {canal !== "email" && <button className="btn btn-g" onClick={markSent}><Check size={15} /> Marquer envoyé</button>}
