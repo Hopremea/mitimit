@@ -2151,6 +2151,20 @@ function verifyProspectMail(parsed, angles, magasin) {
 }
 // Génère un mail de prospection pour un prospect, à partir de ses angles. Parsing JSON robuste (2 essais),
 // signature et mention d'opposition retirées côté code, et vérification des affirmations.
+// En-tête de courrier administratif (« À l'attention de Monsieur Ponce, Gérant. ») : on écrit à un
+// commerçant, pas à une administration. La ligne est retirée si le modèle la produit malgré tout, et
+// la fonction est effacée quand elle a été accolée à la salutation.
+function sansEnTeteAdministratif(t) {
+  const lignes = String(t || "").replace(/\r/g, "").split("\n");
+  while (lignes.length && (!lignes[0].trim() || /^[àa]\s+l'attention\s+de\b/i.test(lignes[0].trim()))) {
+    if (!lignes[0].trim()) { lignes.shift(); continue; }
+    lignes.shift();
+    while (lignes.length && !lignes[0].trim()) lignes.shift();
+  }
+  // « Bonjour Monsieur Ponce, Gérant, » : la fonction n'a rien à faire dans la salutation.
+  if (lignes.length) lignes[0] = lignes[0].replace(/^(bonjour\s+(?:monsieur|madame)\s+[^\s,]+)\s*,\s*[^,]{2,40}\s*,\s*$/i, "$1,");
+  return lignes.join("\n");
+}
 // Le tiret long est proscrit dans les mails : on ne se contente pas de le demander au modèle, on le
 // retire. Un tiret encadrant une incise devient une virgule, un tiret introductif un deux-points.
 // Le trait d'union des mots composés (« Tarn-et-Garonne ») n'est évidemment pas concerné.
@@ -2239,7 +2253,7 @@ async function generateProspectMail({ prospect, angles, consigne, ton, mode, pre
   corps = corps.split(/\n\s*\n/).filter((par) => !/cadre strictement professionnel|souhaitez pas [êe]tre recontact/i.test(par)).join("\n\n").replace(/\s+$/, "");
   // Tiret long et préfixe d'objet : appliqués côté code, après le modèle. Une consigne de prompt se
   // respecte la plupart du temps, ces deux-là doivent l'être à chaque fois.
-  corps = sansTiretLong(corps);
+  corps = sansEnTeteAdministratif(sansTiretLong(corps));
   return { ok: true, objet: objetNormalise(parsed.objet || "", p), corps, objectif: parsed.objectif || angles.objectif_type, angle_utilise: parsed.angle_utilise || angles.bestAngle, claims_verifiables: Array.isArray(parsed.claims_verifiables) ? parsed.claims_verifiables : [], confiance: v.confiance, alertes: v.alertes };
 }
 function contactSite(c, data) { return c && c.siteId ? ((data && data.sites) || []).find((s) => s.id === c.siteId) || null : null; }
@@ -5291,12 +5305,14 @@ Privilégie la première personne du singulier (« je ») plutôt que le « nous
 4. Utilise l'historique pour ancrer le message : rappelle le dernier échange et sa date si elle est pertinente. Ne répète pas les accroches et les formules déjà employées dans <contexte>.historique.derniersEnvois.
 5. Si un ticket SAV est ouvert, la reconnaissance du problème passe avant toute proposition commerciale.
 6. Si le contact n'a jamais répondu après plusieurs relances, change d'angle plutôt que d'insister sur le même argument, et propose une sortie simple (une réponse en un mot suffit).
-7. Si <contexte>.destinataire.typeAdresse vaut "generique", commence le corps par une ligne de routage du type "À l'attention de [civilité nom], [fonction]", et rends l'objet explicite sur l'expéditeur et le sujet.
+7. Si <contexte>.destinataire.typeAdresse vaut "generique", l'adresse est une boîte partagée (contact@, info@) : rends l'OBJET explicite sur l'expéditeur et le sujet, pour que le message soit transmis à la bonne personne. N'écris AUCUNE ligne de routage administrative en tête du corps. "À l'attention de Monsieur Ponce, Gérant" est un en-tête de courrier officiel, pas un courriel professionnel : on écrit à un commerçant, pas à une administration. La personne est nommée dans la salutation, cela suffit.
 8. FORME D'APPEL, suis <contexte>.destinataire.formeAppel, sans jamais en décider toi-même :
-   - "nom" : adresse-toi par le NOM DE FAMILLE, jamais par le prénom seul. Si "civilite" est renseignée, écris "Bonjour [civilité] [nomFamille]". Si elle est vide, écris "Bonjour [prénom] [nomFamille]" : n'invente JAMAIS une civilité et ne la déduis jamais du prénom.
+   - "nom", avec une civilité renseignée : "Bonjour [civilité] [nomFamille],". Rien d'autre sur cette ligne : jamais la fonction, jamais la société, jamais le prénom en plus.
+   - "nom", sans civilité renseignée : écris simplement "Bonjour," sans nom. N'écris JAMAIS "Bonjour [prénom] [nomFamille]", qui sonne comme un publipostage, et n'invente JAMAIS une civilité ni ne la déduis d'un prénom.
    - "prenom" : emploie le prénom seul ("Bonjour [prénom]"). Un message déjà envoyé l'employait ; revenir au nom de famille se lirait comme une prise de distance.
    - Champ absent (destinataire inconnu ou standard d'accueil) : adresse générique sobre, "Bonjour,".
    Écris le nom de famille en casse normale ("Dupont"), même s'il est fourni tout en majuscules.
+9. Ton de courriel, jamais de courrier administratif. Bannis "À l'attention de", "Objet de la présente", "Je soussigné", "Veuillez trouver ci-joint", "par la présente", "Monsieur le Gérant", "Madame la Directrice". La fonction du destinataire ne s'écrit nulle part dans le message : il la connaît.
 </regles_de_fond>
 
 <interdits_absolus>
@@ -5464,8 +5480,8 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
   const applyResult = (r) => {
     // Tiret long retiré ici aussi : la règle vaut pour tout ce qui part au nom de la marque.
     setSubject(sansTiretLong(r.objet || (canal === "email" ? ("PEN'UP 3D : " + estabName) : "")));
-    setOut(sansTiretLong(canal === "email" ? stripSignature(r.corps || "") : (r.corps || ""))); // Gmail ajoute la signature
-    setShortOut(sansTiretLong(canal === "email" ? stripSignature(r.variante_courte || "") : (r.variante_courte || "")));
+    setOut(sansEnTeteAdministratif(sansTiretLong(canal === "email" ? stripSignature(r.corps || "") : (r.corps || "")))); // Gmail ajoute la signature
+    setShortOut(sansEnTeteAdministratif(sansTiretLong(canal === "email" ? stripSignature(r.variante_courte || "") : (r.variante_courte || ""))));
     setUsedCtx(Array.isArray(r.contexte_utilise) ? r.contexte_utilise : []);
     const al = Array.isArray(r.alertes) ? r.alertes.slice() : [];
     if (r.creneauxNonVerifies && r.creneauxNonVerifies.length) al.unshift("Créneau non vérifié, à contrôler : " + r.creneauxNonVerifies.join(" ; "));
