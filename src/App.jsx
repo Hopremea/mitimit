@@ -4367,6 +4367,9 @@ const ARCHIVE_REASONS = [
   { key: "injoignable", label: "Ne répond plus / injoignable" },
   { key: "ferme", label: "Fermeture / cessation d'activité" },
   { key: "hors_cible", label: "Hors cible / non pertinent" },
+  // Le magasin ne décide pas de ses référencements : le parcours s'arrête ici, il reprend au niveau
+  // de la centrale d'achat de l'enseigne.
+  { key: "centrale", label: "Dépend de la centrale" },
   { key: "reporte", label: "Projet reporté" },
   { key: "doublon", label: "Doublon" },
   { key: "autre", label: "Autre" },
