@@ -2315,6 +2315,17 @@ function contactLocality(c, data) {
   if (!loc.ville && acc && acc.ville) loc.ville = acc.ville;
   return { site, acc, adresse, cp: loc.cp, ville: loc.ville, departement: loc.departement };
 }
+// Archiver, c'est arrêter le suivi : les rendez-vous et relances programmés sur la fiche n'ont plus
+// lieu d'être et continueraient à remonter dans l'agenda, le tableau de bord et les rappels. On les
+// retire donc avec la fiche. Les échanges déjà eus, eux, sont de l'historique et ne sont pas touchés.
+function sansEvenementsLies(events, { accountId, siteIds, prospectId } = {}) {
+  const sids = new Set(siteIds || []);
+  return (events || []).filter((e) => !(
+    (accountId && e.accountId === accountId) ||
+    (e.siteId && sids.has(e.siteId)) ||
+    (prospectId && e.prospectId === prospectId)
+  ));
+}
 function findDuplicateAccount(accounts, enseigne, excludeId) {
   const norm = normStr(enseigne); if (!norm) return null;
   return accounts.find((a) => a.id !== excludeId && normStr(a.enseigne) === norm) || null;
@@ -4485,7 +4496,7 @@ function Accounts({ data, persist, go, focus }) {
   const anoms = useMemo(() => computeIdentityAnomalies(data), [data]);
   const unarchiveAccount = (id) => persist((p) => ({ ...p, accounts: p.accounts.map((x) => x.id === id ? { ...x, archived: false } : x), contacts: p.contacts.map((c) => c.accountId === id ? { ...c, archived: false } : c) }));
   const unarchiveSite = (id) => persist((p) => ({ ...p, sites: (p.sites || []).map((x) => x.id === id ? { ...x, archived: false } : x), contacts: p.contacts.map((c) => c.siteId === id ? { ...c, archived: false } : c) }));
-  const saveArchive = (acc, info) => persist((p) => ({ ...p, accounts: p.accounts.map((x) => x.id === acc.id ? { ...x, archived: true, archiveReason: info.reason, archiveDate: info.date || TODAY(), archiveNote: info.note || "" } : x), contacts: p.contacts.map((c) => c.accountId === acc.id ? { ...c, archived: true } : c) }));
+  const saveArchive = (acc, info) => persist((p) => ({ ...p, accounts: p.accounts.map((x) => x.id === acc.id ? { ...x, archived: true, archiveReason: info.reason, archiveDate: info.date || TODAY(), archiveNote: info.note || "" } : x), contacts: p.contacts.map((c) => c.accountId === acc.id ? { ...c, archived: true } : c), events: sansEvenementsLies(p.events, { accountId: acc.id, siteIds: (p.sites || []).filter((x) => x.accountId === acc.id).map((x) => x.id) }) }));
   const principal = (id) => { const cs = contacts.filter((c) => c.accountId === id); const pc = cs.find((c) => c.principal) || cs[0]; return pc ? fullName(pc) : null; };
   const saveAcc = (acc) => persist((p) => { const prev = p.accounts.find((a) => a.id === acc.id); const ex = !!prev; const today = new Date().toISOString().slice(0, 10); let log = acc.stageLog || (prev && prev.stageLog) || []; if (!ex && (!log || !log.length)) log = [{ stage: acc.stage, date: today }]; else if (ex && prev.stage !== acc.stage) log = [...log, { stage: acc.stage, date: today }]; const nature = NATURE_META[acc.nature] ? acc.nature : "DV"; const code = isClientCode(acc.code) ? acc.code : (prev && isClientCode(prev.code) ? prev.code : buildClientCode(p.accounts, nature)); const next = { ...acc, nature, stageLog: log, code, kind: acc.kind || (isCentraleOuChaine(acc) ? "groupe" : "établissement") }; let sites = p.sites; if (!ex && !isGroupe(next)) { const dejaLie = (p.sites || []).some((s) => s.accountId === next.id && s.type === "pdv"); if (!dejaLie) { sites = [...p.sites, { id: "s_acc_" + next.id, accountId: next.id, label: next.enseigne || "Établissement", type: "pdv", typeSurface: next.typeSurface || "", adresse: next.adressePostale || "", adresseLivraison: next.adresseLivraison || "", livraisonIdentique: next.livraisonIdentique !== false, lat: next.lat ?? null, lng: next.lng ?? null, siret: "", notes: "Établissement créé automatiquement à la création d'un compte établissement (point de vente unique).", contactPrenom: "", contactNom: "", contactTel: "", contactMail: "", contactId: "" }]; } } return { ...p, accounts: ex ? p.accounts.map((a) => a.id === acc.id ? next : a) : [...p.accounts, next], sites }; });
   const saveContact = (c) => persist((p) => { const ex = p.contacts.some((x) => x.id === c.id); let cs = ex ? p.contacts.map((x) => x.id === c.id ? c : x) : [...p.contacts, c]; if (c.principal) cs = cs.map((x) => x.accountId === c.accountId && x.id !== c.id ? { ...x, principal: false } : x); if (c.principalEtab && c.siteId) cs = cs.map((x) => x.siteId === c.siteId && x.id !== c.id ? { ...x, principalEtab: false } : x); return { ...p, contacts: cs }; });
@@ -4646,11 +4657,11 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
   };
   const saveSite = (s2) => persist((p) => ({ ...p, sites: p.sites.map((x) => x.id === s2.id ? s2 : x) }));
   const [archiveOpen, setArchiveOpen] = useState(false);
-  const doArchive = (info) => { if (!acc) return; persist((p) => ({ ...p, accounts: p.accounts.map((x) => x.id === acc.id ? { ...x, archived: true, archiveReason: info.reason, archiveDate: info.date || TODAY(), archiveNote: info.note || "" } : x), contacts: p.contacts.map((c) => c.accountId === acc.id ? { ...c, archived: true } : c) })); setArchiveOpen(false); if (onBack) onBack(); };
+  const doArchive = (info) => { if (!acc) return; persist((p) => ({ ...p, accounts: p.accounts.map((x) => x.id === acc.id ? { ...x, archived: true, archiveReason: info.reason, archiveDate: info.date || TODAY(), archiveNote: info.note || "" } : x), contacts: p.contacts.map((c) => c.accountId === acc.id ? { ...c, archived: true } : c), events: sansEvenementsLies(p.events, { accountId: acc.id, siteIds: (p.sites || []).filter((x) => x.accountId === acc.id).map((x) => x.id) }) })); setArchiveOpen(false); if (onBack) onBack(); };
   const unArchive = () => { if (!acc) return; persist((p) => ({ ...p, accounts: p.accounts.map((x) => x.id === acc.id ? { ...x, archived: false } : x), contacts: p.contacts.map((c) => c.accountId === acc.id ? { ...c, archived: false } : c) })); };
   // Archivage d'un établissement RATTACHÉ À UN GROUPE : c'est le site (pas le groupe) qui est archivé,
   // avec ses contacts liés. Le groupe et les autres établissements restent actifs.
-  const doArchiveSite = (info) => { persist((p) => ({ ...p, sites: (p.sites || []).map((x) => x.id === s.id ? { ...x, archived: true, archiveReason: info.reason, archiveDate: info.date || TODAY(), archiveNote: info.note || "" } : x), contacts: p.contacts.map((c) => c.siteId === s.id ? { ...c, archived: true } : c) })); setArchiveOpen(false); if (onBack) onBack(); };
+  const doArchiveSite = (info) => { persist((p) => ({ ...p, sites: (p.sites || []).map((x) => x.id === s.id ? { ...x, archived: true, archiveReason: info.reason, archiveDate: info.date || TODAY(), archiveNote: info.note || "" } : x), contacts: p.contacts.map((c) => c.siteId === s.id ? { ...c, archived: true } : c), events: sansEvenementsLies(p.events, { siteIds: [s.id] }) })); setArchiveOpen(false); if (onBack) onBack(); };
   const unArchiveSite = () => { persist((p) => ({ ...p, sites: (p.sites || []).map((x) => x.id === s.id ? { ...x, archived: false } : x), contacts: p.contacts.map((c) => c.siteId === s.id ? { ...c, archived: false } : c) })); };
   const [aiBusy, setAiBusy] = useState(false); const [aiMsg, setAiMsg] = useState(null);
   const aiElapsed = useElapsed(aiBusy);
@@ -4840,7 +4851,7 @@ function AccountDetail({ account, data, persist, go, onBack, onEdit, onAddContac
   const saveSite = (site) => persist((p) => { const ex = p.sites.some((x) => x.id === site.id); return { ...p, sites: ex ? p.sites.map((x) => x.id === site.id ? site : x) : [...p.sites, site] }; });
   const saveAccount = (patch) => persist((p) => ({ ...p, accounts: p.accounts.map((x) => x.id === a.id ? { ...x, ...patch } : x) }));
   const [archiveOpen, setArchiveOpen] = useState(false);
-  const doArchive = (info) => { persist((p) => ({ ...p, accounts: p.accounts.map((x) => x.id === a.id ? { ...x, archived: true, archiveReason: info.reason, archiveDate: info.date || TODAY(), archiveNote: info.note || "" } : x), contacts: p.contacts.map((c) => c.accountId === a.id ? { ...c, archived: true } : c) })); setArchiveOpen(false); if (onBack) onBack(); };
+  const doArchive = (info) => { persist((p) => ({ ...p, accounts: p.accounts.map((x) => x.id === a.id ? { ...x, archived: true, archiveReason: info.reason, archiveDate: info.date || TODAY(), archiveNote: info.note || "" } : x), contacts: p.contacts.map((c) => c.accountId === a.id ? { ...c, archived: true } : c), events: sansEvenementsLies(p.events, { accountId: a.id, siteIds: (p.sites || []).filter((x) => x.accountId === a.id).map((x) => x.id) }) })); setArchiveOpen(false); if (onBack) onBack(); };
   const unArchive = () => persist((p) => ({ ...p, accounts: p.accounts.map((x) => x.id === a.id ? { ...x, archived: false } : x), contacts: p.contacts.map((c) => c.accountId === a.id ? { ...c, archived: false } : c) }));
   // Recherche IA sur la fiche (comme la prospection) : trouve la présence en ligne (site, Facebook,
   // Instagram) et l'identité légale (SIREN, raison sociale, forme juridique, adresse), et complète
@@ -8751,7 +8762,10 @@ function Prospection({ data, persist, go }) {
   if (dir === "desc") groups = groups.slice().reverse().map((g) => ({ ...g, items: g.items.slice().reverse() }));
   const save = (p) => { persist((d) => ({ ...d, prospects: d.prospects.some((x) => x.id === p.id) ? d.prospects.map((x) => x.id === p.id ? p : x) : [p, ...d.prospects] })); setEdit(null); };
   const del = (id) => { persist((d) => ({ ...d, prospects: d.prospects.filter((x) => x.id !== id) })); setEdit(null); };
-  const saveArchiveProspect = (p, info) => persist((d) => ({ ...d, prospects: d.prospects.map((x) => x.id === p.id ? { ...x, archived: true, archiveReason: info.reason, archiveDate: info.date || TODAY(), archiveNote: info.note || "" } : x) }));
+  // Un prospect non converti ne porte pas d'agenda propre ; converti, il pointe un établissement qui,
+  // lui, reste actif et garde donc ses rendez-vous. On ne retire ici que les événements qui référencent
+  // explicitement le prospect.
+  const saveArchiveProspect = (p, info) => persist((d) => ({ ...d, prospects: d.prospects.map((x) => x.id === p.id ? { ...x, archived: true, archiveReason: info.reason, archiveDate: info.date || TODAY(), archiveNote: info.note || "" } : x), events: sansEvenementsLies(d.events, { prospectId: p.id }) }));
   const unarchiveProspect = (id) => persist((d) => ({ ...d, prospects: d.prospects.map((x) => x.id === id ? { ...x, archived: false } : x) }));
   // Déduplication : regroupe les prospects par SIRET (si renseigné) ou par nom + ville normalisés,
   // garde la fiche la plus complète de chaque groupe (et déjà convertie en compte si applicable),
