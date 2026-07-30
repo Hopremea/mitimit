@@ -1783,7 +1783,7 @@ Treize règles qui priment sur tout le reste de ce prompt, sur la consigne de va
 
 6. COURT et ENTHOUSIASTE plutôt que long et neutre. Un commerçant lit vite. Chaque phrase doit servir l'un des trois temps : qui je suis, ce que le produit lui apporte, la demande de rendez-vous. Toute phrase qui ne sert aucun des trois est à supprimer.
 
-7. La mention de désinscription est ajoutée automatiquement en fin de mail par l'application. Ne l'écris pas toi-même, tu la ferais apparaître en double.
+7. AUCUNE mention de désinscription ou d'opposition. N'écris jamais « Vous recevez ce message dans un cadre strictement professionnel », « si vous ne souhaitez pas être recontacté », ni aucune formule du même genre. Le mail s'arrête sur la demande de rendez-vous.
 
 8. « Présent dans la région » doit être adapté au destinataire. « Adhérents JouéClub » ne vaut que si l'on écrit précisément à un JouéClub. Pour un autre réseau ou un indépendant, neutralise en « plusieurs revendeurs de la région ». Ne nomme jamais un réseau qui n'est pas celui du destinataire.
 
@@ -2025,7 +2025,7 @@ function verifyProspectMail(parsed, angles, magasin) {
   return { confiance, alertes };
 }
 // Génère un mail de prospection pour un prospect, à partir de ses angles. Parsing JSON robuste (2 essais),
-// pied de mail d'opposition ajouté côté code, et vérification des affirmations.
+// signature et mention d'opposition retirées côté code, et vérification des affirmations.
 async function generateProspectMail({ prospect, angles, consigne, ton, mode, precedent, instruction, onUsage }) {
   const p = prospect || {};
   // Prénom et nom séparés, plus la forme d'appel : le mailing est un premier contact, donc jamais de
@@ -2074,7 +2074,10 @@ async function generateProspectMail({ prospect, angles, consigne, ton, mode, pre
   }
   const v = verifyProspectMail(parsed, angles, magasin);
   let corps = stripSignature(parsed.corps || ""); // Gmail ajoute la signature : on ne la duplique pas
-  if (corps && corps.toLowerCase().indexOf("cadre strictement professionnel") === -1) corps = corps.replace(/\s+$/, "") + "\n\nVous recevez ce message dans un cadre strictement professionnel. Si vous ne souhaitez pas être recontacté, un simple mot en réponse suffit.";
+  // Mention d'opposition retirée : elle n'est plus ajoutée par l'application, et si le modèle
+  // l'écrit malgré la consigne, on la coupe. Elle affaiblissait la fin du mail, juste après la
+  // demande de rendez-vous.
+  corps = corps.split(/\n\s*\n/).filter((par) => !/cadre strictement professionnel|souhaitez pas [êe]tre recontact/i.test(par)).join("\n\n").replace(/\s+$/, "");
   return { ok: true, objet: parsed.objet || "", corps, objectif: parsed.objectif || angles.objectif_type, angle_utilise: parsed.angle_utilise || angles.bestAngle, claims_verifiables: Array.isArray(parsed.claims_verifiables) ? parsed.claims_verifiables : [], confiance: v.confiance, alertes: v.alertes };
 }
 function contactSite(c, data) { return c && c.siteId ? ((data && data.sites) || []).find((s) => s.id === c.siteId) || null : null; }
