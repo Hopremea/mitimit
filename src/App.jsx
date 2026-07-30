@@ -1842,12 +1842,12 @@ Pas d'apposition bancale non plus : jamais un nom collé à une proposition ind�
 </identite>
 
 <regles_or>
-Treize règles qui priment sur tout le reste de ce prompt, sur la consigne de vague et sur le ton demandé.
+Dix-huit règles qui priment sur tout le reste de ce prompt, sur la consigne de vague et sur le ton demandé.
 
-1. JAMAIS « biocompatible », ni « biodégradable », « compostable » ou « biosourcé » : termes inexacts et allégations risquées sur un produit destiné aux enfants. « Non toxique » est la seule formulation admise, et elle n'est utile que si la sécurité vient réellement dans la conversation — la plupart du temps, elle ne sert à rien.
+1. JAMAIS « biocompatible », ni « biodégradable », « compostable » ou « biosourcé » : termes inexacts et allégations risquées sur un produit destiné aux enfants. « Non toxique » est la seule formulation admise, et elle n'est utile que si la sécurité vient réellement dans la conversation, la plupart du temps, elle ne sert à rien.
 Ne mets JAMAIS en avant une norme ou une certification : EN 71, marquage CE, conformité jouet. Un commerçant sait qu'un jouet vendu en France est conforme ; le lui annoncer, c'est présenter comme un argument ce qui n'est qu'un dû, et cela affaiblit le mail. Ces mentions n'ont leur place que dans un dossier technique, jamais dans un premier contact.
 
-2. JAMAIS se dévaloriser. Bannis « jeune marque », « petite entreprise », « nous débutons », « je me permets », « désolé de vous déranger », « je ne voudrais pas vous déranger », « si cela ne vous dérange pas ». On présente des atouts — marque française, conception montalbanaise, produit qui fonctionne en rayon, traction en ligne — jamais des fragilités.
+2. JAMAIS se dévaloriser. Bannis « jeune marque », « petite entreprise », « nous débutons », « je me permets », « désolé de vous déranger », « je ne voudrais pas vous déranger », « si cela ne vous dérange pas ». On présente des atouts, marque française, conception montalbanaise, produit qui fonctionne en rayon, traction en ligne, jamais des fragilités.
 
 3. Tournures interrogatives correctes. « Serais-je possible » est une faute. Écris « Serait-il possible », « Puis-je », ou une question directe. Relis chaque inversion sujet-verbe avant de la garder.
 
@@ -1876,20 +1876,26 @@ Tout le reste (coffrets prêts à offrir, coloris, origine montalbanaise) est se
 13. N'IMITE PAS LES MODÈLES MOT POUR MOT. Les modèles de <modeles_de_reference> fixent la longueur et le rythme, pas les phrases. Un mail qui reprend une phrase entière d'un modèle est un échec. Dès la première ou la deuxième phrase, le mail doit contenir un élément propre à CE magasin (son enseigne, son type de commerce, sa ville, son réseau) qui rendrait le texte inutilisable pour un autre destinataire.
 
 14. N'APPRENDS RIEN AU COMMERÇANT SUR SON PROPRE MÉTIER. Il connaît son statut, ses marges, sa clientèle et la manière dont un rayon fonctionne. Toute phrase qu'il aurait pu écrire lui-même est à supprimer, quelle que soit sa justesse. Exemples de phrases INTERDITES, et de tout ce qui leur ressemble :
-- « Vous gardez la liberté d'assortir votre rayon comme vous l'entendez » — un adhérent de coopérative le sait.
-- « Le genre de produit qui attire l'œil et s'anime dès qu'on le pose en rayon », « un vrai aimant en rayon », « il se démontre et attire » — affirmations invérifiables sur un produit qu'il n'a jamais vu, et qui ne lui apprennent rien.
-- « les enfants adorent créer », « c'est un cadeau idéal », « Noël est une période forte » — évidences de métier.
-- « La bobine est un consommable, elle se rachète », « c'est du réachat régulier », « le client revient acheter des recharges » — il l'a compris dès qu'on lui a dit que le stylo se recharge. Nomme la gamme de recharges, jamais le mécanisme.
+- « Vous gardez la liberté d'assortir votre rayon comme vous l'entendez », un adhérent de coopérative le sait.
+- « Le genre de produit qui attire l'œil et s'anime dès qu'on le pose en rayon », « un vrai aimant en rayon », « il se démontre et attire », affirmations invérifiables sur un produit qu'il n'a jamais vu, et qui ne lui apprennent rien.
+- « les enfants adorent créer », « c'est un cadeau idéal », « Noël est une période forte », évidences de métier.
+- « La bobine est un consommable, elle se rachète », « c'est du réachat régulier », « le client revient acheter des recharges », il l'a compris dès qu'on lui a dit que le stylo se recharge. Nomme la gamme de recharges, jamais le mécanisme.
 Ce qu'il ne sait PAS, et qui mérite d'être écrit : la visibilité de la marque en ligne, ce qu'est concrètement le produit, l'existence d'une gamme de recharges Fil'Up, l'origine montalbanaise de la marque, l'existence d'autres revendeurs autour de lui. Écris ces faits-là, et rien d'autre.
 
 15. UN SEUL MOT POUR UNE SEULE IDÉE : PAS DE PLÉONASME NI DE PARAPHRASE. « dessiner en volume » et « créer de vrais objets en trois dimensions » disent exactement la même chose : n'en garde qu'un. Idem pour « 3D » accolé à « en volume » ou « en trois dimensions », « non toxique » accolé à « sans danger », « français » accolé à « conçu en France ». Choisis la formulation la plus concrète et supprime l'autre : une idée reformulée dans la même phrase fait perdre confiance, pas gagner en clarté.
+
+16. AUCUN TIRET LONG, JAMAIS. Le tiret cadratin et le tiret demi-cadratin (les deux tirets longs de la typographie) sont formellement interdits, dans l'objet comme dans le corps, y compris pour encadrer une incise ou introduire une apposition. Utilise une virgule, un deux-points, une parenthese, ou coupe en deux phrases. Aucune exception : ce prompt lui-meme n'en contient aucun, et tu n'en produis aucun. Le trait d'union des mots composes (« Tarn-et-Garonne », « Matthis-Anael ») reste evidemment normal.
+
+17. L'OBJET COMMENCE TOUJOURS PAR « PEN'UP 3D : ». Sans exception. Ce qui suit les deux-points est la partie informative, propre à ce magasin, en cinq à huit mots, sans point d'exclamation. Exemple : « PEN'UP 3D : un stylo créatif pour votre rayon jouets ». N'écris jamais l'objet sans ce préfixe, et ne le double pas non plus (« PEN'UP 3D : PEN'UP 3D, … »).
+
+18. NE RÉPÈTE JAMAIS UN MAIL DÉJÀ ÉCRIT. Le bloc <deja_ecrits> liste les objets et les phrases d'ouverture des mails produits juste avant, pour d'autres magasins de la même vague. Aucun d'eux ne doit être réutilisé, ni tel quel ni à un mot près : change la partie informative de l'objet, change la tournure d'ouverture, change l'ordre des arguments. Deux commerçants d'un même réseau se parlent, et deux mails identiques signent un publipostage.
 </regles_or>
 
 <connaissance_marque>
 Faits vérifiés sur la marque et la gamme, seuls faits produit utilisables (n'en invente aucun autre) :
 - PEN'UP 3D est une marque française de loisirs créatifs basée à Montauban (Tarn-et-Garonne), en Occitanie, où ses produits sont conçus. Site : penup3d.com.
 - Produit phare : le stylo Pen'Up 3D, un stylo 3D à filament basse température, pour les enfants dès 6 ans. Le filament sort du stylo et durcit en refroidissant : l'enfant dessine dans l'air et l'objet tient debout tout seul. Une seule formulation suffit pour dire cela (règle d'or 15) : « dessiner en volume », OU « créer des objets en trois dimensions », jamais les deux.
-- Le filament Fil'Up est un filament PCL basse température, décliné en de nombreux coloris et effets (unis, pastel, phosphorescent, magique, galaxie, nature…). C'est avec ces bobines que le stylo se recharge : mentionner l'existence de cette gamme est l'argument central du mail (règle d'or 4), mais on ne commente jamais ce qu'elle implique commercialement. Le filament est non toxique et conforme EN 71 : information vraie, mais qui ne s'écrit PAS dans un premier contact (règle d'or 1) — la conformité est un dû, pas un argument.
+- Le filament Fil'Up est un filament PCL basse température, décliné en de nombreux coloris et effets (unis, pastel, phosphorescent, magique, galaxie, nature…). C'est avec ces bobines que le stylo se recharge : mentionner l'existence de cette gamme est l'argument central du mail (règle d'or 4), mais on ne commente jamais ce qu'elle implique commercialement. Le filament est non toxique et conforme EN 71 : information vraie, mais qui ne s'écrit PAS dans un premier contact (règle d'or 1), la conformité est un dû, pas un argument.
 - La gamme se construit autour du stylo : Pack Découverte et Pack Complet (coffrets prêts à offrir), recharges de bobines Fil'Up en lots de 3, 4 ou 12, pochoirs Pad'Up, livrets pédagogiques (Découverte, Expert 3D). Prix publics conseillés TTC : stylo seul 49,99 €, Pack Découverte 69,99 €, Pack Complet 99,99 €, recharges dès 9,99 €.
 - Intérêt pour le point de vente, à formuler en FAITS BRUTS : le stylo se recharge avec les bobines Fil'Up (argument central), et il se prête à la démonstration et à l'atelier. Ne va pas au-delà : n'explique pas la mécanique du réachat, ne prédis ni les ventes, ni l'effet en rayon, ni la réaction des clients.
 - Les supports pédagogiques ont été développés avec l'appui du Réseau Canopé (formulation exacte, voir interdits).
@@ -1952,14 +1958,14 @@ proximite, niveau "voisins" : "à quelques kilomètres de chez nous" ou "presque
 proximite, niveau "secteur" : "dans votre secteur".
 proximite, niveau "region" : "en Occitanie comme nous".
 proximite, niveau "aucune" : aucune allusion à la distance, à la région ou au voisinage.
-reseau_enseigne, compte >= 2 : "nous échangeons déjà avec plusieurs [enseigne]" — [enseigne] est celle du DESTINATAIRE, jamais une autre (règle d'or 8).
+reseau_enseigne, compte >= 2 : "nous échangeons déjà avec plusieurs [enseigne]", [enseigne] est celle du DESTINATAIRE, jamais une autre (règle d'or 8).
 reseau_enseigne, compte = 1 : "nous travaillons déjà avec un autre [enseigne]", même exigence.
-reseau_enseigne, dans_la_region >= 1 : précise "de la région" ou "près de chez vous" — "nous échangeons déjà avec plusieurs [enseigne] de la région". N'ajoute "de la région" QUE si dans_la_region est supérieur à zéro.
+reseau_enseigne, dans_la_region >= 1 : précise "de la région" ou "près de chez vous", "nous échangeons déjà avec plusieurs [enseigne] de la région". N'ajoute "de la région" QUE si dans_la_region est supérieur à zéro.
 reseau_enseigne, echanges_en_cours >= 1 : des discussions sont engagées (courriels, appels, rendez-vous) avec ce nombre de magasins de l'enseigne. Écris "nous sommes déjà en discussion avec plusieurs [enseigne]" ou "des échanges sont en cours avec plusieurs [enseigne]". Un échange n'est PAS une vente : n'écris ni "nous fournissons", ni "nos clients [enseigne]", ni "ils nous ont référencés".
 reseau_enseigne, devis_ou_commandes >= 1 : des devis ou des commandes existent avec cette enseigne. C'est l'antécédent le plus fort, et il prime sur le précédent : écris "des échanges commerciaux sont en cours avec plusieurs [enseigne]", ou "nous fournissons déjà plusieurs [enseigne]" si le chiffre est supérieur à un. Ne détaille jamais le montant, la référence ni le magasin concerné.
 reseau_enseigne, les deux à zéro : les magasins de l'enseigne sont suivis mais rien n'est encore engagé. Reste au niveau du suivi : "nous travaillons déjà avec plusieurs [enseigne]" est alors trop fort, préfère "plusieurs [enseigne] nous suivent déjà" ou "nous avons déjà pris contact avec plusieurs [enseigne]".
 reseau_enseigne : cet angle, dès qu'il est fourni, est OBLIGATOIRE dans le mail. Un magasin de réseau à qui l'on écrit sans lui dire que l'on travaille déjà avec ses confrères perd l'argument le plus convaincant dont on dispose. Place-le dans le corps, jamais après la question finale.
-reseau_region : "plusieurs revendeurs de la région s'y intéressent déjà" — formulation neutre, sans nommer aucun réseau.
+reseau_region : "plusieurs revendeurs de la région s'y intéressent déjà", formulation neutre, sans nommer aucun réseau.
 adequation_produit : angle sur le type de commerce et la ville, sans relation ni proximité.
 </traduction_des_angles>
 
@@ -1980,10 +1986,10 @@ Ne les écris jamais, même suggérés par les données.
 </interdits_absolus>
 
 <style>
-Français professionnel, sobre, sans emphase. Pas de tiret cadratin : virgules, parenthèses, ou deux phrases.
+Français professionnel, sobre, sans emphase. Aucun tiret long, ni «, » ni «, », nulle part (règle d'or 16) : virgules, deux-points, parenthèses, ou deux phrases.
 Pas de superlatifs, pas de formules creuses ("je me permets de revenir vers vous", "en espérant que ce mail vous trouve en bonne santé").
 L'enthousiasme se porte par les FAITS et le rythme des phrases, jamais par des adjectifs de vendeur. Interdits, quel que soit le ton demandé : "belle opportunité", "formidable", "incroyable", "révolutionnaire", "unique en son genre", "vous allez adorer", "encore et encore", "petit bijou", "véritable", "un vrai plus", et toute redondance d'insistance du même genre. Un ton enthousiaste coché n'autorise ni emphase, ni promesse, ni remplissage : il rend seulement les phrases plus vives et plus directes.
-Objet de 6 à 9 mots, informatif, sans point d'exclamation.
+Objet toujours préfixé de « PEN'UP 3D : » (règle d'or 17), suivi de cinq à huit mots informatifs, sans point d'exclamation. Cette partie informative change à chaque mail : c'est la première chose que voit le destinataire, et deux magasins voisins ne doivent pas recevoir le même objet.
 Corps de 80 à 150 mots, en trois paragraphes au plus. Une seule idée par paragraphe, aucune idée répétée d'un paragraphe à l'autre (règle d'or 11). Une seule action finale, la plus légère possible (un échange, l'envoi d'un catalogue, ou un coffret d'essai selon la consigne), formulée en une seule question qui clôt le mail (règle d'or 12).
 N'ÉCRIS NI FORMULE DE POLITESSE FINALE NI SIGNATURE. Le message s'arrête sur sa dernière phrase utile : pas de « Bien à vous », « Cordialement » ou équivalent, pas de nom, de fonction, de société, de téléphone ni d'adresse de site. Gmail ajoute automatiquement la signature de l'expéditeur, laquelle contient déjà la formule de politesse : en écrire une ici la ferait apparaître en double.
 </style>
@@ -2000,40 +2006,40 @@ Le nom du destinataire ne se répète pas dans le corps du mail : il figure dans
 
 <modeles_de_reference>
 Cinq mails validés par l'émetteur. Ils fixent la LONGUEUR, le RYTHME et le NIVEAU D'ENTHOUSIASME attendus, ainsi que la structure en trois temps : qui je suis / ce que le produit apporte au commerçant / la demande de rendez-vous.
-Ne les recopie JAMAIS mot pour mot, ni en entier ni phrase par phrase, et n'assemble pas non plus un mail en collant le paragraphe d'un modèle à celui d'un autre : c'est ainsi qu'on obtient un texte à la fois impersonnel et redondant. Chaque mail doit être réécrit pour SON magasin, adossé aux seuls angles fournis. Aucun de ces modèles ne dispense des règles d'or ni de <regle_cardinale> — en particulier, n'emploie « plusieurs revendeurs de la région » que si l'angle correspondant est réellement fourni.
+Ne les recopie JAMAIS mot pour mot, ni en entier ni phrase par phrase, et n'assemble pas non plus un mail en collant le paragraphe d'un modèle à celui d'un autre : c'est ainsi qu'on obtient un texte à la fois impersonnel et redondant. Chaque mail doit être réécrit pour SON magasin, adossé aux seuls angles fournis. Aucun de ces modèles ne dispense des règles d'or ni de <regle_cardinale>, en particulier, n'emploie « plusieurs revendeurs de la région » que si l'angle correspondant est réellement fourni.
 Les crochets sont des variables à remplacer. La formule de politesse finale est absente volontairement : Gmail ajoute la signature.
 
-[MODÈLE 1 — peps mesuré]
-Objet : Pen'Up 3D, un stylo 3D pour enfants et ses recharges
+[MODÈLE 1, peps mesuré]
+Objet : PEN'UP 3D : un stylo créatif pour votre rayon jouets
 Bonjour Monsieur/Madame [NOM],
-Matthis-Anaël, de Pen'Up 3D, une marque française basée à Montauban — la marque de stylos 3D la mieux référencée sur Google et la plus visible sur les réseaux sociaux. Notre stylo permet aux enfants dès 6 ans de dessiner en volume : le filament sort tiède et durcit en refroidissant.
+Matthis-Anaël, de Pen'Up 3D, une marque française basée à Montauban, la marque de stylos 3D la mieux référencée sur Google et la plus visible sur les réseaux sociaux. Notre stylo permet aux enfants dès 6 ans de dessiner en volume : le filament sort tiède et durcit en refroidissant.
 Il se recharge avec les bobines Fil'Up, déclinées en de nombreux coloris et effets. Plusieurs revendeurs de la région s'y intéressent déjà, et j'aimerais beaucoup vous présenter tout ça pour [VILLE/MAGASIN].
 Un court appel, une visio ou un passage en magasin cette semaine ? Je vous montre le stylo en action.
 
-[MODÈLE 2 — peps + image d'accroche]
-Objet : Un stylo qui dessine dans les airs, conçu à Montauban
+[MODÈLE 2, peps + image d'accroche]
+Objet : PEN'UP 3D : le stylo qui dessine dans les airs
 Bonjour Monsieur/Madame [NOM],
 Matthis-Anaël, de Pen'Up 3D, une marque montalbanaise, aujourd'hui la marque de stylos 3D n°1 sur Google, Facebook et Instagram. Notre stylo permet aux enfants de dessiner non pas sur le papier, mais dans les airs : le filament sort tiède, durcit en refroidissant, et l'objet tient debout tout seul. Dès 6 ans, sans risque de brûlure.
 Plusieurs revendeurs de la région l'ont déjà repéré, et j'aimerais vraiment vous le faire découvrir pour [VILLE/MAGASIN].
 On s'appelle cette semaine, ou je passe vous voir ? Je vous montre le stylo en action, et la gamme de recharges Fil'Up.
 
-[MODÈLE 3 — peps chaleureux]
-Objet : Un stylo 3D pour enfants, conçu à Montauban
+[MODÈLE 3, peps chaleureux]
+Objet : PEN'UP 3D : marque montalbanaise de stylos 3D enfants
 Bonjour Monsieur/Madame [NOM],
 Matthis-Anaël, de Pen'Up 3D ! Nous sommes une marque française basée à Montauban, la plus visible en ligne sur les stylos 3D, sur Google comme sur les réseaux sociaux. Notre stylo est fait pour les enfants dès 6 ans : ils dessinent en volume, en toute sécurité, grâce à un filament basse température.
 Il se recharge avec les bobines Fil'Up, qui existent en de nombreux coloris et effets. Plusieurs revendeurs de la région s'y sont déjà mis, et j'aimerais beaucoup faire découvrir la gamme à [VILLE/MAGASIN].
 Un petit créneau cette semaine, par appel, en visio ou sur place ? Je vous montre tout ça en action.
 
-[MODÈLE 4 — resserré, structure de base]
-Objet : Pen'Up 3D, marque française basée à Montauban
+[MODÈLE 4, resserré, structure de base]
+Objet : PEN'UP 3D : une gamme créative pour vos rayons
 Bonjour Monsieur/Madame [NOM],
 Matthis-Anaël, de Pen'Up 3D, marque française basée à Montauban, la mieux référencée sur Google et la plus visible sur les réseaux sociaux dans les stylos 3D. J'ai le sentiment que ce produit aurait sa place dans votre magasin.
 Notre stylo permet aux enfants dès 6 ans de dessiner en volume, sans risque de brûlure (filament basse température), et il se recharge avec les bobines Fil'Up, en de nombreux coloris.
 Plusieurs revendeurs de la région s'y intéressent déjà, et j'aimerais beaucoup vous le présenter pour [VILLE/MAGASIN].
 Un court appel, une visio ou un passage en magasin cette semaine ? Je vous montre le stylo en action.
 
-[MODÈLE 5 — démonstration en magasin ; à privilégier quand contact_mode vaut "visite"]
-Objet : Pen'Up 3D, un stylo créatif conçu à Montauban
+[MODÈLE 5, démonstration en magasin ; à privilégier quand contact_mode vaut "visite"]
+Objet : PEN'UP 3D : démonstration du stylo dans votre magasin
 Bonjour Monsieur/Madame [NOM],
 Je m'appelle Matthis-Anaël Prevedello, de Pen'Up 3D, marque française basée à Montauban et n°1 sur Google, Facebook et Instagram dans les stylos 3D. Nous concevons un stylo à filament basse température : dès 6 ans, les enfants dessinent en volume, sans risque de brûlure.
 Il se recharge avec les bobines Fil'Up, déclinées en de nombreux coloris et effets. Nous travaillons déjà avec plusieurs revendeurs de votre région.
@@ -2145,7 +2151,34 @@ function verifyProspectMail(parsed, angles, magasin) {
 }
 // Génère un mail de prospection pour un prospect, à partir de ses angles. Parsing JSON robuste (2 essais),
 // signature et mention d'opposition retirées côté code, et vérification des affirmations.
-async function generateProspectMail({ prospect, angles, consigne, ton, mode, precedent, instruction, onUsage }) {
+// Le tiret long est proscrit dans les mails : on ne se contente pas de le demander au modèle, on le
+// retire. Un tiret encadrant une incise devient une virgule, un tiret introductif un deux-points.
+// Le trait d'union des mots composés (« Tarn-et-Garonne ») n'est évidemment pas concerné.
+function sansTiretLong(t) {
+  return String(t || "")
+    .replace(/\s*[—–]\s*:/g, " :")
+    .replace(/\s+[—–]\s+/g, ", ")
+    .replace(/^[—–]\s*/gm, "")
+    .replace(/\s*[—–]\s*/g, ", ")
+    .replace(/,\s*,/g, ",")
+    .replace(/\s+,/g, ",");
+}
+// L'objet commence toujours par « PEN'UP 3D : ». On le normalise côté code plutôt que d'espérer que le
+// modèle s'y tienne : on retire le préfixe sous toutes ses graphies (avec ou sans apostrophe typo-
+// graphique, suivi d'un deux-points, d'une virgule ou d'un tiret) puis on le remet sous sa forme unique.
+const OBJET_PREFIXE = "PEN'UP 3D : ";
+function objetNormalise(objet, prospect) {
+  let t = sansTiretLong(objet).trim();
+  for (let i = 0; i < 3; i++) {
+    const av = t;
+    t = t.replace(/^pen'?[’']?up\s*3?d?\s*[:,.\-]?\s*/i, "").trim();
+    if (t === av) break;
+  }
+  if (!t) t = [(prospect && (prospect.nom || prospect.enseigne)) || "", "présentation de la gamme"].filter(Boolean)[0];
+  // Casse laissée telle quelle : abaisser l'initiale abîmerait un nom propre (« JouéClub », « Fil'Up »).
+  return OBJET_PREFIXE + t;
+}
+async function generateProspectMail({ prospect, angles, consigne, ton, mode, precedent, instruction, dejaEcrits, onUsage }) {
   const p = prospect || {};
   // Prénom et nom séparés, plus la forme d'appel : le mailing est un premier contact, donc jamais de
   // prénom seul. Une fiche prospect ne porte pas de civilité et ne garde pas le texte des mails déjà
@@ -2172,12 +2205,19 @@ async function generateProspectMail({ prospect, angles, consigne, ton, mode, pre
     "<consigne_globale>" + (consigne || "proposer un court échange pour présenter la gamme") + "</consigne_globale>",
   ];
   if (ton && String(ton).trim()) parts.push("<ton>Adopte " + String(ton).trim() + ". Ce registre module le style, il n'autorise jamais une affirmation fausse ni une entorse aux règles ci-dessus.</ton>");
+  // Mails déjà produits dans la même vague : le modèle ne garde aucune mémoire d'un appel à l'autre,
+  // il faut donc lui montrer ce qu'il vient d'écrire pour qu'il ne le réécrive pas (règle d'or 18).
+  if (Array.isArray(dejaEcrits) && dejaEcrits.length) {
+    parts.push("<deja_ecrits>\nMails déjà rédigés dans cette vague, pour d'autres magasins. N'en réutilise AUCUN objet ni AUCUNE ouverture, même reformulés :\n"
+      + dejaEcrits.slice(0, 12).map((x, i) => (i + 1) + ". Objet : " + (x.objet || "(sans objet)") + "\n   Ouverture : " + (x.ouverture || "")).join("\n")
+      + "\n</deja_ecrits>");
+  }
   if (mode === "retouche" && precedent) parts.push("<message_precedent>\n" + precedent + "\n</message_precedent>", "<instruction_de_retouche>" + (instruction || "") + "</instruction_de_retouche>\nApplique UNIQUEMENT cette modification, en conservant le reste et le même schéma JSON de sortie.");
   const baseUser = parts.join("\n\n");
   const call = async (suffix) => {
     const jid = aiJobs.anon("Mailing prospection");
     try {
-      const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1200, temperature: 0.6, system: SYS_PROSPECTION, messages: [{ role: "user", content: baseUser + (suffix || "") }] }) });
+      const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1200, temperature: 0.9, system: SYS_PROSPECTION, messages: [{ role: "user", content: baseUser + (suffix || "") }] }) });
       if (!res.ok) throw new Error(await claudeErrorText(res));
       const dt = await res.json();
       if (dt && dt.usage && onUsage) onUsage(dt.usage);
@@ -2197,7 +2237,10 @@ async function generateProspectMail({ prospect, angles, consigne, ton, mode, pre
   // l'écrit malgré la consigne, on la coupe. Elle affaiblissait la fin du mail, juste après la
   // demande de rendez-vous.
   corps = corps.split(/\n\s*\n/).filter((par) => !/cadre strictement professionnel|souhaitez pas [êe]tre recontact/i.test(par)).join("\n\n").replace(/\s+$/, "");
-  return { ok: true, objet: parsed.objet || "", corps, objectif: parsed.objectif || angles.objectif_type, angle_utilise: parsed.angle_utilise || angles.bestAngle, claims_verifiables: Array.isArray(parsed.claims_verifiables) ? parsed.claims_verifiables : [], confiance: v.confiance, alertes: v.alertes };
+  // Tiret long et préfixe d'objet : appliqués côté code, après le modèle. Une consigne de prompt se
+  // respecte la plupart du temps, ces deux-là doivent l'être à chaque fois.
+  corps = sansTiretLong(corps);
+  return { ok: true, objet: objetNormalise(parsed.objet || "", p), corps, objectif: parsed.objectif || angles.objectif_type, angle_utilise: parsed.angle_utilise || angles.bestAngle, claims_verifiables: Array.isArray(parsed.claims_verifiables) ? parsed.claims_verifiables : [], confiance: v.confiance, alertes: v.alertes };
 }
 function contactSite(c, data) { return c && c.siteId ? ((data && data.sites) || []).find((s) => s.id === c.siteId) || null : null; }
 // Un contact peut être rattaché à plusieurs points de vente (ex. un patron de plusieurs magasins) :
@@ -4080,7 +4123,7 @@ function Dashboard({ data, go }) {
     })()}
     {(() => {
       const ranked = accounts.map((a) => ({ a, p: priorityScore(a, data) })).filter((x) => x.p.score > 0).sort((x, y) => y.p.score - x.p.score).slice(0, 6);
-      const relMail = (a) => { const cs = contacts.filter((c) => c.accountId === a.id); const pc = cs.find((c) => c.principal) || cs[0]; const to = pc && pc.email ? pc.email : ""; const subj = encodeURIComponent("PEN'UP 3D — suivi commercial" + (a.enseigne ? " · " + a.enseigne : "")); const body = encodeURIComponent("Bonjour" + (pc && pc.prenom ? " " + pc.prenom : "") + ",\n\nJe me permets de revenir vers vous concernant " + (a.enseigne || "votre établissement") + " et nos stylos 3D PEN'UP.\n\nSeriez-vous disponible pour un point rapide ?\n\nBien à vous,\n"); return "mailto:" + to + "?subject=" + subj + "&body=" + body; };
+      const relMail = (a) => { const cs = contacts.filter((c) => c.accountId === a.id); const pc = cs.find((c) => c.principal) || cs[0]; const to = pc && pc.email ? pc.email : ""; const subj = encodeURIComponent("PEN'UP 3D : suivi commercial" + (a.enseigne ? " · " + a.enseigne : "")); const body = encodeURIComponent("Bonjour" + (pc && pc.prenom ? " " + pc.prenom : "") + ",\n\nJe me permets de revenir vers vous concernant " + (a.enseigne || "votre établissement") + " et nos stylos 3D PEN'UP.\n\nSeriez-vous disponible pour un point rapide ?\n\nBien à vous,\n"); return "mailto:" + to + "?subject=" + subj + "&body=" + body; };
       return (<div className="card" style={{ marginBottom: 18, borderLeft: "4px solid var(--red)" }}><div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><AlertTriangle size={16} style={{ color: "var(--red)" }} /> Priorités commerciales & relances</h3><span>argent en attente · ancienneté · étape</span></div>
         {ranked.length === 0 ? <div className="empty">Rien à prioriser pour le moment.</div> : <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{ranked.map(({ a, p }) => { const cs = contacts.filter((c) => c.accountId === a.id); const pc = cs.find((c) => c.principal) || cs[0]; return (<div key={a.id} className="hrow" style={{ display: "flex", alignItems: "center", gap: 11, padding: "8px 0", borderBottom: "1px solid #f0f3f9" }}><span style={{ width: 36, textAlign: "center", fontWeight: 800, fontSize: 15, color: p.color }} className="tnum">{p.score}</span><div style={{ flex: 1, minWidth: 0 }}><div className="lnk" style={{ fontWeight: 700, fontSize: 13.5 }} onClick={() => go("accounts", a.id)}>{a.enseigne || "Sans nom"}</div><div style={{ fontSize: 11.5, color: "var(--muted)" }}>{p.days == null ? "jamais contacté" : "dernier échange il y a " + p.days + " j"}{p.caAtt > 0 ? " · " + eur(p.caAtt) + " en attente" : ""}</div></div><Badge color={p.color}>{p.level}</Badge>{pc && pc.email ? <a className="btn btn-g btn-s" href={relMail(a)}><Mail size={14} /> Relancer</a> : <button className="btn btn-g btn-s" onClick={() => go("accounts", a.id)}><ChevronRight size={14} /> Ouvrir</button>}</div>); })}</div>}
       </div>);
@@ -5238,7 +5281,7 @@ Privilégie la première personne du singulier (« je ») plutôt que le « nous
 5. Si un ticket SAV est ouvert, la reconnaissance du problème passe avant toute proposition commerciale.
 6. Si le contact n'a jamais répondu après plusieurs relances, change d'angle plutôt que d'insister sur le même argument, et propose une sortie simple (une réponse en un mot suffit).
 7. Si <contexte>.destinataire.typeAdresse vaut "generique", commence le corps par une ligne de routage du type "À l'attention de [civilité nom], [fonction]", et rends l'objet explicite sur l'expéditeur et le sujet.
-8. FORME D'APPEL — suis <contexte>.destinataire.formeAppel, sans jamais en décider toi-même :
+8. FORME D'APPEL, suis <contexte>.destinataire.formeAppel, sans jamais en décider toi-même :
    - "nom" : adresse-toi par le NOM DE FAMILLE, jamais par le prénom seul. Si "civilite" est renseignée, écris "Bonjour [civilité] [nomFamille]". Si elle est vide, écris "Bonjour [prénom] [nomFamille]" : n'invente JAMAIS une civilité et ne la déduis jamais du prénom.
    - "prenom" : emploie le prénom seul ("Bonjour [prénom]"). Un message déjà envoyé l'employait ; revenir au nom de famille se lirait comme une prise de distance.
    - Champ absent (destinataire inconnu ou standard d'accueil) : adresse générique sobre, "Bonjour,".
@@ -5264,7 +5307,7 @@ Le ton demandé module le registre, il n'autorise jamais l'approximation factuel
 </style>
 
 <contraintes_canal>
-EMAIL : objet de 6 à 9 mots, informatif et non racoleur, sans point d'exclamation. Corps de 90 à 180 mots. NI FORMULE DE POLITESSE FINALE NI SIGNATURE : le message s'arrête sur sa dernière phrase utile. Pas de « Bien à vous », « Cordialement » ou équivalent, pas de nom, fonction, société, téléphone ni site — Gmail ajoute automatiquement la signature de l'expéditeur, qui contient déjà la formule de politesse.
+EMAIL : objet de 6 à 9 mots, informatif et non racoleur, sans point d'exclamation. Corps de 90 à 180 mots. NI FORMULE DE POLITESSE FINALE NI SIGNATURE : le message s'arrête sur sa dernière phrase utile. Pas de « Bien à vous », « Cordialement » ou équivalent, pas de nom, fonction, société, téléphone ni site, Gmail ajoute automatiquement la signature de l'expéditeur, qui contient déjà la formule de politesse.
 LINKEDIN : pas d'objet. Message de 60 à 110 mots, ton conversationnel, pas de signature. Si le champ "sousCanal" vaut "invitation", plafond strict de 280 caractères.
 SMS : 2 phrases maximum, 300 caractères maximum, pas d'objet, pas de lien sauf s'il figure dans la consigne, identification de l'expéditeur dès la première phrase (nom et société), pas de familiarité.
 </contraintes_canal>
@@ -5408,9 +5451,10 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
   }, [fullCtx, forceSegment, excluded, isStd, useStoreMail, storeMail]);
   const charCount = useMemo(() => JSON.stringify(effCtx).length, [effCtx]);
   const applyResult = (r) => {
-    setSubject(r.objet || (canal === "email" ? ("PEN'UP 3D — " + estabName) : ""));
-    setOut(canal === "email" ? stripSignature(r.corps || "") : (r.corps || "")); // Gmail ajoute la signature
-    setShortOut(canal === "email" ? stripSignature(r.variante_courte || "") : (r.variante_courte || ""));
+    // Tiret long retiré ici aussi : la règle vaut pour tout ce qui part au nom de la marque.
+    setSubject(sansTiretLong(r.objet || (canal === "email" ? ("PEN'UP 3D : " + estabName) : "")));
+    setOut(sansTiretLong(canal === "email" ? stripSignature(r.corps || "") : (r.corps || ""))); // Gmail ajoute la signature
+    setShortOut(sansTiretLong(canal === "email" ? stripSignature(r.variante_courte || "") : (r.variante_courte || "")));
     setUsedCtx(Array.isArray(r.contexte_utilise) ? r.contexte_utilise : []);
     const al = Array.isArray(r.alertes) ? r.alertes.slice() : [];
     if (r.creneauxNonVerifies && r.creneauxNonVerifies.length) al.unshift("Créneau non vérifié, à contrôler : " + r.creneauxNonVerifies.join(" ; "));
@@ -5450,7 +5494,7 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
     if (!recipient || !recipient.email) { setSentMsg("❌ Le destinataire n'a pas d'adresse e-mail."); return; }
     setSending(true); setSentMsg("");
     try {
-      const res = await fetch("/api/gmail-send", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ to: recipient.email, subject: subject || ("PEN'UP 3D — " + estabName), body: out }) });
+      const res = await fetch("/api/gmail-send", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ to: recipient.email, subject: subject || ("PEN'UP 3D : " + estabName), body: out }) });
       const dt = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(dt.error || ("Erreur " + res.status));
       logInteraction("email");
@@ -5782,7 +5826,7 @@ function seedEmailTemplates() {
     { id: "tpl_relance", name: "Relance de devis", subject: "Votre devis PEN'UP 3D", body: "Bonjour,\n\nJe reviens vers vous au sujet du devis {ref} envoyé le {date}. Restez-vous intéressé(e) ? Je reste disponible pour en échanger ou l'ajuster si besoin.\n\nBien cordialement,\nMatthis-Anaël Prevedello — PEN'UP 3D" },
     { id: "tpl_rdv", name: "Confirmation de rendez-vous", subject: "Confirmation de notre rendez-vous", body: "Bonjour,\n\nJe vous confirme notre rendez-vous du {date}. N'hésitez pas si un autre créneau vous convient mieux.\n\nÀ très bientôt,\nPEN'UP 3D" },
     { id: "tpl_merci", name: "Remerciement après visite", subject: "Merci pour votre accueil", body: "Bonjour,\n\nMerci pour le temps que vous m'avez accordé. Je reste à votre disposition pour toute question sur la gamme PEN'UP 3D et vous transmets le catalogue en pièce jointe.\n\nBien cordialement," },
-    { id: "tpl_catalogue", name: "Envoi de catalogue", subject: "Catalogue PEN'UP 3D — gamme et tarifs", body: "Bonjour,\n\nComme convenu, voici le catalogue de la gamme PEN'UP 3D avec les prix conseillés. Je peux vous préparer un devis adapté à votre point de vente dès que vous le souhaitez.\n\nBien cordialement," },
+    { id: "tpl_catalogue", name: "Envoi de catalogue", subject: "PEN'UP 3D : catalogue, gamme et tarifs", body: "Bonjour,\n\nComme convenu, voici le catalogue de la gamme PEN'UP 3D avec les prix conseillés. Je peux vous préparer un devis adapté à votre point de vente dès que vous le souhaitez.\n\nBien cordialement," },
   ];
 }
 function EmailTemplatesModal({ templates, onClose, persist }) {
@@ -9272,7 +9316,7 @@ function ProspectMailing({ data, persist, onClose }) {
     updateCard(c.id, { sending: true, sendMsg: "" });
     try {
       const pj = piece ? [piece.storagePath ? { filename: piece.name, mimeType: "application/pdf", storagePath: piece.storagePath } : piece.storageUrl ? { filename: piece.name, mimeType: "application/pdf", storageUrl: piece.storageUrl } : { filename: piece.name, mimeType: "application/pdf", contentBase64: piece.dataUrl }] : [];
-      const res = await fetch("/api/gmail-draft", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ to, subject: c.objet || ("PEN'UP 3D — " + (c.prospect.nom || "")), body: c.corps, attachments: pj }) });
+      const res = await fetch("/api/gmail-draft", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ to, subject: c.objet || ("PEN'UP 3D : " + (c.prospect.nom || "")), body: c.corps, attachments: pj }) });
       const dt = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(dt.error || ("Erreur " + res.status));
       const mentionPj = piece ? " — pièce jointe : " + piece.name : "";
@@ -9281,11 +9325,24 @@ function ProspectMailing({ data, persist, onClose }) {
       return true;
     } catch (e) { updateCard(c.id, { sending: false, sendMsg: "❌ " + ((e && e.message) || e) }); return false; }
   };
+  // Objets et ouvertures déjà produits dans la vague : le modèle n'a aucune mémoire d'un appel à
+  // l'autre, on les lui repasse pour qu'il ne resserve pas le même mail au magasin suivant. Lu depuis
+  // le registre global plutôt que depuis l'état local : la génération en lot avance carte par carte.
+  const dejaEcritsPour = (cid) => (mailingWave.cards || [])
+    .filter((x) => x.id !== cid && x.corps)
+    .slice(-12)
+    .map((x) => ({ objet: x.objet || "", ouverture: String(x.corps || "").split(/\n/).filter((l) => l.trim())[1] || "" }));
   const runGen = async (c, opts) => {
     updateCard(c.id, { busy: true });
     try {
-      const r = await generateProspectMail({ prospect: c.prospect, angles: c.angles, consigne: c.angles.objectif_type === "referencement" ? consigne : "", ton: tonStr(), mode: opts && opts.instruction ? "retouche" : undefined, precedent: opts && opts.instruction ? ((c.objet ? "Objet : " + c.objet + "\n\n" : "") + c.corps) : undefined, instruction: opts && opts.instruction, onUsage });
-      updateCard(c.id, { busy: false, objet: r.objet || c.objet, corps: r.corps, confiance: r.confiance, alertes: r.alertes, angle_utilise: r.angle_utilise, edited: false, refineOpen: false, refineText: "" });
+      const r = await generateProspectMail({ prospect: c.prospect, angles: c.angles, consigne: c.angles.objectif_type === "referencement" ? consigne : "", ton: tonStr(), mode: opts && opts.instruction ? "retouche" : undefined, precedent: opts && opts.instruction ? ((c.objet ? "Objet : " + c.objet + "\n\n" : "") + c.corps) : undefined, instruction: opts && opts.instruction, dejaEcrits: dejaEcritsPour(c.id), onUsage });
+      // Filet contre le publipostage : deux cartes de la même vague ne doivent pas porter le même
+      // objet ni la même ouverture. Le cas échéant la carte part en relecture au lieu du lot.
+      const cle = (o, b) => normStr(o) + "|" + normStr(String(b || "").split(/\n/).filter((l) => l.trim())[1] || "");
+      const mienne = cle(r.objet, r.corps);
+      const jumelle = (mailingWave.cards || []).some((x) => x.id !== c.id && x.corps && cle(x.objet, x.corps) === mienne);
+      const alertes = jumelle ? [...(r.alertes || []), "Mail identique à un autre de la vague (même objet et même ouverture) : régénérez-le ou retouchez-le."] : r.alertes;
+      updateCard(c.id, { busy: false, objet: r.objet || c.objet, corps: r.corps, confiance: jumelle ? "a_revoir" : r.confiance, alertes, angle_utilise: r.angle_utilise, edited: false, refineOpen: false, refineText: "" });
     } catch (e) { updateCard(c.id, { busy: false, sendMsg: "❌ IA indisponible" }); }
   };
   const regenCard = async (c) => { if (c.edited) { const ok = await appConfirm("Régénérer va écraser vos modifications sur ce mail. Continuer ?", { title: "Régénérer", confirmLabel: "Régénérer" }); if (!ok) return; } runGen(c); };
