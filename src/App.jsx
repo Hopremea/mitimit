@@ -5581,6 +5581,21 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
     persist((p) => ({ ...p, events: [...(p.events || []), ev] }));
     setSentMsg((m) => (m ? m + " " : "") + "Relance programmée le " + diso + ".");
   };
+  // Dépose le message comme BROUILLON dans Gmail, sans rien envoyer et sans ouvrir d'onglet. Aucun
+  // échange n'est journalisé : un brouillon n'est pas un envoi, et le faire figurer au fil d'activité
+  // laisserait croire que le contact a été relancé.
+  const [drafting, setDrafting] = useState(false);
+  const createGmailDraft = async () => {
+    if (!recipient || !recipient.email) { setSentMsg("❌ Le destinataire n'a pas d'adresse e-mail."); return; }
+    setDrafting(true); setSentMsg("");
+    try {
+      const res = await fetch("/api/gmail-draft", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ to: recipient.email, subject: subject || ("PEN'UP 3D : " + estabName), body: out }) });
+      const dt = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(dt.error || ("Erreur " + res.status));
+      setSentMsg("✅ Brouillon créé dans Gmail pour " + recipient.email + ". Rien n'a été envoyé.");
+    } catch (e) { setSentMsg("❌ Échec de la création du brouillon : " + (e && e.message ? e.message : String(e))); }
+    finally { setDrafting(false); }
+  };
   const sendViaGmail = async () => {
     if (!recipient || !recipient.email) { setSentMsg("❌ Le destinataire n'a pas d'adresse e-mail."); return; }
     setSending(true); setSentMsg("");
@@ -5674,7 +5689,7 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
         <span style={{ fontSize: 11, color: "var(--muted)", marginRight: "auto" }}>Brouillon conservé : vous pouvez fermer cette fenêtre et la rouvrir sur le même message.</span>
         <button className="btn btn-ghost btn-s" onClick={async () => { const ok = await appConfirm("Effacer ce brouillon et repartir d'une page vierge ?", { title: "Effacer le brouillon", confirmLabel: "Effacer" }); if (ok) clearDraft(); }} title="Vide le message conservé pour ce destinataire"><X size={14} /> Effacer le brouillon</button>
         {canal === "email" && recMail && <>
-          <a className="btn btn-g" href={"https://mail.google.com/mail/?view=cm&fs=1&to=" + encodeURIComponent(recMail) + "&subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(out)} target="_blank" rel="noreferrer" title="Ouvrir Gmail avec ce brouillon (sans envoyer)"><Mail size={15} /> Ouvrir Gmail</a>
+          <button className="btn btn-g" onClick={createGmailDraft} disabled={drafting} title="Dépose le message dans vos brouillons Gmail, sans ouvrir d'onglet et sans envoyer"><Mail size={15} className={drafting ? "spin" : ""} /> {drafting ? "Création…" : "Créer le brouillon Gmail"}</button>
           <button className="btn btn-p" onClick={sendViaGmail} disabled={sending}><Send size={15} className={sending ? "spin" : ""} /> {sending ? "Envoi…" : "Envoyer via Gmail"}</button>
         </>}
         {canal === "sms" && smsHref && <a className="btn btn-p" href={smsHref}><MessageSquare size={15} /> Ouvrir l'app SMS</a>}
@@ -5684,7 +5699,7 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
       </div>
       {sentMsg && <div style={{ fontSize: 12.5, fontWeight: 600, marginTop: 8, textAlign: "right", color: sentMsg.startsWith("❌") ? "var(--red)" : "var(--green)" }}>{sentMsg}</div>}
     </>}
-    <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 10 }}>Brouillon IA — à relire avant envoi. Le contexte transmis est consultable et ajustable ci-dessus. « Envoyer via Gmail » nécessite l'intégration Gmail (voir Connexions).</p>
+    <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 10 }}>Brouillon IA, à relire avant envoi. Le contexte transmis est consultable et ajustable ci-dessus. « Créer le brouillon Gmail » dépose le message dans vos brouillons sans rien envoyer ni ouvrir ; « Envoyer via Gmail » l'envoie immédiatement. Les deux nécessitent l'intégration Gmail (voir Connexions).</p>
   </Modal>);
 }
 // Construit le dossier complet d'un compte (groupe / établissement) transmis au chat IA :
