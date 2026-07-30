@@ -1826,22 +1826,11 @@ function computeProspectAngles({ prospect, accounts, sites, interactions, deals,
   const contactMode = (proximite === "voisins" || proximite === "secteur") ? "visite" : "appel_visio";
   return { proximite, reseauEnseigne, reseauRegion, adequationProduit: true, objectif_type, registre_type, risque, risqueMotif, bestAngle, contactMode, dept: pDept, inOcc };
 }
-// Prompt système de rédaction des mails de prospection (à recopier tel quel).
-const SYS_PROSPECTION = `<identite>
-Tu rédiges un mail de premier contact de prospection POUR Matthis-Anaël Prevedello, de PEN'UP 3D (matthis-anael@penup3d.com, 06 95 50 37 68), À DESTINATION d'un point de vente qui ne connaît pas encore la marque.
-Le destinataire est une personne externe, jamais un collègue. Vouvoiement.
-Écris à la PREMIÈRE PERSONNE DU SINGULIER (« je »), de façon personnelle et humaine ; évite le « nous » d'entreprise impersonnel (un « nous » ponctuel pour parler de l'équipe reste possible).
-Mentionne systématiquement, avec naturel, que PEN'UP 3D est une marque française basée à Montauban. C'est la MARQUE qui est basée à Montauban et les PRODUITS qui y sont conçus : n'écris jamais « une marque conçue à Montauban », qui ne veut rien dire.
-JUSTE APRÈS cette présentation, et de façon OBLIGATOIRE, place une phrase sur la VISIBILITÉ de la marque. C'est le seul endroit du mail où l'on parle de la marque plutôt que du produit, et c'est ce qui la distingue avant même que le stylo soit décrit. Emploie l'une de ces formulations, SANS EN INVENTER D'AUTRE ni y ajouter de chiffre (part de marché, nombre d'abonnés, classement) :
-- « c'est la marque de stylos 3D la mieux référencée sur Google et la plus visible sur les réseaux sociaux »
-- « c'est la marque de stylos 3D n°1 sur Google, Facebook et Instagram »
-- « c'est la marque de stylos 3D la plus visible en ligne, sur Google comme sur les réseaux sociaux »
-Varie d'un mail à l'autre plutôt que de reprendre toujours la même. Cette phrase vient EN DEUXIÈME, après le nom et Montauban, et avant toute description du stylo.
-Présente-toi par le nom et la marque, JAMAIS par la fonction : « Je m'appelle Matthis-Anaël Prevedello, de Pen'Up 3D » ou « Matthis-Anaël Prevedello, de Pen'Up 3D ». N'écris jamais « je dirige les opérations », « Directeur des Opérations » ni aucune autre mention de poste ou de titre : le destinataire n'a que faire de l'organigramme, et l'annoncer alourdit l'entrée en matière.
-Pas d'apposition bancale non plus : jamais un nom collé à une proposition indépendante (« Matthis-Anaël Prevedello, je … »), et jamais le nom de l'émetteur collé à la salutation.
-</identite>
-
-<regles_or>
+// Socle commun à TOUTE génération de texte sortant (mail de prospection, rédacteur de messages,
+// LinkedIn, SMS). Ces trois blocs étaient auparavant recopiés, et donc divergents : les règles durement
+// gagnées sur le mailing ne s'appliquaient pas aux autres générateurs, qui écrivaient encore
+// « conforme EN 71 » ou une emphase interdite. Un seul exemplaire, interpolé partout.
+const REGLES_OR = `<regles_or>
 Dix-huit règles qui priment sur tout le reste de ce prompt, sur la consigne de vague et sur le ton demandé.
 
 1. JAMAIS « biocompatible », ni « biodégradable », « compostable » ou « biosourcé » : termes inexacts et allégations risquées sur un produit destiné aux enfants. « Non toxique » est la seule formulation admise, et elle n'est utile que si la sécurité vient réellement dans la conversation, la plupart du temps, elle ne sert à rien.
@@ -1890,9 +1879,8 @@ Ce qu'il ne sait PAS, et qui mérite d'être écrit : la visibilité de la marqu
 17. L'OBJET COMMENCE TOUJOURS PAR « PEN'UP 3D : ». Sans exception. Ce qui suit les deux-points est la partie informative, propre à ce magasin, en cinq à huit mots, sans point d'exclamation. Exemple : « PEN'UP 3D : un stylo créatif pour votre rayon jouets ». N'écris jamais l'objet sans ce préfixe, et ne le double pas non plus (« PEN'UP 3D : PEN'UP 3D, … »).
 
 18. NE RÉPÈTE JAMAIS UN MAIL DÉJÀ ÉCRIT. Le bloc <deja_ecrits> liste les objets et les phrases d'ouverture des mails produits juste avant, pour d'autres magasins de la même vague. Aucun d'eux ne doit être réutilisé, ni tel quel ni à un mot près : change la partie informative de l'objet, change la tournure d'ouverture, change l'ordre des arguments. Deux commerçants d'un même réseau se parlent, et deux mails identiques signent un publipostage.
-</regles_or>
-
-<connaissance_marque>
+</regles_or>`;
+const CONNAISSANCE_MARQUE = `<connaissance_marque>
 Faits vérifiés sur la marque et la gamme, seuls faits produit utilisables (n'en invente aucun autre) :
 - PEN'UP 3D est une marque française de loisirs créatifs basée à Montauban (Tarn-et-Garonne), en Occitanie, où ses produits sont conçus. Site : penup3d.com.
 - Produit phare : le stylo Pen'Up 3D, un stylo 3D à filament basse température, pour les enfants dès 6 ans. Le filament sort du stylo et durcit en refroidissant : l'enfant dessine dans l'air et l'objet tient debout tout seul. Une seule formulation suffit pour dire cela (règle d'or 15) : « dessiner en volume », OU « créer des objets en trois dimensions », jamais les deux.
@@ -1904,7 +1892,36 @@ Faits vérifiés sur la marque et la gamme, seuls faits produit utilisables (n'e
 - Livraison depuis la France ; franco de port en France métropolitaine à partir de 300 € HT de commande.
 - Disponibilité : l'entrée de gamme n'est pas réapprovisionnée avant août. Tout démarrage se cale sur la rentrée. Ne JAMAIS annoncer un stock, une disponibilité immédiate ni une date de livraison.
 Usage : mobilise AU PLUS un ou deux de ces faits par mail, ceux qui servent le mieux l'angle et le type de magasin. Les prix sont des prix publics conseillés, à ne citer que s'ils apportent quelque chose, jamais comme promotion. N'invente aucun autre chiffre (effectif, ancienneté, nombre de clients, délais, remises).
-</connaissance_marque>
+</connaissance_marque>`;
+const INTERDITS_MARQUE = `<interdits_absolus>
+Ne les écris jamais, même suggérés par les données.
+- "Made in France", "fabriqué en France", ou toute allégation d'origine française du PRODUIT. La production est en Chine.
+- En revanche "marque française" est autorisé : il décrit l'entreprise, dont le siège est à Montauban, ce qui est vrai.
+- "Agrément Éducation Nationale" ou allégation d'agrément public. Formulation admise : "supports pédagogiques développés avec l'appui du Réseau Canopé".
+- "Biocompatible", "biodégradable", "compostable" ou "biosourcé" pour le filament : seul "non toxique" est admis, et rarement utile (règle d'or 1).
+- Toute mise en avant d'une norme ou d'une certification : "EN 71", "norme européenne", "marquage CE", "conforme à la réglementation jouet". C'est un dû, pas un argument (règle d'or 1).
+- Tout prix, remise, condition commerciale ou délai absent de <connaissance_marque> : seuls les prix publics conseillés et le franco listés y sont utilisables.
+- Toute présentation du Kit Mécanique comme disponible : sa certification n'est pas obtenue.
+- Toute mention d'un mode haute température du stylo : il n'existe plus.
+</interdits_absolus>`;
+// Prompt système de rédaction des mails de prospection (à recopier tel quel).
+const SYS_PROSPECTION = `<identite>
+Tu rédiges un mail de premier contact de prospection POUR Matthis-Anaël Prevedello, de PEN'UP 3D (matthis-anael@penup3d.com, 06 95 50 37 68), À DESTINATION d'un point de vente qui ne connaît pas encore la marque.
+Le destinataire est une personne externe, jamais un collègue. Vouvoiement.
+Écris à la PREMIÈRE PERSONNE DU SINGULIER (« je »), de façon personnelle et humaine ; évite le « nous » d'entreprise impersonnel (un « nous » ponctuel pour parler de l'équipe reste possible).
+Mentionne systématiquement, avec naturel, que PEN'UP 3D est une marque française basée à Montauban. C'est la MARQUE qui est basée à Montauban et les PRODUITS qui y sont conçus : n'écris jamais « une marque conçue à Montauban », qui ne veut rien dire.
+JUSTE APRÈS cette présentation, et de façon OBLIGATOIRE, place une phrase sur la VISIBILITÉ de la marque. C'est le seul endroit du mail où l'on parle de la marque plutôt que du produit, et c'est ce qui la distingue avant même que le stylo soit décrit. Emploie l'une de ces formulations, SANS EN INVENTER D'AUTRE ni y ajouter de chiffre (part de marché, nombre d'abonnés, classement) :
+- « c'est la marque de stylos 3D la mieux référencée sur Google et la plus visible sur les réseaux sociaux »
+- « c'est la marque de stylos 3D n°1 sur Google, Facebook et Instagram »
+- « c'est la marque de stylos 3D la plus visible en ligne, sur Google comme sur les réseaux sociaux »
+Varie d'un mail à l'autre plutôt que de reprendre toujours la même. Cette phrase vient EN DEUXIÈME, après le nom et Montauban, et avant toute description du stylo.
+Présente-toi par le nom et la marque, JAMAIS par la fonction : « Je m'appelle Matthis-Anaël Prevedello, de Pen'Up 3D » ou « Matthis-Anaël Prevedello, de Pen'Up 3D ». N'écris jamais « je dirige les opérations », « Directeur des Opérations » ni aucune autre mention de poste ou de titre : le destinataire n'a que faire de l'organigramme, et l'annoncer alourdit l'entrée en matière.
+Pas d'apposition bancale non plus : jamais un nom collé à une proposition indépendante (« Matthis-Anaël Prevedello, je … »), et jamais le nom de l'émetteur collé à la salutation.
+</identite>
+
+${REGLES_OR}
+
+${CONNAISSANCE_MARQUE}
 
 <mission>
 Rédiger un mail court, personnalisé pour CE magasin précis, qui donne une raison crédible et VRAIE de le contacter, et se termine par une seule action simple.
@@ -1975,17 +1992,7 @@ adequation_produit : angle sur le type de commerce et la ville, sans relation ni
 Tu ne cites JAMAIS le nom d'un autre magasin, d'un autre client ou d'un autre contact. Tu parles toujours en agrégat : "plusieurs magasins de votre enseigne", jamais "le King Jouet de Rennes".
 </agregat_obligatoire>
 
-<interdits_absolus>
-Ne les écris jamais, même suggérés par les données.
-- "Made in France", "fabriqué en France", ou toute allégation d'origine française du PRODUIT. La production est en Chine.
-- En revanche "marque française" est autorisé : il décrit l'entreprise, dont le siège est à Montauban, ce qui est vrai.
-- "Agrément Éducation Nationale" ou allégation d'agrément public. Formulation admise : "supports pédagogiques développés avec l'appui du Réseau Canopé".
-- "Biocompatible", "biodégradable", "compostable" ou "biosourcé" pour le filament : seul "non toxique" est admis, et rarement utile (règle d'or 1).
-- Toute mise en avant d'une norme ou d'une certification : "EN 71", "norme européenne", "marquage CE", "conforme à la réglementation jouet". C'est un dû, pas un argument (règle d'or 1).
-- Tout prix, remise, condition commerciale ou délai absent de <connaissance_marque> : seuls les prix publics conseillés et le franco listés y sont utilisables.
-- Toute présentation du Kit Mécanique comme disponible : sa certification n'est pas obtenue.
-- Toute mention d'un mode haute température du stylo : il n'existe plus.
-</interdits_absolus>
+${INTERDITS_MARQUE}
 
 <style>
 Français professionnel, sobre, sans emphase. Aucun tiret long, ni «, » ni «, », nulle part (règle d'or 16) : virgules, deux-points, parenthèses, ou deux phrases.
@@ -2083,6 +2090,36 @@ function stripSignature(text) {
   while (cut > 0 && !lines[cut - 1].trim()) cut--;
   return lines.slice(0, cut).join("\n").replace(/\s+$/, "");
 }
+// Fautes rédactionnelles vérifiées sur le TEXTE produit, et pas seulement demandées au modèle :
+// une consigne de prompt n'est jamais garantie. Partagé par le mailing de prospection et le rédacteur
+// de messages : les mêmes règles valent pour tout ce qui sort au nom de la marque, quel que soit le
+// canal. Comparaison sur un texte sans accents ni majuscules (voir `normSansAccents`).
+const normSansAccents = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+const FAUTES_REDACTION = [
+    [/bio-?compatible|biod[ée]gradable|compostable|bio-?sourc[ée]/, "Allégation interdite sur le filament (règle 1) : seul « non toxique » est admis."],
+    // Règle d'or 1 : la conformité est un dû, pas un argument de vente.
+    [/\ben ?71\b|marquage ce\b|norme europ[ée]enne|aux normes (europ[ée]ennes|jouet|en vigueur)|certifi[ée] (ce|jouet)|conforme [àa] la r[ée]glementation/, "Norme ou certification mise en avant (règle 1) : c'est un dû, pas un argument. À retirer du mail."],
+    [/jeune marque|petite entreprise|petite structure|nous d[ée]butons|on d[ée]bute|je me permets|d[ée]sol[ée] de vous d[ée]ranger|vous d[ée]ranger/, "Formulation qui dévalorise la marque (règle 2)."],
+    [/serais-je possible|serai-je possible/, "Tournure interrogative fautive (règle 3) : « Serait-il possible »."],
+    [/qu'en pensez-vous/, "Question trop molle pour appeler une réponse (règle 5) : proposer un créneau."],
+    [/d[ée]s (maintenant|aujourd'hui)|disponible imm[ée]diatement|en stock|livraison sous|sous \d+ (jours|semaines)/, "Promesse de délai ou de disponibilité (règle 10) : caler sur la rentrée."],
+    [/belle opportunite|formidable|incroyable|revolutionnaire|unique en son genre|experience [a-z]+ unique|exceptionnel|vous allez adorer|encore et encore|petit bijou|un vrai plus/, "Emphase creuse de vendeur : l'enthousiasme passe par les faits, pas par les adjectifs."],
+    [/marque (francaise )?concue a montauban|marque montalbanaise concue/, "Formulation fautive : la marque est BASÉE à Montauban, ce sont les produits qui y sont conçus."],
+    [/je dirige les operations|directeur des operations|directrice des operations|responsable des operations/, "L'émetteur se présente par son nom et sa marque, jamais par sa fonction : « Matthis-Anaël Prevedello, de Pen'Up 3D »."],
+    // Règle d'or 15 : « dessiner en volume » et « objets en trois dimensions » disent la même chose.
+    [/en volume[^.!?]*en trois dimensions|en trois dimensions[^.!?]*en volume/, "Pléonasme (règle 15) : « en volume » et « en trois dimensions » disent la même chose, n'en garder qu'un."],
+    // Règle d'or 14 : ne rien apprendre au commerçant sur son propre métier.
+    [/attire l'?(oeil|œil)|s'anime des qu'on|aimant en rayon|se demontre et attire|libert[ée] d'assort|libre d'assortir|libre de (choisir|referencer|r[ée]f[ée]rencer)|comme vous l'entendez|vous savez mieux que/, "Phrase qui n'apprend rien au commerçant (règle 14) : son métier, son statut ou l'effet supposé en rayon."],
+    [/(fait|fera|feront|font|ramene|ramenera|rameneront|ramenent) (revenir )?(vos|les) clients|fidelisera|fideliseront|dopera vos ventes|boostera|augmentera votre (trafic|chiffre)|briller les yeux|animera votre rayon/, "Promesse de résultat chez le commerçant (règle 4) : énoncer le fait, pas la conséquence."],
+    // Règle d'or 4 : on nomme la gamme de recharges, on n'explique pas ce qu'est un consommable.
+    [/(est|c'est|sont) (un |le |des |les )?consommable|se rachete|moteur de reachat|reachat (regulier|de consommable)|logique de reachat/, "Mécanique commerciale expliquée au commerçant (règle 4) : nommer la gamme de recharges et s'arrêter là."],
+  [/lieu ideal|endroit ideal|parfait pour (les|votre|vos)|possible collaboration|collaboration possible|me semble etre un/, "Formule creuse de prospection : dire ce que le produit apporte, pas qu'il serait « idéal » ou « parfait »."],
+  ];
+// Renvoie la liste des messages d'alerte déclenchés par un texte sortant (objet + corps).
+function fautesDeTexte(texte) {
+  const t = normSansAccents(texte);
+  return FAUTES_REDACTION.filter(([re]) => re.test(t)).map(([, msg]) => msg);
+}
 function verifyProspectMail(parsed, angles, magasin) {
   const alertes = Array.isArray(parsed.alertes) ? parsed.alertes.slice() : [];
   let confiance = ["haute", "standard", "a_revoir"].includes(parsed.confiance) ? parsed.confiance : "standard";
@@ -2097,26 +2134,7 @@ function verifyProspectMail(parsed, angles, magasin) {
   // Règles d'or vérifiées sur le texte produit, et pas seulement demandées au modèle : une consigne de
   // prompt n'est jamais garantie. Une carte signalée passe en « à revoir » et sort de la création de
   // brouillons en lot, donc rien ne part sans relecture. Comparaison sans accents (voir `norm`).
-  const FAUTES = [
-    [/bio-?compatible|biod[ée]gradable|compostable|bio-?sourc[ée]/, "Allégation interdite sur le filament (règle 1) : seul « non toxique » est admis."],
-    // Règle d'or 1 : la conformité est un dû, pas un argument de vente.
-    [/\ben ?71\b|marquage ce\b|norme europ[ée]enne|aux normes (europ[ée]ennes|jouet|en vigueur)|certifi[ée] (ce|jouet)|conforme [àa] la r[ée]glementation/, "Norme ou certification mise en avant (règle 1) : c'est un dû, pas un argument. À retirer du mail."],
-    [/jeune marque|petite entreprise|petite structure|nous d[ée]butons|on d[ée]bute|je me permets|d[ée]sol[ée] de vous d[ée]ranger|vous d[ée]ranger/, "Formulation qui dévalorise la marque (règle 2)."],
-    [/serais-je possible|serai-je possible/, "Tournure interrogative fautive (règle 3) : « Serait-il possible »."],
-    [/qu'en pensez-vous/, "Question trop molle pour appeler une réponse (règle 5) : proposer un créneau."],
-    [/d[ée]s (maintenant|aujourd'hui)|disponible imm[ée]diatement|en stock|livraison sous|sous \d+ (jours|semaines)/, "Promesse de délai ou de disponibilité (règle 10) : caler sur la rentrée."],
-    [/belle opportunite|formidable|incroyable|revolutionnaire|unique en son genre|vous allez adorer|encore et encore|petit bijou|un vrai plus/, "Emphase creuse de vendeur : l'enthousiasme passe par les faits, pas par les adjectifs."],
-    [/marque (francaise )?concue a montauban|marque montalbanaise concue/, "Formulation fautive : la marque est BASÉE à Montauban, ce sont les produits qui y sont conçus."],
-    [/je dirige les operations|directeur des operations|directrice des operations|responsable des operations/, "L'émetteur se présente par son nom et sa marque, jamais par sa fonction : « Matthis-Anaël Prevedello, de Pen'Up 3D »."],
-    // Règle d'or 15 : « dessiner en volume » et « objets en trois dimensions » disent la même chose.
-    [/en volume[^.!?]*en trois dimensions|en trois dimensions[^.!?]*en volume/, "Pléonasme (règle 15) : « en volume » et « en trois dimensions » disent la même chose, n'en garder qu'un."],
-    // Règle d'or 14 : ne rien apprendre au commerçant sur son propre métier.
-    [/attire l'?(oeil|œil)|s'anime des qu'on|aimant en rayon|se demontre et attire|libert[ée] d'assort|libre d'assortir|libre de (choisir|referencer|r[ée]f[ée]rencer)|comme vous l'entendez|vous savez mieux que/, "Phrase qui n'apprend rien au commerçant (règle 14) : son métier, son statut ou l'effet supposé en rayon."],
-    [/(fait|fera|feront|font|ramene|ramenera|rameneront|ramenent) (revenir )?(vos|les) clients|fidelisera|fideliseront|dopera vos ventes|boostera|augmentera votre (trafic|chiffre)|briller les yeux|animera votre rayon/, "Promesse de résultat chez le commerçant (règle 4) : énoncer le fait, pas la conséquence."],
-    // Règle d'or 4 : on nomme la gamme de recharges, on n'explique pas ce qu'est un consommable.
-    [/(est|c'est|sont) (un |le |des |les )?consommable|se rachete|moteur de reachat|reachat (regulier|de consommable)|logique de reachat/, "Mécanique commerciale expliquée au commerçant (règle 4) : nommer la gamme de recharges et s'arrêter là."],
-  ];
-  FAUTES.forEach(([re, msg]) => { if (re.test(text)) { alertes.push(msg); confiance = "a_revoir"; } });
+  fautesDeTexte(text).forEach((msg) => { alertes.push(msg); confiance = "a_revoir"; });
   // La phrase de visibilité de la marque est obligatoire en prospection : c'est le seul endroit du mail
   // qui parle de la marque plutôt que du produit. Son absence n'est pas une faute de style, c'est un
   // argument manquant — la carte part en relecture plutôt qu'en brouillon automatique.
@@ -5298,6 +5316,10 @@ Tu écris à la première personne du singulier, du point de vue de l'émetteur.
 Quand l'émetteur se présente, donne son nom et sa marque, jamais sa fonction : « Je m'appelle [Prénom Nom], de PEN'UP 3D ». Le champ <contexte>.emetteur.fonction sert à te situer, il ne s'écrit pas dans le message : ni « Directeur des Opérations », ni « je dirige les opérations », ni aucun titre de poste.
 </identite>
 
+${REGLES_OR}
+
+${CONNAISSANCE_MARQUE}
+
 <mission>
 Produire un message prêt à être relu et envoyé, ancré dans l'historique réel de la relation, qui poursuit un objectif unique et se termine par une seule action attendue.
 </mission>
@@ -5324,19 +5346,13 @@ Privilégie la première personne du singulier (« je ») plutôt que le « nous
 9. Ton de courriel, jamais de courrier administratif. Bannis "À l'attention de", "Objet de la présente", "Je soussigné", "Veuillez trouver ci-joint", "par la présente", "Monsieur le Gérant", "Madame la Directrice". La fonction du destinataire ne s'écrit nulle part dans le message : il la connaît.
 </regles_de_fond>
 
-<interdits_absolus>
-Ces mentions sont juridiquement fautives ou inexactes. Ne les écris jamais, même si l'utilisateur les emploie dans sa consigne.
-- "Made in France", "fabriqué en France", ou toute allégation d'origine française du produit. La production est réalisée en Chine.
-- "Agrément Éducation Nationale" ou toute allégation d'agrément public. Formulation admise : "supports pédagogiques développés avec l'appui du Réseau Canopé".
-- "Biocompatible", "biodégradable", "compostable" ou "biosourcé" pour le filament PCL. Employer "non toxique" et "conforme EN 71". « Biocompatible » est un terme médical inexact, et une allégation environnementale ou sanitaire non étayée sur un produit destiné aux enfants est juridiquement risquée.
-- Toute présentation du Kit Mécanique comme disponible à la vente : sa certification CE/EN71 n'est pas obtenue.
-- Toute mention d'un mode haute température du stylo : ce mode n'existe plus, le stylo ne dispose que du mode basse température.
+${INTERDITS_MARQUE}
 - Tout usage du logo ou du symbole de la République française.
 Si la consigne de l'utilisateur t'amène vers l'un de ces points, rédige sans la mention fautive et signale-le dans "alertes".
-</interdits_absolus>
 
 <style>
-Français professionnel, direct, sans emphase commerciale. Pas de tiret cadratin : emploie des virgules, des parenthèses, ou deux phrases.
+Français professionnel, direct, sans emphase commerciale. Aucun tiret long, nulle part (règle d'or 16) : virgules, deux-points, parenthèses, ou deux phrases.
+Pour un courriel, l'objet commence toujours par « PEN'UP 3D : » (règle d'or 17), suivi de cinq à huit mots informatifs et COMPLETS : jamais un objet tronqué du type « PEN'UP 3D : stylos 3D pour ».
 Pas de superlatifs ("révolutionnaire", "incontournable", "unique"). Pas de formules creuses ("je me permets de revenir vers vous", "en espérant que ce message vous trouve en bonne santé").
 Une seule idée par paragraphe. Une seule action demandée, en fin de message.
 Le ton demandé module le registre, il n'autorise jamais l'approximation factuelle.
@@ -5488,12 +5504,17 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
   const charCount = useMemo(() => JSON.stringify(effCtx).length, [effCtx]);
   const applyResult = (r) => {
     // Tiret long retiré ici aussi : la règle vaut pour tout ce qui part au nom de la marque.
-    setSubject(sansTiretLong(r.objet || (canal === "email" ? ("PEN'UP 3D : " + estabName) : "")));
+    // Objet normalisé comme pour les mails de prospection : préfixe unique « PEN'UP 3D : », jamais
+    // doublé. Seul le canal e-mail porte un objet ; LinkedIn et SMS n'en ont pas.
+    setSubject(canal === "email" ? objetNormalise(r.objet || "", { nom: estabName }) : sansTiretLong(r.objet || ""));
     setOut(sansEnTeteAdministratif(sansTiretLong(canal === "email" ? stripSignature(r.corps || "") : (r.corps || "")))); // Gmail ajoute la signature
     setShortOut(sansEnTeteAdministratif(sansTiretLong(canal === "email" ? stripSignature(r.variante_courte || "") : (r.variante_courte || ""))));
     setUsedCtx(Array.isArray(r.contexte_utilise) ? r.contexte_utilise : []);
     const al = Array.isArray(r.alertes) ? r.alertes.slice() : [];
     if (r.creneauxNonVerifies && r.creneauxNonVerifies.length) al.unshift("Créneau non vérifié, à contrôler : " + r.creneauxNonVerifies.join(" ; "));
+    // Mêmes contrôles automatiques que pour le mailing de prospection : allégation interdite, norme
+    // mise en avant, emphase creuse, leçon de métier, promesse de résultat, pléonasme.
+    fautesDeTexte((r.objet || "") + "\n" + (r.corps || "")).forEach((m) => { if (!al.includes(m)) al.push(m); });
     setAlertes(al); setEdited(false);
   };
   const gen = async () => {
