@@ -2674,8 +2674,17 @@ const LEGACY_BGTHEME = {
 // CSS généré : un fond par couleur, un motif par couple couleur×motif (teinte adaptée au fond).
 // Le thème de couleur (fond + motif) ne s'applique QU'EN clair : en mode sombre, la palette sombre
 // dédiée prend le dessus (évite « le noir des couleurs de fond » et les conflits texte sombre/carte sombre).
+// Un fond peut être une couleur unie ou un dégradé. Pour l'empiler sous un voile en mode sombre, il
+// faut une IMAGE : une couleur unie est donc convertie en dégradé d'elle-même vers elle-même.
+const bgEnImage = (bg) => (/gradient\(/.test(bg) ? bg : `linear-gradient(${bg},${bg})`);
+// En mode sombre, le fond choisi était purement et simplement ignoré (règles écrites « :not(.dark) »),
+// tout comme le motif : sélectionner une couleur ne produisait aucun effet visible. On applique
+// désormais le même fond sous un voile sombre, ce qui garde le contraste du mode sombre tout en
+// rendant le choix perceptible. Le motif, lui, est retracé en blanc translucide pour rester lisible.
 const THEME_BG_CSS = THEME_COLORS.map((c) => `.pu-root.color-${c.id}:not(.dark){background:${c.bg};}`
-  + THEME_PATTERNS.filter((p) => p.fn).map((p) => `.pu-root.color-${c.id}:not(.dark).pat-${p.id}::before{background-image:${p.fn(c.stroke)};background-size:${p.size};opacity:${p.op};}`).join("")).join("\n");
+  + `.pu-root.dark.color-${c.id}{background:linear-gradient(rgba(9,13,24,.80),rgba(9,13,24,.80)),${bgEnImage(c.bg)};background-attachment:fixed;}`
+  + THEME_PATTERNS.filter((p) => p.fn).map((p) => `.pu-root.color-${c.id}:not(.dark).pat-${p.id}::before{background-image:${p.fn(c.stroke)};background-size:${p.size};opacity:${p.op};}`).join("")).join("\n")
+  + "\n" + THEME_PATTERNS.filter((p) => p.fn).map((p) => `.pu-root.dark.pat-${p.id}::before{background-image:${p.fn("rgba(255,255,255,.62)")};background-size:${p.size};opacity:${p.op};}`).join("\n");
 // Texte clair hors carte sur les fonds foncés (revient sombre dans les surfaces claires).
 const DARK_BG_TEXT = THEME_COLORS.filter((c) => c.dark).map((c) => c.id).map((t) => `
 .pu-root.color-${t}:not(.dark) .main{color:#fff;--ink:#fff;--muted:rgba(255,255,255,.82);--line:rgba(255,255,255,.30);text-shadow:0 1px 2px rgba(0,0,0,.22);}
