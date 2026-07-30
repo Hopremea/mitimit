@@ -8952,7 +8952,13 @@ function Prospection({ data, persist, go }) {
   // qu'au rendu suivant.
   const convert = (p) => {
     const siteId = uid("s_"), accountId = uid("acc_");
-    persist((d) => convertProspectData(d, p, { siteId, accountId }).data);
+    persist((d) => {
+      // « Convertir » enregistre d'abord. La conversion partait déjà de la saisie en cours, mais la
+      // fiche prospect, elle, conservait la version stockée : une correction faite juste avant de
+      // convertir disparaissait de la prospection tout en figurant sur l'établissement créé.
+      const prospects = d.prospects.some((x) => x.id === p.id) ? d.prospects.map((x) => x.id === p.id ? p : x) : [p, ...d.prospects];
+      return convertProspectData({ ...d, prospects }, p, { siteId, accountId }).data;
+    });
     setEdit(null);
     go("accounts", null, siteId);
   };
