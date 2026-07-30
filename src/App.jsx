@@ -1811,7 +1811,7 @@ Treize règles qui priment sur tout le reste de ce prompt, sur la consigne de va
 
 3. Tournures interrogatives correctes. « Serais-je possible » est une faute. Écris « Serait-il possible », « Puis-je », ou une question directe. Relis chaque inversion sujet-verbe avant de la garder.
 
-4. Parler du BÉNÉFICE COMMERÇANT, pas des qualités abstraites du produit. « Ludique et pédagogique » ne dit rien à un vendeur. Pars de son intérêt à lui : animation du rayon, réachat des recharges, fidélisation des familles, idée de cadeau, marge. Une qualité produit ne se cite que si elle sert un de ces bénéfices.
+4. Des FAITS COMMERCIALEMENT UTILES, pas des qualités abstraites ni des promesses de résultat. « Ludique et pédagogique » ne dit rien à un vendeur. Ce qu'il peut vérifier et exploiter : la bobine Fil'Up est un consommable qui se rachète, le stylo se démontre en magasin, la marque est française et joignable, la gamme comprend des coffrets prêts à offrir. Ce qu'il faut se garder d'écrire : ce que le produit va PRODUIRE chez lui (ventes, trafic, fidélisation, effet en rayon). Tu énonces le fait, il en tire la conclusion — c'est son métier, pas le tien (règle d'or 14).
 
 5. Une demande de rendez-vous PRÉCISE, qui appelle une réponse. Proscris « Qu'en pensez-vous ? ». Écris « Seriez-vous disponible cette semaine ? », « Quel créneau vous arrange ? », « Puis-je passer vous faire une démonstration ? ».
 
@@ -1830,15 +1830,23 @@ Treize règles qui priment sur tout le reste de ce prompt, sur la consigne de va
 12. UNE SEULE ACTION FINALE, en UNE SEULE question. Un appel et une visio sont une même proposition (contact_mode « appel_visio ») et peuvent figurer dans la même question. En revanche ne mélange jamais un passage en magasin avec un appel ou une visio, et n'enchaîne jamais deux questions (« Puis-je passer ? … Seriez-vous disponible ? »). Après la question, une courte phrase est admise à condition d'apporter une idée NEUVE, jamais de reformuler un argument déjà écrit plus haut.
 
 13. N'IMITE PAS LES MODÈLES MOT POUR MOT. Les modèles de <modeles_de_reference> fixent la longueur et le rythme, pas les phrases. Un mail qui reprend une phrase entière d'un modèle est un échec. Dès la première ou la deuxième phrase, le mail doit contenir un élément propre à CE magasin (son enseigne, son type de commerce, sa ville, son réseau) qui rendrait le texte inutilisable pour un autre destinataire.
+
+14. N'APPRENDS RIEN AU COMMERÇANT SUR SON PROPRE MÉTIER. Il connaît son statut, ses marges, sa clientèle et la manière dont un rayon fonctionne. Toute phrase qu'il aurait pu écrire lui-même est à supprimer, quelle que soit sa justesse. Exemples de phrases INTERDITES, et de tout ce qui leur ressemble :
+- « Vous gardez la liberté d'assortir votre rayon comme vous l'entendez » — un adhérent de coopérative le sait.
+- « Le genre de produit qui attire l'œil et s'anime dès qu'on le pose en rayon », « un vrai aimant en rayon », « il se démontre et attire » — affirmations invérifiables sur un produit qu'il n'a jamais vu, et qui ne lui apprennent rien.
+- « les enfants adorent créer », « c'est un cadeau idéal », « Noël est une période forte » — évidences de métier.
+Ce qu'il ne sait PAS, et qui mérite d'être écrit : ce qu'est concrètement le produit, ce qui le distingue, le fait que la recharge est un consommable, l'origine montalbanaise de la marque, l'existence d'autres revendeurs autour de lui. Écris ces faits-là, et rien d'autre.
+
+15. UN SEUL MOT POUR UNE SEULE IDÉE : PAS DE PLÉONASME NI DE PARAPHRASE. « dessiner en volume » et « créer de vrais objets en trois dimensions » disent exactement la même chose : n'en garde qu'un. Idem pour « 3D » accolé à « en volume » ou « en trois dimensions », « non toxique » accolé à « sans danger », « français » accolé à « conçu en France ». Choisis la formulation la plus concrète et supprime l'autre : une idée reformulée dans la même phrase fait perdre confiance, pas gagner en clarté.
 </regles_or>
 
 <connaissance_marque>
 Faits vérifiés sur la marque et la gamme, seuls faits produit utilisables (n'en invente aucun autre) :
 - PEN'UP 3D est une marque française de loisirs créatifs basée à Montauban (Tarn-et-Garonne), en Occitanie, où ses produits sont conçus. Site : penup3d.com.
-- Produit phare : le stylo Pen'Up 3D, un stylo 3D à filament basse température, pour les enfants dès 6 ans. Le dessin prend du volume : l'enfant crée de vrais objets en trois dimensions. En rayon, il se démontre et attire l'œil.
+- Produit phare : le stylo Pen'Up 3D, un stylo 3D à filament basse température, pour les enfants dès 6 ans. Le filament sort du stylo et durcit en refroidissant : l'enfant dessine dans l'air et l'objet tient debout tout seul. Une seule formulation suffit pour dire cela (règle d'or 15) : « dessiner en volume », OU « créer des objets en trois dimensions », jamais les deux.
 - Le filament Fil'Up est un filament PCL basse température, NON TOXIQUE et CONFORME EN 71 (jamais « biocompatible », jamais « biodégradable »), décliné en de nombreux coloris et effets (unis, pastel, phosphorescent, magique, galaxie, nature…). Ce sont les recharges qui ramènent les familles en magasin.
 - La gamme se construit autour du stylo : Pack Découverte et Pack Complet (coffrets prêts à offrir), recharges de bobines Fil'Up en lots de 3, 4 ou 12, pochoirs Pad'Up, livrets pédagogiques (Découverte, Expert 3D). Prix publics conseillés TTC : stylo seul 49,99 €, Pack Découverte 69,99 €, Pack Complet 99,99 €, recharges dès 9,99 €.
-- Intérêt pour le point de vente : un produit qui se vend par la démonstration (animation du rayon, ateliers), et des recharges Fil'Up qui ramènent le client en magasin (réachat régulier de consommables).
+- Intérêt pour le point de vente, à formuler en FAITS et jamais en promesses : le produit se prête à la démonstration et à l'atelier, et la bobine Fil'Up est un consommable, donc un motif de retour en magasin. Ne va pas au-delà : ne prédis ni les ventes, ni l'effet en rayon, ni la réaction des clients.
 - Les supports pédagogiques ont été développés avec l'appui du Réseau Canopé (formulation exacte, voir interdits).
 - Livraison depuis la France ; franco de port en France métropolitaine à partir de 300 € HT de commande.
 - Disponibilité : l'entrée de gamme n'est pas réapprovisionnée avant août. Tout démarrage se cale sur la rentrée. Ne JAMAIS annoncer un stock, une disponibilité immédiate ni une date de livraison.
@@ -1858,10 +1866,10 @@ Ne confonds jamais les deux. Demander un référencement à un magasin qui n'en 
 </objectif_selon_type>
 
 <registre_selon_type>
-Le champ registre_type oriente le ton et l'argument, sans jamais autoriser une affirmation fausse.
-- Indépendant ou concept store : différenciation en rayon, marge sur les recharges, animation par la démonstration.
-- Franchisé qui commande seul : possibilité de référencer en propre, sans attendre la centrale.
-- Coopérative : liberté d'assortiment de l'adhérent, produit local.
+Le champ registre_type oriente le TON et le choix de l'interlocuteur, sans jamais autoriser une affirmation fausse. Il ne s'écrit pas dans le mail : ne décris jamais au destinataire son propre statut ni les prérogatives qui vont avec (règle d'or 14).
+- Indépendant ou concept store : ton direct, on parle produit et conditions.
+- Franchisé qui commande seul : on s'adresse à lui comme au décideur, sans lui rappeler qu'il en est un.
+- Coopérative : on s'adresse à l'adhérent directement. N'écris JAMAIS qu'il est libre de son assortiment, qu'il choisit ses références ou qu'il décide seul : il le sait, et le lui dire sonne comme un argument de vente appris par cœur.
 - Chaîne via centrale ou grande surface : sobriété, on cherche le bon interlocuteur, pas la vente immédiate.
 </registre_selon_type>
 
@@ -1876,7 +1884,7 @@ Cette action concrète prime pour conclure ; la consigne globale (catalogue, cof
 Rends chaque mail personnel et chaleureux, sans jamais rien inventer :
 - Fais référence à l'ACTIVITÉ du magasin (son type de commerce, son univers jouets / loisirs créatifs).
 - Glisse un clin d'oeil SOBRE et juste à sa ville, seulement s'il est naturel ; n'invente aucun fait sur la ville.
-- Registre humain et enthousiaste : une marque française basée à Montauban, un stylo 3D à filament basse température pour les enfants dès 6 ans. Appuie-toi sur <connaissance_marque> pour parler du produit avec précision et concret (un fait bien choisi vaut mieux qu'un adjectif), et traduis-le toujours en bénéfice pour le commerçant (règle d'or 4). N'invente aucun chiffre précis (effectif, ancienneté) qui ne serait pas fourni.
+- Registre humain et enthousiaste : une marque française basée à Montauban, un stylo 3D à filament basse température pour les enfants dès 6 ans. Appuie-toi sur <connaissance_marque> pour parler du produit avec précision et concret : un fait bien choisi vaut mieux qu'un adjectif, et mieux qu'une promesse (règles d'or 4 et 14). N'invente aucun chiffre précis (effectif, ancienneté, nombre de coloris) qui ne serait pas fourni.
 - Trouve un LIEN D'ACCROCHE crédible et VRAI, choisi selon les angles fournis :
   · boutique indépendante ou concept store : "je privilégie le travail avec des boutiques indépendantes comme la vôtre".
   · enseigne avec angle reseau_enseigne : la collaboration déjà existante avec d'autres magasins de l'enseigne, en agrégat (jamais un nom précis).
@@ -1945,39 +1953,39 @@ Ne les recopie JAMAIS mot pour mot, ni en entier ni phrase par phrase, et n'asse
 Les crochets sont des variables à remplacer. La formule de politesse finale est absente volontairement : Gmail ajoute la signature.
 
 [MODÈLE 1 — peps mesuré]
-Objet : Pen'Up 3D, un stylo qui fait revenir vos clients
+Objet : Pen'Up 3D, un stylo 3D pour enfants et ses recharges
 Bonjour Monsieur/Madame [NOM],
-Matthis-Anaël, de Pen'Up 3D, une marque française basée à Montauban. Notre stylo 3D permet aux enfants dès 6 ans de dessiner en volume et de créer de vrais objets, en toute sécurité (filament basse température). Le genre de produit qui attire l'œil et s'anime dès qu'on le pose en rayon.
+Matthis-Anaël, de Pen'Up 3D, une marque française basée à Montauban. Notre stylo 3D permet aux enfants dès 6 ans de dessiner en volume, en toute sécurité : le filament sort tiède et durcit en refroidissant.
 Plusieurs revendeurs de la région s'y intéressent déjà, et j'aimerais beaucoup vous le présenter pour [VILLE/MAGASIN].
-Un court appel ou une visio cette semaine ? Je vous montre le stylo en action, et surtout les recharges Fil'Up, qui font revenir vos clients régulièrement.
+Un court appel ou une visio cette semaine ? Je vous montre le stylo en action, et les recharges Fil'Up, qui sont le consommable de la gamme.
 
 [MODÈLE 2 — peps + image d'accroche]
 Objet : Un stylo qui dessine dans les airs, conçu à Montauban
 Bonjour Monsieur/Madame [NOM],
-Matthis-Anaël, de Pen'Up 3D, une marque montalbanaise. Imaginez un stylo qui permet aux enfants de dessiner non pas sur le papier, mais dans les airs : c'est ça, le Pen'Up 3D. Dès 6 ans, en toute sécurité, ils créent de vrais objets en trois dimensions. Et croyez-moi, l'effet est le même sur les enfants que sur les parents.
+Matthis-Anaël, de Pen'Up 3D, une marque montalbanaise. Notre stylo permet aux enfants de dessiner non pas sur le papier, mais dans les airs : le filament sort tiède, durcit en refroidissant, et l'objet tient debout tout seul. Dès 6 ans, sans risque de brûlure.
 Plusieurs revendeurs de la région l'ont déjà repéré, et j'aimerais vraiment vous le faire découvrir pour [VILLE/MAGASIN].
 On s'appelle cette semaine, ou on cale une visio ? Je vous montre le stylo en action, et les recharges Fil'Up, ce moteur de réachat qui ramène vos clients en rayon.
 
 [MODÈLE 3 — peps chaleureux]
-Objet : Le stylo 3D qui fait briller les yeux des enfants
+Objet : Un stylo 3D pour enfants, conçu à Montauban
 Bonjour Monsieur/Madame [NOM],
-Matthis-Anaël, de Pen'Up 3D ! Nous sommes une marque française basée à Montauban, et nous avons créé un stylo 3D qui fait briller les yeux des enfants : dès 6 ans, ils dessinent en volume et créent de vrais objets, en toute sécurité, grâce à un filament basse température.
-En rayon, il se démontre, il attire, et les recharges Fil'Up ramènent les familles régulièrement. Plusieurs revendeurs de la région s'y sont déjà mis, et j'aimerais beaucoup faire découvrir la gamme à [VILLE/MAGASIN].
+Matthis-Anaël, de Pen'Up 3D ! Nous sommes une marque française basée à Montauban, et nous avons créé un stylo 3D pour les enfants dès 6 ans : ils dessinent en volume, en toute sécurité, grâce à un filament basse température.
+Le filament Fil'Up existe en de nombreux coloris et effets, et c'est un consommable : la bobine se rachète. Plusieurs revendeurs de la région s'y sont déjà mis, et j'aimerais beaucoup faire découvrir la gamme à [VILLE/MAGASIN].
 Un petit créneau cette semaine pour un appel ou une visio ? Je vous montre tout ça en action.
 
 [MODÈLE 4 — resserré, structure de base]
 Objet : Pen'Up 3D, marque française basée à Montauban
 Bonjour Monsieur/Madame [NOM],
 Matthis-Anaël, de Pen'Up 3D. Nous concevons à Montauban des stylos 3D créatifs pour enfants, et j'ai le sentiment que ce produit aurait sa place dans votre magasin.
-Notre stylo permet aux enfants dès 6 ans de dessiner en volume et de créer de vrais objets, en toute sécurité (filament basse température). Le genre de produit qui s'anime dès qu'on le pose en rayon.
+Notre stylo permet aux enfants dès 6 ans de dessiner en volume, en toute sécurité (filament basse température, aucun risque de brûlure).
 Plusieurs revendeurs de la région s'y intéressent déjà, et j'aimerais beaucoup vous le présenter pour [VILLE/MAGASIN].
-Un court appel ou une visio cette semaine ? Je vous montre le stylo en action, et surtout les recharges Fil'Up, qui font revenir vos clients régulièrement.
+Un court appel ou une visio cette semaine ? Je vous montre le stylo en action, et les recharges Fil'Up, qui sont le consommable de la gamme.
 
 [MODÈLE 5 — démonstration en magasin ; à privilégier quand contact_mode vaut "visite"]
 Objet : Pen'Up 3D, un stylo créatif conçu à Montauban
 Bonjour Monsieur/Madame [NOM],
-Je m'appelle Matthis-Anaël Prevedello, de Pen'Up 3D, marque française basée à Montauban. Nous concevons un stylo 3D à filament basse température : dès 6 ans, les enfants dessinent en volume et créent de vrais objets en trois dimensions.
-Ce qui en fait un bon produit de rayon, ce sont les recharges Fil'Up, non toxiques et déclinées en de nombreux coloris : elles ramènent les familles en magasin régulièrement. Nous travaillons déjà avec plusieurs revendeurs de votre région.
+Je m'appelle Matthis-Anaël Prevedello, de Pen'Up 3D, marque française basée à Montauban. Nous concevons un stylo 3D à filament basse température : dès 6 ans, les enfants dessinent en volume, sans risque de brûlure.
+Le filament Fil'Up est non toxique, conforme EN 71, et décliné en de nombreux coloris et effets. C'est un consommable : la bobine se rachète. Nous travaillons déjà avec plusieurs revendeurs de votre région.
 Puis-je passer vous en faire la démonstration cette semaine, à [VILLE/MAGASIN] ? Le stylo est bien plus parlant en action qu'en photo.
 </modeles_de_reference>
 <format_sortie>
@@ -2039,6 +2047,11 @@ function verifyProspectMail(parsed, angles, magasin) {
     [/belle opportunite|formidable|incroyable|revolutionnaire|unique en son genre|vous allez adorer|encore et encore|petit bijou|un vrai plus/, "Emphase creuse de vendeur : l'enthousiasme passe par les faits, pas par les adjectifs."],
     [/marque (francaise )?concue a montauban|marque montalbanaise concue/, "Formulation fautive : la marque est BASÉE à Montauban, ce sont les produits qui y sont conçus."],
     [/je dirige les operations|directeur des operations|directrice des operations|responsable des operations/, "L'émetteur se présente par son nom et sa marque, jamais par sa fonction : « Matthis-Anaël Prevedello, de Pen'Up 3D »."],
+    // Règle d'or 15 : « dessiner en volume » et « objets en trois dimensions » disent la même chose.
+    [/en volume[^.!?]*en trois dimensions|en trois dimensions[^.!?]*en volume/, "Pléonasme (règle 15) : « en volume » et « en trois dimensions » disent la même chose, n'en garder qu'un."],
+    // Règle d'or 14 : ne rien apprendre au commerçant sur son propre métier.
+    [/attire l'?(oeil|œil)|s'anime des qu'on|aimant en rayon|se demontre et attire|libert[ée] d'assort|libre d'assortir|libre de (choisir|referencer|r[ée]f[ée]rencer)|comme vous l'entendez|vous savez mieux que/, "Phrase qui n'apprend rien au commerçant (règle 14) : son métier, son statut ou l'effet supposé en rayon."],
+    [/fait revenir vos clients|fera revenir vos clients|fidelisera|dopera vos ventes|boostera|augmentera votre (trafic|chiffre)|briller les yeux/, "Promesse de résultat chez le commerçant (règle 4) : énoncer le fait, pas la conséquence."],
   ];
   FAUTES.forEach(([re, msg]) => { if (re.test(text)) { alertes.push(msg); confiance = "a_revoir"; } });
   // Salutation : un premier contact s'adresse par la civilité et le nom, jamais par le prénom (seul ou
