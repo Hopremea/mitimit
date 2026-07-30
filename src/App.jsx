@@ -1760,11 +1760,12 @@ function computeProspectAngles({ prospect, accounts, sites, interactions, hq, no
 }
 // Prompt système de rédaction des mails de prospection (à recopier tel quel).
 const SYS_PROSPECTION = `<identite>
-Tu rédiges un mail de premier contact de prospection POUR Matthis-Anaël Prevedello, Directeur des Opérations de PEN'UP 3D (matthis-anael@penup3d.com, 06 95 50 37 68), À DESTINATION d'un point de vente qui ne connaît pas encore la marque.
+Tu rédiges un mail de premier contact de prospection POUR Matthis-Anaël Prevedello, de PEN'UP 3D (matthis-anael@penup3d.com, 06 95 50 37 68), À DESTINATION d'un point de vente qui ne connaît pas encore la marque.
 Le destinataire est une personne externe, jamais un collègue. Vouvoiement.
 Écris à la PREMIÈRE PERSONNE DU SINGULIER (« je »), de façon personnelle et humaine ; évite le « nous » d'entreprise impersonnel (un « nous » ponctuel pour parler de l'équipe reste possible).
 Mentionne systématiquement, avec naturel, que PEN'UP 3D est une marque française basée à Montauban. C'est la MARQUE qui est basée à Montauban et les PRODUITS qui y sont conçus : n'écris jamais « une marque conçue à Montauban », qui ne veut rien dire.
-Présente-toi par une phrase complète, jamais par une apposition bancale : « Je m'appelle Matthis-Anaël Prevedello, je dirige les opérations de Pen'Up 3D » ou « Matthis-Anaël Prevedello, de Pen'Up 3D ». Jamais « Matthis-Anaël Prevedello, je dirige… » collé à une salutation ou à un autre nom.
+Présente-toi par le nom et la marque, JAMAIS par la fonction : « Je m'appelle Matthis-Anaël Prevedello, de Pen'Up 3D » ou « Matthis-Anaël Prevedello, de Pen'Up 3D ». N'écris jamais « je dirige les opérations », « Directeur des Opérations » ni aucune autre mention de poste ou de titre : le destinataire n'a que faire de l'organigramme, et l'annoncer alourdit l'entrée en matière.
+Pas d'apposition bancale non plus : jamais un nom collé à une proposition indépendante (« Matthis-Anaël Prevedello, je … »), et jamais le nom de l'émetteur collé à la salutation.
 </identite>
 
 <regles_or>
@@ -1941,7 +1942,7 @@ Un court appel ou une visio cette semaine ? Je vous montre le stylo en action, e
 [MODÈLE 5 — démonstration en magasin ; à privilégier quand contact_mode vaut "visite"]
 Objet : Pen'Up 3D, un stylo créatif conçu à Montauban
 Bonjour Monsieur/Madame [NOM],
-Je m'appelle Matthis-Anaël Prevedello et je dirige les opérations de Pen'Up 3D, marque française basée à Montauban. Nous concevons un stylo 3D à filament basse température : dès 6 ans, les enfants dessinent en volume et créent de vrais objets en trois dimensions.
+Je m'appelle Matthis-Anaël Prevedello, de Pen'Up 3D, marque française basée à Montauban. Nous concevons un stylo 3D à filament basse température : dès 6 ans, les enfants dessinent en volume et créent de vrais objets en trois dimensions.
 Ce qui en fait un bon produit de rayon, ce sont les recharges Fil'Up, non toxiques et déclinées en de nombreux coloris : elles ramènent les familles en magasin régulièrement. Nous travaillons déjà avec plusieurs revendeurs de votre région.
 Puis-je passer vous en faire la démonstration cette semaine, à [VILLE/MAGASIN] ? Le stylo est bien plus parlant en action qu'en photo.
 </modeles_de_reference>
@@ -2003,6 +2004,7 @@ function verifyProspectMail(parsed, angles, magasin) {
     [/d[ée]s (maintenant|aujourd'hui)|disponible imm[ée]diatement|en stock|livraison sous|sous \d+ (jours|semaines)/, "Promesse de délai ou de disponibilité (règle 10) : caler sur la rentrée."],
     [/belle opportunite|formidable|incroyable|revolutionnaire|unique en son genre|vous allez adorer|encore et encore|petit bijou|un vrai plus/, "Emphase creuse de vendeur : l'enthousiasme passe par les faits, pas par les adjectifs."],
     [/marque (francaise )?concue a montauban|marque montalbanaise concue/, "Formulation fautive : la marque est BASÉE à Montauban, ce sont les produits qui y sont conçus."],
+    [/je dirige les operations|directeur des operations|directrice des operations|responsable des operations/, "L'émetteur se présente par son nom et sa marque, jamais par sa fonction : « Matthis-Anaël Prevedello, de Pen'Up 3D »."],
   ];
   FAUTES.forEach(([re, msg]) => { if (re.test(text)) { alertes.push(msg); confiance = "a_revoir"; } });
   // Salutation : un premier contact s'adresse par la civilité et le nom, jamais par le prénom (seul ou
@@ -5094,6 +5096,7 @@ const SYS_REDACTION = `<identite>
 Tu rédiges un message professionnel POUR le collaborateur de PEN'UP 3D dont l'identité figure dans <contexte>.emetteur, À DESTINATION du contact figurant dans <contexte>.destinataire.
 Le destinataire est une personne EXTERNE à PEN'UP 3D : un client, un prospect, un partenaire. Ce n'est jamais un collègue. Ne le traite jamais comme un membre de l'équipe et ne lui parle jamais de l'organisation interne de PEN'UP 3D.
 Tu écris à la première personne du singulier, du point de vue de l'émetteur. Vouvoiement systématique.
+Quand l'émetteur se présente, donne son nom et sa marque, jamais sa fonction : « Je m'appelle [Prénom Nom], de PEN'UP 3D ». Le champ <contexte>.emetteur.fonction sert à te situer, il ne s'écrit pas dans le message : ni « Directeur des Opérations », ni « je dirige les opérations », ni aucun titre de poste.
 </identite>
 
 <mission>
