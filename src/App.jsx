@@ -1741,12 +1741,15 @@ function prospectContactHistory(p, data) {
   if (p.statut === "brouillon_cree" || p.brouillonDate) return { envoye: false, date: p.brouillonDate || "", quoi: p.brouillonObjet || "brouillon de prospection créé", source: "brouillon créé depuis MITMIT" };
   return null;
 }
-function computeProspectAngles({ prospect, accounts, sites, interactions, hq, now }) {
+function computeProspectAngles({ prospect, accounts, sites, interactions, deals, hq, now }) {
   const p = prospect || {};
   hq = hq || SIEGE;
-  const accs = accounts || [], sts = sites || [], its = interactions || [];
+  const accs = accounts || [], sts = sites || [], its = interactions || [], dls = deals || [];
   const workedAcc = new Set(its.map((i) => i.accountId).filter(Boolean));
-  const isWorked = (a) => a && !a.archived && (workedAcc.has(a.id) || (a.stage && a.stage !== "prospect"));
+  // Un devis ou une commande vaut antécédent au même titre qu'un échange : ce sont les « pourparlers
+  // en cours » que le mail doit pouvoir invoquer.
+  const dealAcc = new Set(dls.map((x) => x.accountId).filter(Boolean));
+  const isWorked = (a) => a && !a.archived && (workedAcc.has(a.id) || dealAcc.has(a.id) || (a.stage && a.stage !== "prospect"));
   const siteByAcc = {}; sts.forEach((s) => { if (s.accountId) (siteByAcc[s.accountId] = siteByAcc[s.accountId] || []).push(s); });
   const accountDept = (a) => { let d = depFromCP(parseLocality(a.adressePostale || a.adresseLivraison || "").cp); if (!d) { for (const s of (siteByAcc[a.id] || [])) { d = depFromCP(parseLocality(s.adresse || "").cp); if (d) break; } } return d; };
   // Département / région du prospect.
@@ -1762,9 +1765,30 @@ function computeProspectAngles({ prospect, accounts, sites, interactions, hq, no
   else if (pDept && pDept === HQ_DEPT) proximite = "secteur";
   else if (inOcc) proximite = "region";
   else proximite = "aucune";
-  // Réseau d'enseigne : comptes réellement travaillés portant la même enseigne.
+  // Réseau d'enseigne. Compter les seuls COMPTES ratait l'essentiel : un magasin de réseau converti
+  // depuis la prospection devient un ÉTABLISSEMENT rattaché au groupe de l'enseigne (voir
+  // convertProspectData), jamais un compte. Un JouéClub écrit après dix JouéClub déjà travaillés
+  // n'avait donc aucun antécédent à invoquer. On compte ici les deux, et on isole ce qui est
+  // réellement engagé commercialement (devis ou commande) et ce qui est dans la même région.
   const ek = enseigneNorm(p.enseigne);
-  const reseauEnseigneCount = (ek && ek.length >= 2) ? accs.filter((a) => isWorked(a) && enseigneNorm(a.enseigne) === ek).length : 0;
+  const enseigneAccs = (ek && ek.length >= 2) ? accs.filter((a) => !a.archived && enseigneNorm(a.enseigne) === ek) : [];
+  const enseigneAccIds = new Set(enseigneAccs.map((a) => a.id));
+  // Établissements de l'enseigne : un point de vente n'existe dans « Groupes & établissements »
+  // qu'après un premier contact réel (la conversion est déclenchée par l'envoi confirmé du mail) ou
+  // une saisie manuelle. Sa seule présence atteste donc une relation engagée.
+  const enseigneSites = sts.filter((s) => enseigneAccIds.has(s.accountId) && (s.type === "pdv" || s.type === "decision"));
+  // Le groupe (la centrale de l'enseigne) n'est pas un magasin : il ne compte pas comme confrère, ses
+  // établissements si. Un devis passé au niveau du groupe reste compté, mais dans « operations ».
+  const workedEnseigneAccs = enseigneAccs.filter((a) => isWorked(a) && !isGroupe(a));
+  const reseauEnseigneCount = workedEnseigneAccs.length + enseigneSites.length;
+  // Sous-ensembles, pour que le mail ne dise que ce qui est vrai : opérations en cours (devis ou
+  // commande) et établissements de la même région que le prospect.
+  const dealCountEnseigne = dls.filter((x) => enseigneAccIds.has(x.accountId)).length;
+  const siteDept = (s) => depFromCP(parseLocality(s.adresse || "").cp);
+  const enseigneRegionCount = pDept
+    ? enseigneSites.filter((s) => { const d = siteDept(s); return d && (d === pDept || (inOcc && OCCITANIE_DEPTS.has(d))); }).length
+      + workedEnseigneAccs.filter((a) => { const d = accountDept(a); return d && (d === pDept || (inOcc && OCCITANIE_DEPTS.has(d))); }).length
+    : 0;
   // Réseau régional : comptes réellement travaillés dans la même région (si prospect en Occitanie).
   const reseauRegionCount = inOcc ? accs.filter((a) => isWorked(a) && OCCITANIE_DEPTS.has(accountDept(a))).length : 0;
   // Objectif et registre selon le type (autonomie de décision).
@@ -1784,7 +1808,7 @@ function computeProspectAngles({ prospect, accounts, sites, interactions, hq, no
   if (!hasEmail) risque = "bloquant";
   else if (!hasName || (!hasEnseigne && !realType)) risque = "bloquant";
   else risque = (proximite !== "aucune" || reseauEnseigneCount > 0 || reseauRegionCount > 0) ? "faible" : "standard";
-  const reseauEnseigne = { available: reseauEnseigneCount >= 1, count: reseauEnseigneCount, label: p.enseigne || "" };
+  const reseauEnseigne = { available: reseauEnseigneCount >= 1, count: reseauEnseigneCount, region: enseigneRegionCount, operations: dealCountEnseigne, label: p.enseigne || "" };
   const reseauRegion = { available: reseauRegionCount >= 1, count: reseauRegionCount };
   const bestAngle = reseauEnseigne.available ? "reseau_enseigne" : (proximite !== "aucune" ? "proximite" : (reseauRegion.available ? "reseau_region" : "adequation_produit"));
   const risqueMotif = !hasEmail ? "Pas d'adresse e-mail exploitable" : (!hasName || (!hasEnseigne && !realType)) ? "Identification trop incertaine (ni enseigne, ni type de commerce précis)" : "";
@@ -1920,6 +1944,9 @@ proximite, niveau "region" : "en Occitanie comme nous".
 proximite, niveau "aucune" : aucune allusion à la distance, à la région ou au voisinage.
 reseau_enseigne, compte >= 2 : "nous échangeons déjà avec plusieurs [enseigne]" — [enseigne] est celle du DESTINATAIRE, jamais une autre (règle d'or 8).
 reseau_enseigne, compte = 1 : "nous travaillons déjà avec un autre [enseigne]", même exigence.
+reseau_enseigne, dans_la_region >= 1 : précise "de la région" ou "près de chez vous" — "nous échangeons déjà avec plusieurs [enseigne] de la région". N'ajoute "de la région" QUE si dans_la_region est supérieur à zéro.
+reseau_enseigne, operations_en_cours >= 1 : des devis ou des commandes sont en cours avec cette enseigne. C'est l'antécédent le plus fort : écris "des échanges commerciaux sont en cours avec plusieurs [enseigne]" (ou "avec un autre [enseigne]" si compte = 1). Ne détaille jamais le montant, la référence ni le magasin concerné.
+reseau_enseigne : cet angle, dès qu'il est fourni, est OBLIGATOIRE dans le mail. Un magasin de réseau à qui l'on écrit sans lui dire que l'on travaille déjà avec ses confrères perd l'argument le plus convaincant dont on dispose. Place-le dans le corps, jamais après la question finale.
 reseau_region : "plusieurs revendeurs de la région s'y intéressent déjà" — formulation neutre, sans nommer aucun réseau.
 adequation_produit : angle sur le type de commerce et la ville, sans relation ni proximité.
 </traduction_des_angles>
@@ -2073,6 +2100,13 @@ function verifyProspectMail(parsed, angles, magasin) {
   // La phrase de visibilité de la marque est obligatoire en prospection : c'est le seul endroit du mail
   // qui parle de la marque plutôt que du produit. Son absence n'est pas une faute de style, c'est un
   // argument manquant — la carte part en relecture plutôt qu'en brouillon automatique.
+  // L'antécédent de réseau, quand il existe, est l'argument le plus convaincant du mail : l'oublier
+  // n'est pas un détail de style. Détection large, le modèle ayant plusieurs formulations possibles.
+  const ANTECEDENT = /nous (travaillons|echangeons|collaborons|sommes en (relation|discussion))|deja (avec|en relation|present)|en cours avec|(plusieurs|d'autres|un autre|certains) (magasins?|adherents?|confreres?|points? de vente|revendeurs?)|plusieurs [a-z']+club|d'autres [a-z']+club/;
+  if (angles.reseauEnseigne && angles.reseauEnseigne.available && !ANTECEDENT.test(text)) {
+    alertes.push("Antécédent de réseau non exploité : " + angles.reseauEnseigne.count + " établissement(s) de cette enseigne sont déjà suivis, le mail doit le dire.");
+    confiance = "a_revoir";
+  }
   if (!/google|instagram|facebook|reseaux sociaux/.test(norm(parsed.corps || ""))) {
     alertes.push("Phrase de visibilité de la marque absente : la placer juste après « Pen'Up 3D, basée à Montauban ».");
     confiance = "a_revoir";
@@ -2110,7 +2144,7 @@ async function generateProspectMail({ prospect, angles, consigne, ton, mode, pre
   };
   const anglesPayload = {
     proximite: angles.proximite,
-    reseau_enseigne: (angles.reseauEnseigne && angles.reseauEnseigne.available) ? { compte: angles.reseauEnseigne.count, enseigne: p.enseigne } : null,
+    reseau_enseigne: (angles.reseauEnseigne && angles.reseauEnseigne.available) ? { compte: angles.reseauEnseigne.count, dans_la_region: angles.reseauEnseigne.region || 0, operations_en_cours: angles.reseauEnseigne.operations || 0, enseigne: p.enseigne } : null,
     reseau_region: (angles.reseauRegion && angles.reseauRegion.available) ? { compte: angles.reseauRegion.count } : null,
     adequation_produit: { type: magasin.type, ville: magasin.ville },
     objectif_type: angles.objectif_type,
@@ -9112,7 +9146,7 @@ function ProspectMailing({ data, persist, onClose }) {
   const running = jobs.has("mailing:wave");
   const waveJob = jobs.get("mailing:wave");
   const onUsage = (u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }));
-  const anglesOf = (p) => computeProspectAngles({ prospect: p, accounts: data.accounts, sites: data.sites, interactions: data.interactions, hq: SIEGE });
+  const anglesOf = (p) => computeProspectAngles({ prospect: p, accounts: data.accounts, sites: data.sites, interactions: data.interactions, deals: data.deals, hq: SIEGE });
   // « Déjà contacté » : croisement de l'API Gmail (mail réellement ENVOYÉ, libellé SENT — vérification
   // lancée à l'ouverture du volet) et des données MITMIT (statut « contacté », échanges journalisés).
   // Ces prospects sont masqués par défaut et jamais présélectionnés : on ne redémarche pas quelqu'un
@@ -12443,6 +12477,18 @@ export default function App() {
   // Mise à jour forcée : vide les caches du navigateur (Cache API + service workers) puis recharge
   // depuis le serveur avec une URL anti-cache, pour récupérer immédiatement la dernière version déployée.
   const hardRefresh = useCallback(async () => {
+    // Le rechargement DOIT avoir lieu quoi qu'il arrive. Chacune des étapes ci-dessous peut rester en
+    // suspens indéfiniment (requête Supabase sans réponse, Cache API bloquée, service worker qui ne
+    // répond pas) : un `await` sur l'une d'elles suffirait à rendre le bouton inerte, sans message ni
+    // rechargement. On arme donc un compte à rebours qui recharge coûte que coûte, et chaque étape est
+    // bornée dans le temps. Au pire on perd la synchronisation d'une écriture en attente ; ne pas
+    // recharger du tout serait pire, puisque c'est précisément ce qu'on demande au bouton.
+    const go = () => {
+      try { const u = new URL(window.location.href); u.searchParams.set("_v", Date.now().toString(36)); window.location.replace(u.toString()); }
+      catch (e) { try { window.location.reload(); } catch (e2) { } }
+    };
+    const filet = setTimeout(go, 5000);
+    const borne = (promesse, ms) => Promise.race([Promise.resolve(promesse).catch(() => null), new Promise((r) => setTimeout(r, ms))]);
     // Vide d'abord toute écriture Supabase en attente (persist est débouncé de 800 ms) : sinon une
     // valeur enregistrée juste avant la mise à jour serait perdue, le pull au rechargement écrasant
     // le localStorage par la version serveur (obsolète). On pousse l'état local courant avant de recharger.
@@ -12454,12 +12500,13 @@ export default function App() {
       if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
       if (supabaseEnabled && supabase && hadPending) {
         const payload = latestRef.current || (() => { try { const raw = localStorage.getItem(KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } })();
-        if (payload) { const ts = new Date().toISOString(); await supabase.from("cockpit_state").upsert({ id: "shared", data: payload, updated_at: ts }, { onConflict: "id" }); pendingWrite.current = false; }
+        if (payload) { const ts = new Date().toISOString(); await borne(supabase.from("cockpit_state").upsert({ id: "shared", data: payload, updated_at: ts }, { onConflict: "id" }), 2500); pendingWrite.current = false; }
       }
     } catch (e) { }
-    try { if (typeof caches !== "undefined") { const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); } } catch (e) { }
-    try { if (navigator.serviceWorker) { const regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map((r) => r.unregister())); } } catch (e) { }
-    try { const u = new URL(window.location.href); u.searchParams.set("_v", Date.now().toString(36)); window.location.replace(u.toString()); } catch (e) { window.location.reload(); }
+    try { if (typeof caches !== "undefined") { const ks = await borne(caches.keys(), 1500) || []; await borne(Promise.all(ks.map((k) => caches.delete(k))), 1500); } } catch (e) { }
+    try { if (navigator.serviceWorker) { const regs = await borne(navigator.serviceWorker.getRegistrations(), 1500) || []; await borne(Promise.all(regs.map((r) => r.unregister())), 1500); } } catch (e) { }
+    clearTimeout(filet);
+    go();
   }, []);
   const exportAll = () => { const today = new Date().toISOString().slice(0, 10); downloadJSON({ exportedAt: new Date().toISOString(), version: 1, data }, `penup3d-cockpit-${today}.json`); try { localStorage.setItem("penup_lastBackup", today); } catch {} setBackupDone(today); };
   const [backupDone, setBackupDone] = useState(() => { try { return localStorage.getItem("penup_lastBackup") || ""; } catch { return ""; } });
