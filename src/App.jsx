@@ -1851,11 +1851,12 @@ Ne mets JAMAIS en avant une norme ou une certification : EN 71, marquage CE, con
 
 3. Tournures interrogatives correctes. « Serais-je possible » est une faute. Écris « Serait-il possible », « Puis-je », ou une question directe. Relis chaque inversion sujet-verbe avant de la garder.
 
-4. PARS DE L'INTÉRÊT DU COMMERÇANT, pas des qualités abstraites du produit. « Ludique et pédagogique » ne dit rien à un vendeur. Deux arguments, et dans cet ordre d'importance :
-- LES RECHARGES, argument central : il existe une gamme de bobines Fil'Up, en de nombreux coloris et effets. Tu NOMMES la gamme de recharges, et tu t'arrêtes là. N'explique JAMAIS ce qu'est un consommable ni qu'il se rachète (« la bobine est un consommable, elle se rachète », « c'est du réachat régulier ») : c'est le b.a.-ba de son métier, il fait le raisonnement plus vite que toi et le lui dérouler est vexant.
+4. PARS DE L'INTÉRÊT DU COMMERÇANT, pas des qualités abstraites du produit. « Ludique et pédagogique » ne dit rien à un vendeur. Trois arguments, et dans cet ordre d'importance :
+- LA DEMANDE NON SERVIE EN MAGASIN, argument le plus fort : nos ventes en ligne sont très soutenues de septembre à décembre, et une partie des acheteurs renoncent parce qu'ils voulaient acheter en magasin, pas sur internet. Cette demande existe déjà dans sa ville et personne ne la sert. C'est un fait sur NOS ventes, donc légitime à énoncer, et non une prédiction sur son commerce. Exemple de formulation : « Nos ventes en ligne sont fortes de septembre à décembre, et une partie des acheteurs abandonnent parce qu'ils préféraient acheter en magasin. Ce magasin pourrait être le vôtre. » N'y ajoute AUCUN chiffre : ni pourcentage, ni volume, ni nombre de recherches, ni chiffre d'affaires. Ces chiffres n'existent pas dans ce prompt et les inventer ruinerait l'argument.
+- LES RECHARGES : il existe une gamme de bobines Fil'Up, en de nombreux coloris et effets. Tu NOMMES la gamme de recharges, et tu t'arrêtes là. N'explique JAMAIS ce qu'est un consommable ni qu'il se rachète (« la bobine est un consommable, elle se rachète », « c'est du réachat régulier ») : c'est le b.a.-ba de son métier, il fait le raisonnement plus vite que toi et le lui dérouler est vexant.
 - LA DÉMONSTRATION : le stylo se prête à une démonstration ou à un atelier en magasin.
-Tout le reste (coffrets prêts à offrir, coloris, origine montalbanaise) est secondaire et ne se cite que s'il sert l'un des deux.
-Énonce ces deux arguments comme des FAITS BRUTS, sans les commenter : « le stylo se recharge avec les bobines Fil'Up, déclinées en de nombreux coloris » suffit. Ni explication de la mécanique commerciale (« c'est un consommable », « c'est du réachat »), ni prédiction sur son commerce (« ces recharges feront revenir vos clients », « vous fidéliserez les familles », « votre rayon sera animé ») : les deux reviennent à lui apprendre son métier (règle d'or 14). Tu poses le fait, il en tire la conclusion.
+Tout le reste (coffrets prêts à offrir, coloris, origine montalbanaise) est secondaire et ne se cite que s'il sert l'un des trois. Deux arguments par mail suffisent, jamais les trois : le mail doit rester court (règle d'or 6).
+Énonce-les comme des FAITS BRUTS, sans les commenter : « le stylo se recharge avec les bobines Fil'Up, déclinées en de nombreux coloris » suffit. Ni explication de la mécanique commerciale (« c'est un consommable », « c'est du réachat »), ni prédiction sur son commerce (« ces recharges feront revenir vos clients », « vous fidéliserez les familles », « votre rayon sera animé ») : les deux reviennent à lui apprendre son métier (règle d'or 14). Tu poses le fait, il en tire la conclusion.
 
 5. Une demande de rendez-vous PRÉCISE, qui appelle une réponse. Proscris « Qu'en pensez-vous ? ». Écris « Seriez-vous disponible cette semaine ? », « Quel créneau vous arrange ? », « Puis-je passer vous faire une démonstration ? ».
 
@@ -1897,7 +1898,8 @@ Faits vérifiés sur la marque et la gamme, seuls faits produit utilisables (n'e
 - Produit phare : le stylo Pen'Up 3D, un stylo 3D à filament basse température, pour les enfants dès 6 ans. Le filament sort du stylo et durcit en refroidissant : l'enfant dessine dans l'air et l'objet tient debout tout seul. Une seule formulation suffit pour dire cela (règle d'or 15) : « dessiner en volume », OU « créer des objets en trois dimensions », jamais les deux.
 - Le filament Fil'Up est un filament PCL basse température, décliné en de nombreux coloris et effets (unis, pastel, phosphorescent, magique, galaxie, nature…). C'est avec ces bobines que le stylo se recharge : mentionner l'existence de cette gamme est l'argument central du mail (règle d'or 4), mais on ne commente jamais ce qu'elle implique commercialement. Le filament est non toxique et conforme EN 71 : information vraie, mais qui ne s'écrit PAS dans un premier contact (règle d'or 1), la conformité est un dû, pas un argument.
 - La gamme se construit autour du stylo : Pack Découverte et Pack Complet (coffrets prêts à offrir), recharges de bobines Fil'Up en lots de 3, 4 ou 12, pochoirs Pad'Up, livrets pédagogiques (Découverte, Expert 3D). Prix publics conseillés TTC : stylo seul 49,99 €, Pack Découverte 69,99 €, Pack Complet 99,99 €, recharges dès 9,99 €.
-- Intérêt pour le point de vente, à formuler en FAITS BRUTS : le stylo se recharge avec les bobines Fil'Up (argument central), et il se prête à la démonstration et à l'atelier. Ne va pas au-delà : n'explique pas la mécanique du réachat, ne prédis ni les ventes, ni l'effet en rayon, ni la réaction des clients.
+- Saisonnalité et demande non servie, fait vérifié sur NOS ventes : les ventes en ligne sont très soutenues de septembre à décembre, et une partie des acheteurs renoncent parce qu'ils voulaient acheter en magasin plutôt que sur internet. C'est l'argument le plus fort du mail (règle d'or 4) : la demande existe déjà dans la ville du destinataire, et aucun point de vente ne la sert. Aucun chiffre ne peut accompagner ce fait : ni pourcentage, ni volume, ni nombre de visiteurs.
+- Intérêt pour le point de vente, à formuler en FAITS BRUTS : le stylo se recharge avec les bobines Fil'Up, et il se prête à la démonstration et à l'atelier. Ne va pas au-delà : n'explique pas la mécanique du réachat, ne prédis ni les ventes, ni l'effet en rayon, ni la réaction des clients.
 - Les supports pédagogiques ont été développés avec l'appui du Réseau Canopé (formulation exacte, voir interdits).
 - Livraison depuis la France ; franco de port en France métropolitaine à partir de 300 € HT de commande.
 - Disponibilité : l'entrée de gamme n'est pas réapprovisionnée avant août. Tout démarrage se cale sur la rentrée. Ne JAMAIS annoncer un stock, une disponibilité immédiate ni une date de livraison.
@@ -2013,14 +2015,14 @@ Les crochets sont des variables à remplacer. La formule de politesse finale est
 Objet : PEN'UP 3D : un stylo créatif pour votre rayon jouets
 Bonjour Monsieur/Madame [NOM],
 Matthis-Anaël, de Pen'Up 3D, une marque française basée à Montauban, la marque de stylos 3D la mieux référencée sur Google et la plus visible sur les réseaux sociaux. Notre stylo permet aux enfants dès 6 ans de dessiner en volume : le filament sort tiède et durcit en refroidissant.
-Il se recharge avec les bobines Fil'Up, déclinées en de nombreux coloris et effets. Plusieurs revendeurs de la région s'y intéressent déjà, et j'aimerais beaucoup vous présenter tout ça pour [VILLE/MAGASIN].
+Nos ventes en ligne sont fortes de septembre à décembre, et une partie des acheteurs renoncent parce qu'ils voulaient acheter en magasin. Ce magasin pourrait être le vôtre : plusieurs revendeurs de la région s'y intéressent déjà, et j'aimerais beaucoup vous présenter la gamme pour [VILLE/MAGASIN].
 Un court appel, une visio ou un passage en magasin cette semaine ? Je vous montre le stylo en action.
 
 [MODÈLE 2, peps + image d'accroche]
 Objet : PEN'UP 3D : le stylo qui dessine dans les airs
 Bonjour Monsieur/Madame [NOM],
 Matthis-Anaël, de Pen'Up 3D, une marque montalbanaise, aujourd'hui la marque de stylos 3D n°1 sur Google, Facebook et Instagram. Notre stylo permet aux enfants de dessiner non pas sur le papier, mais dans les airs : le filament sort tiède, durcit en refroidissant, et l'objet tient debout tout seul. Dès 6 ans, sans risque de brûlure.
-Plusieurs revendeurs de la région l'ont déjà repéré, et j'aimerais vraiment vous le faire découvrir pour [VILLE/MAGASIN].
+De septembre à décembre, nos ventes en ligne grimpent, et une partie des acheteurs abandonnent faute de le trouver en magasin. J'aimerais vraiment vous le faire découvrir pour [VILLE/MAGASIN].
 On s'appelle cette semaine, ou je passe vous voir ? Je vous montre le stylo en action, et la gamme de recharges Fil'Up.
 
 [MODÈLE 3, peps chaleureux]
@@ -2728,11 +2730,10 @@ body{background:var(--bg);}
 .pu-root{font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:var(--ink);min-height:100vh;display:flex;font-size:14px;background:radial-gradient(1100px 560px at 100% -8%,rgba(63,96,170,.10),transparent 55%),radial-gradient(900px 520px at -8% 6%,rgba(255,210,18,.22),transparent 55%),radial-gradient(820px 520px at 112% 116%,rgba(255,90,69,.14),transparent 55%),var(--bg);}
 .pu-display{font-family:'Bricolage Grotesque','Plus Jakarta Sans',sans-serif;letter-spacing:-.01em;}
 .tnum{font-variant-numeric:tabular-nums;}
-/* Volet de navigation ancré à la fenêtre : il reste visible quel que soit le défilement de la page.
-   « position:sticky » ne suffisait pas, car il cesse d'agir dès qu'un ancêtre crée un contexte de
-   défilement (un « overflow » posé plus haut suffit) ; « fixed » ne dépend d'aucun ancêtre. Le volet
-   étant alors hors du flux, c'est « .main » qui réserve sa largeur par une marge à gauche. */
-.sb{width:240px;flex:0 0 240px;padding:22px 16px;position:fixed;top:0;left:0;height:100vh;z-index:60;display:flex;flex-direction:column;gap:6px;background:linear-gradient(180deg,#fffdf8,#fffaf0);border-right:1px solid var(--line);overflow-y:auto;}
+/* Volet de navigation qui reste visible au défilement. Il reste DANS le flux (« sticky » et non
+   « fixed ») : le sortir du flux lui créerait un contexte d'empilement au-dessus du contenu, ce qui
+   passe devant les fenêtres surgissantes du bandeau (sélecteur de thème). */
+.sb{width:240px;flex:0 0 240px;padding:22px 16px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:6px;background:linear-gradient(180deg,#fffdf8,#fffaf0);border-right:1px solid var(--line);overflow-y:auto;}
 .brand{display:flex;flex-direction:column;align-items:flex-start;gap:9px;padding:2px 6px 16px;}
 .brand img{width:100%;max-width:178px;height:auto;display:block;}
 .brand-accent{height:5px;width:100%;border-radius:6px;border:1px solid rgba(22,32,58,.10);background:linear-gradient(90deg,var(--blue) 0 33.33%,#ffffff 33.33% 66.66%,var(--red) 66.66% 100%);}
@@ -2750,12 +2751,12 @@ body{background:var(--bg);}
 .sb-brandfoot img{width:100%;max-width:160px;height:auto;display:block;margin:0 auto;transition:opacity .15s;}
 .sb-brandfoot:hover img{opacity:.78;}
 .sb-foot{padding:12px 8px 0;border-top:1px solid var(--line);color:var(--muted);font-size:11px;}
-.main{flex:1;min-width:0;margin-left:240px;padding:26px 30px 60px;position:relative;z-index:1;}
+.main{flex:1;min-width:0;padding:26px 30px 60px;position:relative;z-index:1;}
 .main::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;background-image:radial-gradient(currentColor 0.5px,transparent 0.6px);background-size:22px 22px;opacity:.028;}
-/* Cette règle posait autrefois « position:relative » pour passer le volet au-dessus du motif de fond.
-   Elle écrasait silencieusement le positionnement déclaré plus haut, et c'est ce qui empêchait le
-   volet de rester en place au défilement. Seul l'empilement est conservé ici. */
-.sb{z-index:60;}
+/* Cette règle posait « position:relative » pour passer le volet au-dessus du motif de fond, et
+   écrasait ainsi le « position:sticky » déclaré plus haut : c'est ce qui empêchait le volet de rester
+   en place au défilement. Seul l'empilement est conservé, au niveau qu'il avait toujours eu. */
+.sb{z-index:2;}
 .pu-root::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;background-repeat:repeat;}
 ${THEME_BG_CSS}
 ${DARK_BG_TEXT}
@@ -3020,8 +3021,7 @@ ${ACCENT_CSS}
   .pu-root.nav-open .sb{transform:translateX(0);}
   .sb-scrim{display:block;position:fixed;inset:0;background:rgba(20,32,58,.5);z-index:85;opacity:0;pointer-events:none;transition:opacity .26s;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);}
   .pu-root.nav-open .sb-scrim{opacity:1;pointer-events:auto;}
-  /* Le volet redevient un tiroir escamotable : plus de largeur à lui réserver. */
-  .main{margin-left:0;padding:0 14px 54px;min-height:100vh;}
+  .main{padding:0 14px 54px;min-height:100vh;}
   .mobilebar{display:flex;align-items:center;gap:11px;position:sticky;top:0;z-index:40;background:var(--bg);margin:0 -14px 12px;padding:9px 12px;border-bottom:1px solid var(--line);}
   .mobilebar .mtitle{flex:1;min-width:0;font-weight:800;font-size:16px;font-family:'Bricolage Grotesque','Plus Jakarta Sans',sans-serif;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .navarrows-d{display:none;}
