@@ -1783,7 +1783,17 @@ function computeProspectAngles({ prospect, accounts, sites, interactions, deals,
   const reseauEnseigneCount = workedEnseigneAccs.length + enseigneSites.length;
   // Sous-ensembles, pour que le mail ne dise que ce qui est vrai : opérations en cours (devis ou
   // commande) et établissements de la même région que le prospect.
-  const dealCountEnseigne = dls.filter((x) => enseigneAccIds.has(x.accountId)).length;
+  // On compte des ÉTABLISSEMENTS engagés, pas des lignes : dix courriels avec le même magasin ne font
+  // pas dix confrères. Un devis ou un échange rattaché à un point de vente est imputé à ce point de
+  // vente, sinon au compte.
+  const enseigneSiteIds = new Set(enseigneSites.map((s) => s.id));
+  const toucheEnseigne = (x) => !!x && (enseigneAccIds.has(x.accountId) || enseigneSiteIds.has(x.siteId));
+  const cleEnseigne = (x) => (enseigneSiteIds.has(x.siteId) ? x.siteId : x.accountId);
+  const dealCountEnseigne = new Set(dls.filter(toucheEnseigne).map(cleEnseigne).filter(Boolean)).size;
+  // Les échanges (courriels, appels, rendez-vous) valent antécédent au même titre qu'un devis : une
+  // discussion en cours avec des confrères est souvent l'argument le plus parlant, et elle précède
+  // toujours le devis.
+  const echangeCountEnseigne = new Set(its.filter(toucheEnseigne).map(cleEnseigne).filter(Boolean)).size;
   const siteDept = (s) => depFromCP(parseLocality(s.adresse || "").cp);
   const enseigneRegionCount = pDept
     ? enseigneSites.filter((s) => { const d = siteDept(s); return d && (d === pDept || (inOcc && OCCITANIE_DEPTS.has(d))); }).length
@@ -1808,7 +1818,7 @@ function computeProspectAngles({ prospect, accounts, sites, interactions, deals,
   if (!hasEmail) risque = "bloquant";
   else if (!hasName || (!hasEnseigne && !realType)) risque = "bloquant";
   else risque = (proximite !== "aucune" || reseauEnseigneCount > 0 || reseauRegionCount > 0) ? "faible" : "standard";
-  const reseauEnseigne = { available: reseauEnseigneCount >= 1, count: reseauEnseigneCount, region: enseigneRegionCount, operations: dealCountEnseigne, label: p.enseigne || "" };
+  const reseauEnseigne = { available: reseauEnseigneCount >= 1, count: reseauEnseigneCount, region: enseigneRegionCount, operations: dealCountEnseigne, echanges: echangeCountEnseigne, label: p.enseigne || "" };
   const reseauRegion = { available: reseauRegionCount >= 1, count: reseauRegionCount };
   const bestAngle = reseauEnseigne.available ? "reseau_enseigne" : (proximite !== "aucune" ? "proximite" : (reseauRegion.available ? "reseau_region" : "adequation_produit"));
   const risqueMotif = !hasEmail ? "Pas d'adresse e-mail exploitable" : (!hasName || (!hasEnseigne && !realType)) ? "Identification trop incertaine (ni enseigne, ni type de commerce précis)" : "";
@@ -1945,7 +1955,9 @@ proximite, niveau "aucune" : aucune allusion à la distance, à la région ou au
 reseau_enseigne, compte >= 2 : "nous échangeons déjà avec plusieurs [enseigne]" — [enseigne] est celle du DESTINATAIRE, jamais une autre (règle d'or 8).
 reseau_enseigne, compte = 1 : "nous travaillons déjà avec un autre [enseigne]", même exigence.
 reseau_enseigne, dans_la_region >= 1 : précise "de la région" ou "près de chez vous" — "nous échangeons déjà avec plusieurs [enseigne] de la région". N'ajoute "de la région" QUE si dans_la_region est supérieur à zéro.
-reseau_enseigne, operations_en_cours >= 1 : des devis ou des commandes sont en cours avec cette enseigne. C'est l'antécédent le plus fort : écris "des échanges commerciaux sont en cours avec plusieurs [enseigne]" (ou "avec un autre [enseigne]" si compte = 1). Ne détaille jamais le montant, la référence ni le magasin concerné.
+reseau_enseigne, echanges_en_cours >= 1 : des discussions sont engagées (courriels, appels, rendez-vous) avec ce nombre de magasins de l'enseigne. Écris "nous sommes déjà en discussion avec plusieurs [enseigne]" ou "des échanges sont en cours avec plusieurs [enseigne]". Un échange n'est PAS une vente : n'écris ni "nous fournissons", ni "nos clients [enseigne]", ni "ils nous ont référencés".
+reseau_enseigne, devis_ou_commandes >= 1 : des devis ou des commandes existent avec cette enseigne. C'est l'antécédent le plus fort, et il prime sur le précédent : écris "des échanges commerciaux sont en cours avec plusieurs [enseigne]", ou "nous fournissons déjà plusieurs [enseigne]" si le chiffre est supérieur à un. Ne détaille jamais le montant, la référence ni le magasin concerné.
+reseau_enseigne, les deux à zéro : les magasins de l'enseigne sont suivis mais rien n'est encore engagé. Reste au niveau du suivi : "nous travaillons déjà avec plusieurs [enseigne]" est alors trop fort, préfère "plusieurs [enseigne] nous suivent déjà" ou "nous avons déjà pris contact avec plusieurs [enseigne]".
 reseau_enseigne : cet angle, dès qu'il est fourni, est OBLIGATOIRE dans le mail. Un magasin de réseau à qui l'on écrit sans lui dire que l'on travaille déjà avec ses confrères perd l'argument le plus convaincant dont on dispose. Place-le dans le corps, jamais après la question finale.
 reseau_region : "plusieurs revendeurs de la région s'y intéressent déjà" — formulation neutre, sans nommer aucun réseau.
 adequation_produit : angle sur le type de commerce et la ville, sans relation ni proximité.
@@ -2104,7 +2116,10 @@ function verifyProspectMail(parsed, angles, magasin) {
   // n'est pas un détail de style. Détection large, le modèle ayant plusieurs formulations possibles.
   const ANTECEDENT = /nous (travaillons|echangeons|collaborons|sommes en (relation|discussion))|deja (avec|en relation|present)|en cours avec|(plusieurs|d'autres|un autre|certains) (magasins?|adherents?|confreres?|points? de vente|revendeurs?)|plusieurs [a-z']+club|d'autres [a-z']+club/;
   if (angles.reseauEnseigne && angles.reseauEnseigne.available && !ANTECEDENT.test(text)) {
-    alertes.push("Antécédent de réseau non exploité : " + angles.reseauEnseigne.count + " établissement(s) de cette enseigne sont déjà suivis, le mail doit le dire.");
+    const det = [];
+    if (angles.reseauEnseigne.echanges) det.push(angles.reseauEnseigne.echanges + " en discussion");
+    if (angles.reseauEnseigne.operations) det.push(angles.reseauEnseigne.operations + " avec devis ou commande");
+    alertes.push("Antécédent de réseau non exploité : " + angles.reseauEnseigne.count + " établissement(s) de cette enseigne sont déjà suivis" + (det.length ? " (" + det.join(", ") + ")" : "") + ", le mail doit le dire.");
     confiance = "a_revoir";
   }
   if (!/google|instagram|facebook|reseaux sociaux/.test(norm(parsed.corps || ""))) {
@@ -2144,7 +2159,7 @@ async function generateProspectMail({ prospect, angles, consigne, ton, mode, pre
   };
   const anglesPayload = {
     proximite: angles.proximite,
-    reseau_enseigne: (angles.reseauEnseigne && angles.reseauEnseigne.available) ? { compte: angles.reseauEnseigne.count, dans_la_region: angles.reseauEnseigne.region || 0, operations_en_cours: angles.reseauEnseigne.operations || 0, enseigne: p.enseigne } : null,
+    reseau_enseigne: (angles.reseauEnseigne && angles.reseauEnseigne.available) ? { compte: angles.reseauEnseigne.count, dans_la_region: angles.reseauEnseigne.region || 0, echanges_en_cours: angles.reseauEnseigne.echanges || 0, devis_ou_commandes: angles.reseauEnseigne.operations || 0, enseigne: p.enseigne } : null,
     reseau_region: (angles.reseauRegion && angles.reseauRegion.available) ? { compte: angles.reseauRegion.count } : null,
     adequation_produit: { type: magasin.type, ville: magasin.ville },
     objectif_type: angles.objectif_type,
