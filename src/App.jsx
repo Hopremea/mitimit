@@ -1267,7 +1267,41 @@ function normalize(d) {
     d.settings._pause30 = true;
   }
   d.accounts = autoClassifyStages(d);
+  // Assainissement des champs libres, à CHAQUE enregistrement et à chaque chargement (donc pas de
+  // drapeau de migration) : les imports de tableur déposent « vide », « N/A » ou « - » là où la donnée
+  // manque, ces marqueurs se retrouvent ensuite sur les fiches et jusque dans les mails.
+  d.prospects = (d.prospects || []).map(scrubRecord);
+  d.contacts = (d.contacts || []).map(scrubRecord);
+  d.accounts = (d.accounts || []).map(scrubRecord);
+  d.sites = (d.sites || []).map(scrubRecord);
   return d;
+}
+// Marqueurs de « case sans valeur » produits par les exports de tableur. Comparaison sur la valeur
+// ENTIÈRE du champ, jamais sur une sous-chaîne : une note qui contient le mot « vide » reste intacte.
+const PLACEHOLDER_VALUE = /^(vide|vides|n\/?a|néant|neant|non renseign[ée]|non communiqu[ée]|non d[ée]fini[e]?|inconnu[e]?|aucun[e]?|null|undefined|-{1,3}|—|\.)$/i;
+const EMAIL_FIELDS = ["email", "contactEmail", "contactMail", "emailMagasin"];
+const PHONE_FIELDS = ["telephone", "tel", "mobile", "fixe", "contactTel"];
+// Une adresse sans « @ » n'est pas une adresse ; un téléphone qui n'est pas fait de chiffres n'est pas
+// un téléphone. Dans les deux cas la valeur est effacée plutôt que conservée fausse : un champ vide se
+// voit et se corrige, une valeur erronée se propage (mailing, export, recherche de doublons).
+function scrubRecord(r) {
+  if (!r || typeof r !== "object") return r;
+  let out = r;
+  const set = (k, v) => { if (out === r) out = { ...r }; out[k] = v; };
+  Object.keys(r).forEach((k) => {
+    const v = r[k];
+    if (typeof v !== "string") return;
+    const t = v.trim();
+    if (!t) { if (v !== t) set(k, ""); return; }
+    if (PLACEHOLDER_VALUE.test(t)) { set(k, ""); return; }
+    if (EMAIL_FIELDS.includes(k)) { if (t.indexOf("@") === -1) set(k, ""); return; }
+    if (PHONE_FIELDS.includes(k)) {
+      // Chiffres et séparateurs usuels seulement (+ espace . - / parenthèses), et assez de chiffres
+      // pour être un numéro : « vide », « à demander » ou « 06 » sont écartés.
+      if (!/^\+?[\d\s.\-/()]+$/.test(t) || t.replace(/\D/g, "").length < 6) set(k, "");
+    }
+  });
+  return out;
 }
 
 const eur = (n) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(Number(n) || 0);
