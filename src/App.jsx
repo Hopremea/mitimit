@@ -6189,6 +6189,12 @@ function SequenceEnrollModal({ contact, sequences, onClose, onEnroll }) {
 function Fiche({ c, account, data, myEmail, settings, deals, interactions, onBack, onEdit, onDelete, onTogglePrincipal, onSaveContact, go, onGoEnseigne, onGoSite, persist, editModal }) {
   const [seqOpen, setSeqOpen] = useState(false);
   const enrollSequence = (seq, steps) => { const evs = steps.map((st, i) => ({ id: uid("ev_"), date: st.date, heure: "", titre: st.titre, notes: "Séquence « " + seq.name + " » — étape " + (i + 1) + "/" + steps.length + ".", type: st.type, color: (EVENT_TYPES[st.type] || EVENT_TYPES.relance).color, accountId: c.accountId || "", siteId: c.siteId || "", contactId: c.id, seqId: seq.id, seqStep: i })); persist((p) => ({ ...p, events: [...(p.events || []), ...evs] })); setSeqOpen(false); };
+  // Rattachement d'un établissement depuis la fiche contact : un patron multi-magasins se voit ajouter
+  // ses points de vente au fil de l'eau, sans passer par le formulaire complet ni par la fiche du site.
+  const [siteLink, setSiteLink] = useState(null); // null = fermé, sinon la recherche saisie
+  const lierSite = (sid) => { persist((p) => ({ ...p, contacts: p.contacts.map((x) => { if (x.id !== c.id) return x; const site = (p.sites || []).find((y) => y.id === sid); const dejaPrincipal = !!x.siteId; return { ...x, accountId: x.accountId || (site && site.accountId) || "", siteId: dejaPrincipal ? x.siteId : sid, siteIds: dejaPrincipal ? [...new Set([...(x.siteIds || []), sid])] : (x.siteIds || []).filter((y) => y !== sid) }; }) })); setSiteLink(null); };
+  // Détacher : si l'on retire l'établissement principal, le premier des secondaires prend sa place.
+  const delierSite = (sid) => persist((p) => ({ ...p, contacts: p.contacts.map((x) => { if (x.id !== c.id) return x; const autres = (x.siteIds || []).filter((y) => y !== sid); if (x.siteId !== sid) return { ...x, siteIds: autres }; return { ...x, siteId: autres[0] || "", siteIds: autres.slice(1) }; }) }));
   const [addInt, setAddInt] = useState(false);
   const [intEdit, setIntEdit] = useState(null); const [intView, setIntView] = useState(null); const [syncing, setSyncing] = useState(false); const [syncMsg, setSyncMsg] = useState(null); const [enr, setEnr] = useState(false); const [enrMsg, setEnrMsg] = useState(null); const [preview, setPreview] = useState(null); const [vcardOpen, setVcardOpen] = useState(false); const [msgOpen, setMsgOpen] = useState(false); const [eventEdit, setEventEdit] = useState(null); const [eventView, setEventView] = useState(null);
   const rm = ROLE_META[c.role] || ROLE_META.autre; const dealsVal = deals.reduce((s, d) => s + d.montant, 0); const lastEch = interactions[0]?.date; const ens = account?.enseigne || "";
@@ -6257,8 +6263,9 @@ function Fiche({ c, account, data, myEmail, settings, deals, interactions, onBac
           // or un patron multi-magasins a besoin de voir l'adresse et le type de chacun d'un coup d'œil.
           const ids = [...new Set([c.siteId, ...(Array.isArray(c.siteIds) ? c.siteIds : [])].filter(Boolean))];
           const sts = ids.map((id) => (data.sites || []).find((x) => x.id === id)).filter(Boolean);
-          if (sts.length < 1) return null;
-          return (<div className="card"><div className="sec-h"><h3 className="pu-display">Établissements suivis</h3><span>{sts.length}</span></div>
+          // Carte affichée même sans rattachement : c'est de là que part le premier.
+          return (<div className="card"><div className="sec-h"><h3 className="pu-display">Établissements suivis</h3><div style={{ display: "flex", gap: 8, alignItems: "center" }}><span>{sts.length}</span><button className="btn btn-y btn-s" onClick={() => setSiteLink("")} title="Rattacher un établissement à ce contact"><Plus size={14} /> Rattacher</button></div></div>
+            {sts.length === 0 && <div className="empty">Aucun établissement rattaché. Utilisez « Rattacher » pour lier ce contact à un ou plusieurs points de vente.</div>}
             {sts.map((st, i) => { const ga = (data.accounts || []).find((a) => a.id === st.accountId) || null; return (
               <div key={st.id} className="crow" onClick={() => onGoSite && onGoSite(st.id)} title="Ouvrir cet établissement">
                 <span style={{ width: 30, height: 30, borderRadius: 9, background: "var(--blue-l)", color: "var(--blue)", display: "grid", placeItems: "center", flexShrink: 0 }}><Store size={15} /></span>
@@ -6267,6 +6274,7 @@ function Fiche({ c, account, data, myEmail, settings, deals, interactions, onBac
                   <div style={{ color: "var(--muted)", fontSize: 12 }}>{[ga && ga.enseigne, st.adresse].filter(Boolean).join(" · ") || "—"}</div>
                 </div>
                 {st.typeSurface && <Badge color="#5b6478">{st.typeSurface}</Badge>}
+                <button className="iconbtn" title="Détacher cet établissement de ce contact" onClick={(e) => { e.stopPropagation(); delierSite(st.id); }}><X size={14} /></button>
               </div>); })}
           </div>);
         })()}
@@ -6279,6 +6287,32 @@ function Fiche({ c, account, data, myEmail, settings, deals, interactions, onBac
         <InteractionThread interactions={interactions} data={data} onView={(it) => setIntView(it)} onEdit={(it) => setIntEdit(it)} onDelete={delInteraction} />
       </div>
     </div>
+    {siteLink !== null && (() => {
+      // Sélecteur d'établissement : mêmes repères que la liste « Groupes & établissements » (libellé,
+      // groupe, adresse), recherche sur les trois, et exclusion de ceux déjà rattachés au contact.
+      const deja = new Set([c.siteId, ...(Array.isArray(c.siteIds) ? c.siteIds : [])].filter(Boolean));
+      const q = normStr(siteLink);
+      const choix = (data.sites || [])
+        .filter((st) => !deja.has(st.id) && !st.archived && (st.type === "pdv" || st.type === "decision"))
+        .filter((st) => { if (!q) return true; const ga = (data.accounts || []).find((a) => a.id === st.accountId); return normStr([st.label, ga && ga.enseigne, st.adresse].filter(Boolean).join(" ")).includes(q); })
+        .sort((x, y) => String(x.label || "").localeCompare(String(y.label || ""), "fr"));
+      return (<Modal title={"Rattacher un établissement — " + fullName(c)} onClose={() => setSiteLink(null)}>
+        <input value={siteLink} onChange={(e) => setSiteLink(e.target.value)} placeholder="Rechercher un établissement (nom, groupe, adresse)…" autoFocus style={{ marginBottom: 10 }} />
+        {choix.length === 0 ? <div className="empty">{q ? "Aucun établissement ne correspond." : "Tous les établissements sont déjà rattachés à ce contact."}</div> : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 420, overflowY: "auto" }}>
+            {choix.map((st) => { const ga = (data.accounts || []).find((a) => a.id === st.accountId) || null; return (
+              <div key={st.id} onClick={() => lierSite(st.id)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 11, background: "var(--card)", cursor: "pointer" }}>
+                <span style={{ width: 28, height: 28, borderRadius: 8, background: "var(--blue-l)", color: "var(--blue)", display: "grid", placeItems: "center", flexShrink: 0 }}><Store size={14} /></span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{st.label || "Établissement"}</div>
+                  <div style={{ color: "var(--muted)", fontSize: 12 }}>{[ga && ga.enseigne, st.adresse].filter(Boolean).join(" · ") || "—"}</div>
+                </div>
+                <Link2 size={15} color="var(--muted)" />
+              </div>); })}
+          </div>)}
+        <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 10 }}>Le premier établissement rattaché devient le principal ; les suivants s'ajoutent à sa liste. Le principal détermine la ville et l'adresse affichées sur la fiche.</div>
+      </Modal>);
+    })()}
     {addInt && <Modal title={addInt && addInt.type === "appel" ? "Journaliser l'appel" : "Nouvel échange"} onClose={() => setAddInt(false)}><InteractionForm accountId={c.accountId} contactId={c.id} siteId={c.siteId || ""} interaction={typeof addInt === "object" ? addInt : undefined} onSave={(it) => { addInteraction(it); setAddInt(false); }} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onPlanEvents={(evs, f) => persist((p) => ({ ...p, events: [...(p.events || []), ...plannedEvents(evs, { baseDate: f.date, accountId: c.accountId, siteId: c.siteId || "", contactId: c.id })] }))} /></Modal>}
     {intEdit && <Modal title="Modifier l'échange" onClose={() => setIntEdit(null)}><InteractionForm accountId={c.accountId} contactId={c.id} siteId={c.siteId || ""} interaction={intEdit} onSave={(it) => { saveInteraction(it); setIntEdit(null); }} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onPlanEvents={(evs, f) => persist((p) => ({ ...p, events: [...(p.events || []), ...plannedEvents(evs, { baseDate: f.date, accountId: c.accountId, siteId: c.siteId || "", contactId: c.id })] }))} /></Modal>}
     {eventEdit && <Modal title={(data.events || []).some((e) => e.id === eventEdit.id) ? "Modifier l'événement" : "Nouvel événement"} onClose={() => setEventEdit(null)}><EventForm event={eventEdit} accounts={data.accounts} onSave={(ev) => { saveEvent(ev); setEventEdit(null); }} onDelete={() => { delEvent(eventEdit.id); setEventEdit(null); }} isExisting={(data.events || []).some((e) => e.id === eventEdit.id)} /></Modal>}
