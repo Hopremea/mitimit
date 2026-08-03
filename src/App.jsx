@@ -2843,8 +2843,33 @@ const bgEnImage = (bg) => (/gradient\(/.test(bg) ? bg : `linear-gradient(${bg},$
 // tout comme le motif : sélectionner une couleur ne produisait aucun effet visible. On applique
 // désormais le même fond sous un voile sombre, ce qui garde le contraste du mode sombre tout en
 // rendant le choix perceptible. Le motif, lui, est retracé en blanc translucide pour rester lisible.
+// Voile du mode sombre, CALCULÉ par thème au lieu d'être fixé à 80 % pour tous. Un voile unique doit
+// convenir au fond le plus pâle de la liste : à 80 % il éteignait complètement les dégradés des thèmes
+// déjà sombres (Bleu nuit, Acier, Prune), qui n'en avaient nul besoin. On retient donc, pour chaque
+// thème, le voile le PLUS LÉGER qui garde le texte lisible — le fond redevient visible sans rien céder
+// sur le contraste, et un thème ajouté plus tard obtient son voile tout seul.
+//
+// Cas de référence : une TUILE — la surface la plus translucide du mode sombre, 42 % — posée sur le
+// fond voilé. C'est là que le fond transparaît le plus. Seuil AA de 4,5:1 exigé pour le texte principal
+// ET pour le texte secondaire, plus pâle donc plus exposé.
+const VOILE_RVB = [9, 13, 24];
+const DARK_INK = [232, 237, 245], DARK_MUTED = [148, 160, 184], DARK_TUILE = [38, 50, 74], DARK_TUILE_A = 0.42;
+const lumRelative = ([r, g, b]) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+const contrasteRvb = (a, b) => { const x = lumRelative(a), y = lumRelative(b); const h = Math.max(x, y), l = Math.min(x, y); return (h + 0.05) / (l + 0.05); };
+const melangeRvb = (dessus, alpha, dessous) => dessus.map((v, i) => alpha * v + (1 - alpha) * dessous[i]);
+const hexRvb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+function voileSombre(bg) {
+  const teintes = (String(bg).match(/#[0-9a-fA-F]{6}/g) || []).map(hexRvb);
+  if (!teintes.length) return 0.8;
+  const lisible = (a) => teintes.every((t) => {
+    const fond = melangeRvb(DARK_TUILE, DARK_TUILE_A, melangeRvb(VOILE_RVB, a, t));
+    return contrasteRvb(DARK_INK, fond) >= 4.5 && contrasteRvb(DARK_MUTED, fond) >= 4.5;
+  });
+  for (let a = 15; a <= 90; a++) if (lisible(a / 100)) return a / 100;
+  return 0.9;
+}
 const THEME_BG_CSS = THEME_COLORS.map((c) => `.pu-root.color-${c.id}:not(.dark){background:${c.bg};}`
-  + `.pu-root.dark.color-${c.id}{background:linear-gradient(rgba(9,13,24,.80),rgba(9,13,24,.80)),${bgEnImage(c.bg)};background-attachment:fixed;}`
+  + `.pu-root.dark.color-${c.id}{background:linear-gradient(rgba(9,13,24,${voileSombre(c.bg)}),rgba(9,13,24,${voileSombre(c.bg)})),${bgEnImage(c.bg)};background-attachment:fixed;}`
   + THEME_PATTERNS.filter((p) => p.fn).map((p) => `.pu-root.color-${c.id}:not(.dark).pat-${p.id}::before{background-image:${p.fn(c.stroke)};background-size:${p.size};opacity:${p.op};}`).join("")).join("\n")
   + "\n" + THEME_PATTERNS.filter((p) => p.fn).map((p) => `.pu-root.dark.pat-${p.id}::before{background-image:${p.fn("rgba(255,255,255,.62)")};background-size:${p.size};opacity:${p.op};}`).join("\n");
 // Texte clair hors carte sur les fonds foncés (revient sombre dans les surfaces claires).
