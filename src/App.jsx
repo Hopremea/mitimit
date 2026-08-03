@@ -8203,7 +8203,10 @@ async function geoResolveZone(zone) {
   if (/^\d{5}$/.test(z)) return { departement: cpToDepartement(z), cp: z, nom: z };
   try {
     const r = await fetch("https://geo.api.gouv.fr/communes?nom=" + encodeURIComponent(z) + "&fields=nom,code,codeDepartement,codesPostaux,population&limit=1&boost=population");
-    if (r.ok) { const j = await r.json(); const c = j && j[0]; if (c) return { departement: c.codeDepartement || "", cp: (c.codesPostaux || [])[0] || "", nom: c.nom, commune: c.nom, population: c.population || 0 }; }
+    // Le code INSEE de la commune est conservé : c'est le seul moyen de restreindre une recherche au
+    // territoire d'une ville. Le code postal n'y suffit pas — Toulouse en compte six, n'en retenir
+    // qu'un couperait les deux tiers des résultats (22 sociétés au lieu de 31).
+    if (r.ok) { const j = await r.json(); const c = j && j[0]; if (c) return { departement: c.codeDepartement || "", cp: (c.codesPostaux || [])[0] || "", code: c.code || "", nom: c.nom, commune: c.nom, population: c.population || 0 }; }
   } catch (e) {}
   try {
     const r = await fetch("https://geo.api.gouv.fr/departements?nom=" + encodeURIComponent(z) + "&fields=nom,code&limit=1");
@@ -8270,14 +8273,48 @@ const NAF_CIBLES = [
 ];
 // Catégorie de prospect induite par le code d'activité : une crèche n'est pas un magasin.
 const typeDepuisNaf = (naf) => (NAF_CIBLES.find((n) => n.code === naf) || {}).type || "";
-async function nafSearch(zone, naf, limit = 50) {
+// Filtres RÉELS de la recherche par code d'activité : chacun est un paramètre que le registre applique
+// vraiment côté serveur, ou une donnée qu'il renvoie et que l'on peut contrôler. Mesuré sur les 67
+// sociétés « jeux et jouets » de Haute-Garonne : taille 67→49, commune 67→31, entrepreneur individuel
+// 67→53. À l'inverse, `date_creation_min` renvoie bien un 200 mais ne filtre rien : il n'est pas offert.
+//
+// L'entrepreneur individuel est écarté d'office : ces commerces n'ont ni structure d'achat ni volume
+// pour un référencement, les démarcher revient à remplir le listing de fiches sans suite.
+const TAILLES_ENTREPRISE = [
+  { v: "", label: "Toutes tailles" },
+  { v: "PME", label: "PME" },
+  { v: "ETI", label: "ETI (entreprise de taille intermédiaire)" },
+  { v: "GE", label: "Grande entreprise" },
+];
+// Le registre n'accepte qu'UN code de forme juridique par requête, alors qu'une même famille en compte
+// plusieurs (SARL : 5410, 5498, 5499…). Le filtrage se fait donc sur la FAMILLE, à partir du libellé
+// déjà dérivé du code : une SARL unipersonnelle n'est pas perdue parce qu'elle porte un autre code.
+const FORMES_REGISTRE = ["SARL", "SAS", "SA", "Société coopérative", "Société civile", "SNC", "Association"];
+// Au-delà de ce nombre d'établissements OUVERTS, la société est un réseau. Déterministe : le registre
+// donne le compte (335 pour King Jouet, 1 pour un indépendant), plus besoin de le deviner.
+const SEUIL_RESEAU = 3;
+async function nafSearch(zone, naf, opts = {}) {
   const g = await geoResolveZone(zone); if (!g || !g.departement) return [];
   const typeNaf = typeDepuisNaf(naf);
-  const params = new URLSearchParams({ activite_principale: naf, departement: g.departement, per_page: String(Math.min(limit, 25)), etat_administratif: "A" });
-  const r = await fetch("https://recherche-entreprises.api.gouv.fr/search?" + params.toString());
-  if (!r.ok) throw new Error("API entreprises " + r.status);
-  const j = await r.json();
-  return (j.results || []).map((e) => {
+  const limit = Math.min(Math.max(Number(opts.limit) || 60, 1), 200);
+  const base = { activite_principale: naf, etat_administratif: "A", per_page: "25", est_entrepreneur_individuel: "false" };
+  // Une ville saisie en zone restreignait seulement au département : « Toulouse » remontait toute la
+  // Haute-Garonne. Le code INSEE de la commune corrige ce point.
+  if (g.code) base.code_commune = g.code; else base.departement = g.departement;
+  if (opts.taille) base.categorie_entreprise = opts.taille;
+  // Le registre plafonne à 25 résultats par page : sans pagination, 42 des 67 sociétés d'un
+  // département n'étaient jamais lues, et tout filtre appliqué ensuite portait sur un échantillon.
+  const brut = [];
+  for (let page = 1; page <= Math.ceil(limit / 25) && brut.length < limit; page++) {
+    const params = new URLSearchParams({ ...base, page: String(page) });
+    const r = await fetch("https://recherche-entreprises.api.gouv.fr/search?" + params.toString());
+    if (!r.ok) { if (page === 1) throw new Error("API entreprises " + r.status); break; }
+    const j = await r.json();
+    const lot = j.results || [];
+    brut.push(...lot);
+    if (lot.length < 25) break;
+  }
+  return brut.map((e) => {
     // On privilégie l'établissement situé dans le département demandé plutôt que le siège social,
     // qui peut être à l'autre bout de la France pour une chaîne.
     const etabs = (e.matching_etablissements || []).filter((x) => String(x.etat_administratif || "A") === "A");
@@ -8285,8 +8322,9 @@ async function nafSearch(zone, naf, limit = 50) {
     const d = (e.dirigeants || []).find((x) => x.type_dirigeant === "personne physique") || null;
     // Société dirigeante : c'est elle qui dit si l'établissement se démarche en direct.
     const dm = (e.dirigeants || []).find((x) => x.type_dirigeant === "personne morale") || null;
+    const ouverts = Number(e.nombre_etablissements_ouverts || e.nombre_etablissements || 1);
     return {
-      nom: e.nom_complet || e.nom_raison_sociale || "", type: typeNaf || (e.nombre_etablissements > 3 ? "chaine" : "independant"),
+      nom: e.nom_complet || e.nom_raison_sociale || "", type: typeNaf || (ouverts >= SEUIL_RESEAU ? "chaine" : "independant"),
       dirigeantSiren: dm ? (dm.siren || "") : "", dirigeantSociete: dm ? (dm.denomination || dm.nom || "") : "",
       siren: e.siren || "", siret: loc.siret || "", raisonSociale: e.nom_raison_sociale || "", formeJuridique: natureJuridiqueLabel(e.nature_juridique),
       adresse: loc.adresse || "", cp: loc.code_postal || "", ville: loc.libelle_commune || "",
@@ -8295,8 +8333,14 @@ async function nafSearch(zone, naf, limit = 50) {
       contactFonction: d ? (d.qualite && d.qualite !== "Autre" ? d.qualite : "Dirigeant") : "",
       contactSource: d ? "RNE/INSEE (annuaire-entreprises)" : "",
       notes: "", telephone: "", email: "", site: "",
+      etablissementsOuverts: ouverts,
     };
-  }).filter((x) => x.nom);
+  }).filter((x) => x.nom)
+    .filter((x) => !opts.forme || x.formeJuridique === opts.forme)
+    // Un type issu du code d'activité (crèche, médiathèque…) n'est ni chaîne ni indépendant : la cible
+    // ne s'y applique pas, sinon une recherche « crèches » ne rendrait plus rien.
+    .filter((x) => typeNaf || cibleAccepte(opts.cible, x.type))
+    .slice(0, limit);
 }
 // Médiathèques et bibliothèques via OpenStreetMap (amenity=library) : elles animent souvent des
 // ateliers créatifs et achètent du matériel.
@@ -8891,6 +8935,7 @@ function Prospection({ data, persist, go }) {
   const [zone, setZone] = useState(""); const [kind, setKind] = useState("toutes");
   // Source de la recherche : magasins (OSM + IA) ou registres officiels gratuits (NAF, écoles,
   // associations, médiathèques). Seule « magasins » peut engager une dépense.
+  const [taille, setTaille] = useState(""); const [forme, setForme] = useState("");
   const [source, setSource] = useState("magasins"); const [naf, setNaf] = useState(NAF_CIBLES[0].code); const [assoMot, setAssoMot] = useState("ludothèque"); const [busy, setBusy] = useState(false); const [aiMsg, setAiMsg] = useState(null); const [aiErr, setAiErr] = useState(null);
   const aiElapsed = useElapsed(busy);
   // Approfondir la recherche IA sur la fiche prospect ouverte : complète les champs encore vides.
@@ -9389,7 +9434,7 @@ function Prospection({ data, persist, go }) {
           let lignes = [], libelle = "";
           if (source === "ecoles") { lignes = await educationSearch(z); libelle = "établissement(s) scolaire(s)"; }
           else if (source === "associations") { lignes = await associationSearch(z, assoMot); libelle = "association(s)"; }
-          else if (source === "naf") { lignes = await nafSearch(z, naf); libelle = "entreprise(s)"; }
+          else if (source === "naf") { lignes = await nafSearch(z, naf, { taille, forme, cible: kind }); libelle = "entreprise(s)"; }
           else if (source === "mediatheques") { lignes = await osmSearchLieux(z, '["amenity"="library"]', "mediatheque"); libelle = "médiathèque(s)"; }
           // Dédoublonnage sur les mêmes clés que le reste de l'application : on ne recrée jamais une
           // fiche déjà présente (prospect, établissement ou groupe).
@@ -9523,8 +9568,10 @@ function Prospection({ data, persist, go }) {
           <option value="associations">Associations & ludothèques</option>
           <option value="mediatheques">Médiathèques & bibliothèques</option>
         </select></div>
-        {source === "magasins" && <div className="fld" style={{ minWidth: 170, marginBottom: 0 }}><label>Cible</label><select value={kind} onChange={(e) => setKind(e.target.value)}><option value="toutes">Tous</option><option value="chaine">Chaînes & franchises</option><option value="independant">Indépendants & concept stores</option></select></div>}
+        {(source === "magasins" || source === "naf") && <div className="fld" style={{ minWidth: 170, marginBottom: 0 }}><label>Cible</label><select value={kind} onChange={(e) => setKind(e.target.value)} title={source === "naf" ? "Déterminé par le nombre d'établissements ouverts de la société (" + SEUIL_RESEAU + " ou plus = réseau), donnée du registre." : "Déterminé par l'enseigne de réseau déclarée sur le point de vente."}><option value="toutes">Tous</option><option value="chaine">Chaînes & franchises</option><option value="independant">Indépendants & concept stores</option></select></div>}
         {source === "naf" && <div className="fld" style={{ minWidth: 230, marginBottom: 0 }}><label>Code d'activité</label><select value={naf} onChange={(e) => setNaf(e.target.value)}>{NAF_CIBLES.map((n) => <option key={n.code} value={n.code}>{n.code} — {n.label}</option>)}</select></div>}
+        {source === "naf" && <div className="fld" style={{ minWidth: 175, marginBottom: 0 }}><label>Taille</label><select value={taille} onChange={(e) => setTaille(e.target.value)} title="Filtre appliqué par le registre lui-même.">{TAILLES_ENTREPRISE.map((t) => <option key={t.v} value={t.v}>{t.label}</option>)}</select></div>}
+        {source === "naf" && <div className="fld" style={{ minWidth: 165, marginBottom: 0 }}><label>Forme juridique</label><select value={forme} onChange={(e) => setForme(e.target.value)}><option value="">Toutes formes</option>{FORMES_REGISTRE.map((f) => <option key={f} value={f}>{f}</option>)}</select></div>}
         {source === "associations" && <div className="fld" style={{ minWidth: 170, marginBottom: 0 }}><label>Mot-clé</label><input value={assoMot} onChange={(e) => setAssoMot(e.target.value)} placeholder="ludothèque" /></div>}
         <button className="btn-save" disabled={busy} onClick={runAI} style={busy ? { opacity: .7, cursor: "wait" } : {}}>{busy ? (<><Sparkles size={15} className="spin" /> Recherche en cours… {fmtElapsed(aiElapsed)}</>) : (<><Sparkles size={15} /> {source === "magasins" ? "Lancer la recherche" : "Lancer (gratuit)"}</>)}</button>
       </div>
