@@ -7781,6 +7781,23 @@ function SiteForm({ site, accounts, onSave, known = [], contacts = [], onOpenCon
   </>);
 }
 
+// « Cible » de la recherche de magasins. Ce n'est plus une consigne polie adressée au modèle : le type
+// de chaque résultat est CONTRÔLÉ avant de créer la fiche. Un modèle à qui l'on demande de privilégier
+// les chaînes rend quand même des indépendants, et OpenStreetMap, interrogé en premier, ne lisait même
+// pas la consigne — le champ n'avait alors aucun effet.
+const CIBLE_TYPES = {
+  chaine: ["chaine", "franchise", "cooperative", "gss"],
+  independant: ["independant", "specialiste"],
+};
+const CIBLE_LABEL = { toutes: "Tous", chaine: "Chaînes & franchises", independant: "Indépendants & concept stores" };
+// « autre » passe toujours : c'est le type des fiches mal classées, et les écarter reviendrait à jeter
+// un magasin valable pour un défaut d'étiquette.
+function cibleAccepte(kind, type) {
+  const l = CIBLE_TYPES[kind];
+  if (!l) return true;                       // « Tous »
+  const t = String(type || "").trim();
+  return !t || t === "autre" || l.includes(t);
+}
 async function aiSearchStores(zone, kind) {
   const sys = "Tu es un agent de prospection B2B retail pour PEN'UP 3D, marque française de stylos 3D et loisirs créatifs pour enfants. Tu recherches des établissements physiques de jouets, jeux et loisirs créatifs en France (chaînes, coopératives, franchises, indépendants, concept stores) ET tu enrichis chaque fiche avec l'identité légale de la société exploitante en t'appuyant sur les registres et sources officielles. Tu ne fournis QUE des données factuelles et vérifiables ; en cas de doute tu laisses le champ vide plutôt que d'inventer. Tu ne fabriques jamais un courriel, un téléphone, un nom de dirigeant ou un SIREN.";
   const kindTxt = kind === "chaine" ? "Privilégie les groupes nationaux, coopératives et franchises." : kind === "independant" ? "Privilégie les établissements indépendants et concept stores." : "Tous comptes confondus.";
@@ -9397,7 +9414,10 @@ function Prospection({ data, persist, go }) {
         let osm = [];
         try { osm = await osmSearchStores(z); } catch (e) {}
         const seenOsm = new Set(data.prospects.map((p) => ((p.nom || "") + "|" + (p.ville || "")).toLowerCase()));
-        const osmNew = osm.filter((s) => { const k = ((s.nom || "") + "|" + (s.ville || "")).toLowerCase(); if (seenOsm.has(k)) return false; seenOsm.add(k); return true; });
+        const osmNew = osm.filter((s) => { const k = ((s.nom || "") + "|" + (s.ville || "")).toLowerCase(); if (seenOsm.has(k)) return false; seenOsm.add(k); return true; })
+          // « Cible » filtre pour de bon. OpenStreetMap porte une étiquette « brand » sur les points de
+          // vente de réseau : sa présence distingue une chaîne d'un indépendant sans rien deviner.
+          .filter((s) => cibleAccepte(kind, s.enseigne ? "chaine" : "independant"));
         const today0 = TODAY();
         const osmAdd = osmNew.map((s, i) => ({ id: "p_osm_" + Date.now() + "_" + i, nom: s.nom, enseigne: s.enseigne || "", type: s.enseigne ? "chaine" : "independant", format: "", adresse: s.adresse || "", ville: s.ville || "", cp: s.cp || "", departement: cpToDepartement(s.cp) || "", region: DEPT_REGION[cpToDepartement(s.cp)] || "", telephone: s.telephone || "", site: s.site || "", email: s.email || "", facebook: s.facebook || "", instagram: s.instagram || "", horaires: s.horaires || "", statut: "a_qualifier", potentiel: "", notes: "", source: "OpenStreetMap (gratuit) · " + today0, accountId: null, createdAt: today0, siren: "", siret: "", raisonSociale: "", formeJuridique: "", contactPrenom: "", contactNom: "", contactFonction: "", contactEmail: "", contactTel: "", contactSource: "", lat: s.lat, lng: s.lng }));
         if (osmAdd.length) persist((d) => ({ ...d, prospects: [...osmAdd, ...d.prospects] }));
@@ -9405,14 +9425,19 @@ function Prospection({ data, persist, go }) {
         if (osmAdd.length >= 6) { setQ(""); setFType("tous"); setFRegion("tous"); setFlashIds(new Set(osmAdd.map((a) => a.id))); setAiMsg(osmAdd.length + " prospect(s) ajouté(s) depuis OpenStreetMap — gratuitement, sans crédit IA. Statut « À qualifier », à vérifier."); return; }
         const { stores: arr, usage } = await aiSearchStores(z, kind);
         const seen = new Set(data.prospects.concat(osmAdd).map((p) => ((p.nom || "") + "|" + (p.ville || "")).toLowerCase())); const today = TODAY(); const add = [];
-        let refusesDir = 0;
+        let refusesDir = 0; let horsCible = 0;
         arr.forEach((r) => { const nom = (r.nom || r.enseigne || "").trim(); if (!nom) return; const key = (nom + "|" + (r.ville || "")).toLowerCase(); if (seen.has(key)) return; seen.add(key); const ct = r.contact || {};
           // Dirigeant exclu de la prospection : le résultat est jeté, pas rangé dans le listing.
           if (dirigeantExclu({ contactPrenom: ct.prenom, contactNom: ct.nom, siren: r.siren })) { refusesDir++; return; }
+          // La consigne « privilégie les chaînes » n'était qu'une suggestion faite au modèle, que rien
+          // ne vérifiait ensuite. Le type renvoyé est maintenant contrôlé : hors cible, la fiche est
+          // écartée. Un « autre » passe, faute de quoi on jetterait une fiche mal typée mais valable.
+          if (!cibleAccepte(kind, r.type)) { horsCible++; return; }
           add.push({ id: "p_" + Date.now() + "_" + add.length, nom, enseigne: r.enseigne || "", type: ["cooperative", "chaine", "franchise", "independant", "specialiste", "gss", "autre"].includes(r.type) ? r.type : "autre", format: "", adresse: r.adresse || "", ville: r.ville || "", cp: r.cp || "", departement: r.departement || "", region: r.region || "", telephone: r.telephone || "", site: r.site || "", email: r.email || "", statut: "a_qualifier", potentiel: "", notes: r.notes || "", source: "Recherche IA · " + today, accountId: null, createdAt: today, siren: r.siren || "", siret: r.siret || "", raisonSociale: r.raisonSociale || "", formeJuridique: r.formeJuridique || "", contactPrenom: ct.prenom || "", contactNom: ct.nom || "", contactFonction: ct.fonction || "", contactEmail: ct.email || "", contactTel: ct.telephone || "", contactSource: ct.source || "" }); });
         persist((d) => ({ ...d, prospects: add.length ? [...add, ...d.prospects] : d.prospects, claudeUsage: addUsage(d.claudeUsage, usage) }));
         if (add.length) { setQ(""); setFType("tous"); setFRegion("tous"); setFlashIds(new Set(add.map((a) => a.id))); }
-        const exDir = refusesDir ? " " + refusesDir + " résultat(s) refusé(s) : dirigeant exclu de la prospection (achats en centrale, ou magasin détenu par sa tête de réseau)." : "";
+        const exDir = (refusesDir ? " " + refusesDir + " résultat(s) refusé(s) : dirigeant exclu de la prospection (achats en centrale, ou magasin détenu par sa tête de réseau)." : "")
+          + (horsCible ? " " + horsCible + " hors cible « " + CIBLE_LABEL[kind] + " »." : "");
         setAiMsg((add.length ? add.length + " prospect(s) ajouté(s) au listing, statut « À qualifier ». À vérifier avant action." : "Aucun nouveau prospect (déjà présents ou aucun résultat exploitable).") + exDir);
       } catch (e) { const m = String((e && e.message) || e); const slow = /50[24]|delai|timeout|aborted|abort/i.test(m); setAiErr(slow ? "La recherche IA a mis trop de temps à répondre (elle interroge le web et les registres officiels en direct). Réessaie, ou précise une zone plus petite / un établissement précis pour accélérer." : ("Recherche IA momentanément indisponible (" + m + "). Réessaie dans un instant.")); }
       finally { setBusy(false); }
