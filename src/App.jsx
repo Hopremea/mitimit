@@ -6589,6 +6589,8 @@ function Deals({ data, persist, go, focus }) {
   const [sel, setSel] = useState(() => new Set());
   useEffect(() => { if (focus && focus.id) { const d = data.deals.find((x) => x.id === focus.id); if (d) setPreview(d); } }, [focus && focus.n]);
   const [pipeOpen, setPipeOpen] = useState(true);
+  // Le compteur doit annoncer ce que le tableau affiche vraiment : les refusés n'y ont plus de colonne.
+  const pipeCount = deals.filter((d) => d.statut !== "refuse").length;
   const accOf = (id) => accounts.find((a) => a.id === id);
   const accName = (id) => accOf(id)?.enseigne || "—";
   // Libellé client d'un document : on affiche le nom de l'ÉTABLISSEMENT (site lié au document / à la
@@ -6628,7 +6630,7 @@ function Deals({ data, persist, go, focus }) {
   return (<div className="fade">
     <div className="card" style={{ marginBottom: 14, padding: 0, overflow: "hidden" }}>
       <div onClick={() => setPipeOpen((o) => !o)} style={{ cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 14px" }}>
-        <h3 className="pu-display" style={{ margin: 0, fontSize: 15, display: "inline-flex", alignItems: "center", gap: 8 }}><GitBranch size={15} />Pipeline <span style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 600 }}>· {deals.length} document{deals.length > 1 ? "s" : ""}</span></h3>
+        <h3 className="pu-display" style={{ margin: 0, fontSize: 15, display: "inline-flex", alignItems: "center", gap: 8 }}><GitBranch size={15} />Pipeline <span style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 600 }}>· {pipeCount} document{pipeCount > 1 ? "s" : ""}</span></h3>
         <ChevronRight size={18} style={{ transform: pipeOpen ? "rotate(90deg)" : "none", transition: "transform .2s", color: "var(--muted)" }} />
       </div>
       {pipeOpen && <div style={{ padding: "0 12px 12px" }}><PipelineKanban data={data} persist={persist} go={go} embedded /></div>}
@@ -10865,8 +10867,10 @@ function PipelineKanban({ data, persist, go, embedded }) {
     { id: "expediee", label: "En cours de livraison", color: "#F8B133" },
     { id: "livre", label: "Livré", color: "#3F60AA" },
     { id: "paye", label: "Livré et payé", color: "#128C6E" },
-    { id: "refuse", label: "Refusé", color: "#FF5A45" },
   ];
+  // « Refusé » n'a pas de colonne : le pipeline montre ce qui avance, et un document refusé n'avance
+  // plus. Le statut existe toujours — il se pose depuis la fiche du document, et le listing garde son
+  // filtre « Refusé » pour les retrouver.
   const accOf = (id) => data.accounts.find((a) => a.id === id);
   // Libellé client d'un document : nom de l'ÉTABLISSEMENT (site lié au document / à la livraison) en
   // priorité, sinon l'enseigne du compte, sinon l'établissement d'un indépendant sans enseigne.
