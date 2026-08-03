@@ -9066,6 +9066,10 @@ function Prospection({ data, persist, go }) {
   const [importOpen, setImportOpen] = useState(false);
   const [q, setQ] = useState(""); const [fType, setFType] = useState("tous"); const [fRegion, setFRegion] = useState("tous"); const [sort, setSort] = useState("type"); const [dir, setDir] = useState("asc"); const [view, setView] = useState("actifs"); const [archiveEdit, setArchiveEdit] = useState(null); const [dupOpen, setDupOpen] = useState(null); const [mailingOpen, setMailingOpen] = useState(false);
   const [fTag, setFTag] = useState("tous"); const [fList, setFList] = useState("tous"); const [fIncomplete, setFIncomplete] = useState(false);
+  // Filtre « ouvert maintenant ». Il ne retient QUE les fiches dont les horaires sont interprétés et
+  // en cours : une fiche sans horaires (pastille orange) est écartée, puisqu'on ne peut pas affirmer
+  // qu'elle est ouverte — la confondre avec une ouverte enverrait passer un appel dans le vide.
+  const [fOuvert, setFOuvert] = useState(false);
   const [selMode, setSelMode] = useState(false); const [selIds, setSelIds] = useState(() => new Set());
   const [sirBusy, setSirBusy] = useState(false); const [sirMsg, setSirMsg] = useState(null);
   const [edit, setEdit] = useState(null);
@@ -9286,7 +9290,7 @@ function Prospection({ data, persist, go }) {
   const lists = data.prospectLists || [];
   const savedViews = (data.settings && data.settings.prospectionViews) || [];
   const listById = (id) => lists.find((l) => l.id === id) || null;
-  const list = prospects.filter((p) => !p.archived && !p.accountId && p.statut !== "converti" && (fType === "tous" || p.type === fType) && (fRegion === "tous" || p.region === fRegion) && (fTag === "tous" || (p.tags || []).includes(fTag)) && (fList === "tous" || !listById(fList) || (listById(fList).ids || []).includes(p.id)) && (!fIncomplete || prospectCompleteness(p) < 70) && (q === "" || [p.nom, p.enseigne, p.ville, p.adresse, p.notes, (p.tags || []).join(" ")].join(" ").toLowerCase().includes(q.toLowerCase())));
+  const list = prospects.filter((p) => !p.archived && !p.accountId && p.statut !== "converti" && (fType === "tous" || p.type === fType) && (fRegion === "tous" || p.region === fRegion) && (fTag === "tous" || (p.tags || []).includes(fTag)) && (fList === "tous" || !listById(fList) || (listById(fList).ids || []).includes(p.id)) && (!fIncomplete || prospectCompleteness(p) < 70) && (!fOuvert || statutHoraire(p.horaires).etat === "ouvert") && (q === "" || [p.nom, p.enseigne, p.ville, p.adresse, p.notes, (p.tags || []).join(" ")].join(" ").toLowerCase().includes(q.toLowerCase())));
   // ===== Sélection multiple & actions groupées (façon HubSpot / Salesforce / Monday) =====
   const toggleSel = (id) => setSelIds((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const selectAllVisible = () => setSelIds(new Set(list.map((p) => p.id)));
@@ -9300,8 +9304,8 @@ function Prospection({ data, persist, go }) {
   const bulkAddToList = (listId) => { persist((d) => ({ ...d, prospectLists: (d.prospectLists || []).map((l) => l.id === listId ? { ...l, ids: Array.from(new Set([...(l.ids || []), ...selIds])) } : l) })); setDupMsg({ ok: true, t: selCount + " fiche(s) ajoutée(s) à la liste « " + ((listById(listId) || {}).name || "") + " »." }); setTimeout(() => setDupMsg(null), 4000); };
   const bulkNewList = () => { const nm = (window.prompt("Nom de la nouvelle liste :", "") || "").trim(); if (!nm) return; const id = uid("list_"); persist((d) => ({ ...d, prospectLists: [...(d.prospectLists || []), { id, name: nm, ids: [...selIds] }] })); setFList(id); setDupMsg({ ok: true, t: "Liste « " + nm + " » créée avec " + selCount + " fiche(s)." }); setTimeout(() => setDupMsg(null), 4000); };
   // ===== Vues enregistrées (Notion / Airtable / Salesforce list views) =====
-  const applyView = (v) => { if (!v) return; setQ(v.q || ""); setFType(v.fType || "tous"); setFRegion(v.fRegion || "tous"); setFTag(v.fTag || "tous"); setFList(v.fList || "tous"); setSort(v.sort || "type"); setDir(v.dir || "asc"); };
-  const saveView = () => { const nm = (window.prompt("Nom de cette vue (filtres + tri) :", "") || "").trim(); if (!nm) return; const v = { id: uid("view_"), name: nm, q, fType, fRegion, fTag, fList, sort, dir }; persist((d) => ({ ...d, settings: { ...d.settings, prospectionViews: [...((d.settings && d.settings.prospectionViews) || []), v] } })); };
+  const applyView = (v) => { if (!v) return; setQ(v.q || ""); setFType(v.fType || "tous"); setFRegion(v.fRegion || "tous"); setFTag(v.fTag || "tous"); setFList(v.fList || "tous"); setFOuvert(!!v.fOuvert); setSort(v.sort || "type"); setDir(v.dir || "asc"); };
+  const saveView = () => { const nm = (window.prompt("Nom de cette vue (filtres + tri) :", "") || "").trim(); if (!nm) return; const v = { id: uid("view_"), name: nm, q, fType, fRegion, fTag, fList, fOuvert, sort, dir }; persist((d) => ({ ...d, settings: { ...d.settings, prospectionViews: [...((d.settings && d.settings.prospectionViews) || []), v] } })); };
   const delView = (id) => { appConfirm("Supprimer cette vue enregistrée ?", { title: "Supprimer la vue" }).then((ok) => { if (ok) persist((d) => ({ ...d, settings: { ...d.settings, prospectionViews: ((d.settings && d.settings.prospectionViews) || []).filter((v) => v.id !== id) } })); }); };
   const delList = (id) => { appConfirm("Supprimer cette liste ? (les fiches ne sont pas supprimées)", { title: "Supprimer la liste" }).then((ok) => { if (!ok) return; persist((d) => ({ ...d, prospectLists: (d.prospectLists || []).filter((l) => l.id !== id) })); if (fList === id) setFList("tous"); }); };
   const archivedProspects = prospects.filter((p) => p.archived && !p.accountId);
@@ -9652,8 +9656,8 @@ function Prospection({ data, persist, go }) {
       finally { setBusy(false); }
     });
   };
-  const hasFilter = q || fType !== "tous" || fRegion !== "tous" || fTag !== "tous" || fList !== "tous" || fIncomplete;
-  const clearFilters = () => { setQ(""); setFType("tous"); setFRegion("tous"); setFTag("tous"); setFList("tous"); setFIncomplete(false); };
+  const hasFilter = q || fType !== "tous" || fRegion !== "tous" || fTag !== "tous" || fList !== "tous" || fIncomplete || fOuvert;
+  const clearFilters = () => { setQ(""); setFType("tous"); setFRegion("tous"); setFTag("tous"); setFList("tous"); setFIncomplete(false); setFOuvert(false); };
   // Identité légale officielle (SIRENE / annuaire-entreprises) — gratuit, sans crédit IA.
   const sireneProspect = async () => {
     if (!edit) return;
@@ -9771,6 +9775,14 @@ function Prospection({ data, persist, go }) {
             <optgroup label="Gérer">{hasFilter || sort !== "type" || dir !== "asc" ? <option value="__save">＋ Enregistrer la vue actuelle…</option> : null}{savedViews.map((v) => <option key={"d" + v.id} value={"del:" + v.id}>🗑 Supprimer « {v.name} »</option>)}</optgroup>
           </select>
         </div>
+        {/* Coche « Ouvert », à droite des vues : filtre le listing sur les magasins ouverts à l'instant.
+            La pastille reprend les couleurs du listing, pour qu'on lise le lien sans explication. */}
+        <label title="N'afficher que les magasins ouverts à cette heure. Les fiches sans horaires renseignés sont écartées : leur ouverture est inconnue, pas acquise."
+          style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 12px", borderRadius: 10, border: "1px solid " + (fOuvert ? "#2bb673" : "var(--line)"), background: fOuvert ? "rgba(43,182,115,.12)" : "#fff", color: fOuvert ? "#1f8f5b" : "var(--ink)", fontSize: 13, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
+          <input type="checkbox" checked={fOuvert} onChange={(e) => setFOuvert(e.target.checked)} style={{ width: 15, height: 15, margin: 0, cursor: "pointer" }} />
+          <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#2bb673", display: "inline-block", flexShrink: 0 }} />
+          Ouvert
+        </label>
         {hasFilter && <button className="btn btn-ghost btn-s" onClick={clearFilters}><X size={13} /> Effacer</button>}
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
