@@ -1314,6 +1314,16 @@ function scrubRecord(r) {
   if (String(out.fonction || "").trim() && !nommee("prenom", "nom")) set("fonction", "");
   return out;
 }
+// Vrai si les données STOCKÉES portent encore quelque chose que l'assainissement retire. Sans cette
+// vérification, normalize nettoie l'affichage à chaque chargement mais la valeur fautive reste
+// enregistrée indéfiniment : elle ressort au premier export, à la première restauration, ou sur un
+// appareil resté sur une version antérieure. scrubRecord renvoie l'objet d'origine quand il n'a rien
+// changé : la comparaison de références suffit, et devient fausse dès la première réécriture.
+function donneesAAssainir(d) {
+  if (!d || typeof d !== "object") return false;
+  if (["prospects", "contacts", "accounts", "sites"].some((k) => (d[k] || []).some((r) => scrubRecord(r) !== r))) return true;
+  return (d.prospects || []).some((p) => dirigeantExclu(p) && !p.accountId && p.statut !== "converti");
+}
 // Dirigeants à ne jamais prospecter : leur enseigne achète exclusivement en centrale, une fiche à leur
 // nom est un cul-de-sac qui pollue le listing et le mailing. La règle est PRÉVENTIVE (aucune fiche
 // n'est créée à la recherche ni à l'import) et RÉTROACTIVE (les fiches déjà enregistrées sont retirées).
@@ -12741,7 +12751,17 @@ export default function App() {
       if (supabaseEnabled && supabase) {
         try {
           const { data: row, error } = await supabase.from("cockpit_state").select("data, updated_at").eq("id", "shared").maybeSingle();
-          if (!error && row && row.data) { current = normalize(row.data); lastSyncAt.current = row.updated_at || null; if (!cancelled) { setData(current); try { localStorage.setItem(KEY, JSON.stringify(current)); } catch (e) { } } }
+          if (!error && row && row.data) {
+            const aAssainir = donneesAAssainir(row.data);
+            current = normalize(row.data); lastSyncAt.current = row.updated_at || null;
+            if (!cancelled) { setData(current); try { localStorage.setItem(KEY, JSON.stringify(current)); } catch (e) { } }
+            // La base contient encore des valeurs que l'assainissement retire (fonction sans personne,
+            // marqueur « vide », dirigeant exclu…) : on réécrit la version propre UNE fois. Au chargement
+            // suivant la condition est fausse, donc aucune écriture répétée.
+            if (aAssainir && !cancelled) {
+              try { const ts = new Date().toISOString(); await supabase.from("cockpit_state").upsert({ id: "shared", data: current, updated_at: ts }, { onConflict: "id" }); lastSyncAt.current = ts; } catch (e) { }
+            }
+          }
         } catch (e) { }
       }
       // Sécurité données : on n'injecte les données de secours QUE s'il n'existe
