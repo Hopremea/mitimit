@@ -2998,6 +2998,16 @@ ${ACCENT_CSS}
 .tile{cursor:pointer;background:rgba(255,255,255,.52);-webkit-backdrop-filter:blur(16px) saturate(170%);backdrop-filter:blur(16px) saturate(170%);box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 4px 16px rgba(20,32,58,.06);transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease;}
 .tile:hover{transform:translateY(-3px);box-shadow:0 12px 26px rgba(20,32,58,.14);border-color:#cfdcf3;background:var(--bg);}
 .warntip{position:relative;display:inline-flex;align-items:center;cursor:help;flex-shrink:0;}
+/* Flèches de défilement, en bas à droite. z-index 35 : au-dessus du contenu, mais SOUS la barre de
+   sélection groupée (40) et les fenêtres modales (50), qu'elles ne doivent jamais recouvrir. */
+.scrollarrows{position:fixed;right:16px;bottom:16px;z-index:35;display:flex;flex-direction:column;gap:8px;}
+.scrollarrows button{width:38px;height:38px;display:grid;place-items:center;border-radius:50%;cursor:pointer;color:var(--blue);background:var(--card);border:1px solid var(--line);box-shadow:0 4px 14px rgba(20,32,58,.16);transition:transform .16s cubic-bezier(.2,.8,.2,1),box-shadow .18s ease,opacity .18s ease;}
+.scrollarrows button:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 10px 24px rgba(20,32,58,.24);}
+.scrollarrows button:active:not(:disabled){transform:translateY(0) scale(.94);}
+/* Bout de course : la flèche s'efface sans disparaître, pour que la paire ne saute pas d'un cran. */
+.scrollarrows button:disabled{opacity:.32;cursor:default;box-shadow:none;}
+.pu-root.dark .scrollarrows button{box-shadow:0 4px 14px rgba(0,0,0,.45);}
+@media (max-width: 760px){.scrollarrows{right:10px;bottom:10px;}.scrollarrows button{width:34px;height:34px;}}
 .hoverpop{position:fixed;z-index:9999;background:#fff;color:#3a4358;border:1px solid #e2e7f0;border-radius:12px;padding:10px 12px;font-size:12px;line-height:1.5;text-align:left;box-shadow:0 12px 32px rgba(20,32,58,.26);pointer-events:none;font-family:'Plus Jakarta Sans',system-ui,sans-serif;}
 .warntip-pop{display:block;position:fixed;z-index:9999;background:#fff;color:#3a4358;border:1px solid #f0c36d;border-radius:10px;padding:9px 11px;font-size:11.5px;line-height:1.5;font-weight:500;text-align:left;box-shadow:0 10px 28px rgba(20,32,58,.28);white-space:normal;pointer-events:none;font-family:'Plus Jakarta Sans',system-ui,sans-serif;}
 .tile:active{transform:translateY(-1px);box-shadow:0 6px 14px rgba(20,32,58,.12);}
@@ -11137,6 +11147,41 @@ const NAV_STATE_KEY = "penup_nav";
 function readSavedNav() { try { const o = JSON.parse(localStorage.getItem(NAV_STATE_KEY) || "null"); return o && o.tab && TABS.some((x) => x.id === o.tab) ? { tab: o.tab, focus: o.focus || null } : null; } catch (e) { return null; } }
 const clone = (x) => typeof structuredClone !== "undefined" ? structuredClone(x) : JSON.parse(JSON.stringify(x));
 
+// ============== FLÈCHES DE DÉFILEMENT (haut / bas de page) ==============
+// Les listings de MITMIT (prospects, contacts, documents) tiennent sur plusieurs écrans : revenir en
+// tête après avoir déroulé demandait jusqu'ici un long geste de molette.
+// Le composant est posé HORS de .main : sur un fond à motif, .main force le texte en blanc, et les
+// flèches y deviendraient invisibles sur leur pastille claire.
+function ScrollArrows() {
+  const [pos, setPos] = useState({ scrollable: false, haut: true, bas: false });
+  useEffect(() => {
+    const mesurer = () => {
+      const doc = document.documentElement;
+      const y = window.scrollY || doc.scrollTop || 0;
+      const total = Math.max(doc.scrollHeight, document.body.scrollHeight);
+      const vue = window.innerHeight;
+      // Marge de 4 px : les hauteurs sous-pixel d'un zoom navigateur laissent sinon les deux flèches
+      // actives en permanence, y compris sur une page qui ne défile pas.
+      setPos({ scrollable: total - vue > 4, haut: y <= 4, bas: y + vue >= total - 4 });
+    };
+    mesurer();
+    window.addEventListener("scroll", mesurer, { passive: true });
+    window.addEventListener("resize", mesurer);
+    // Le contenu change de hauteur sans défilement ni redimensionnement (filtre appliqué, fiche
+    // dépliée, recherche terminée) : sans observation, les flèches resteraient dans un état faux.
+    let ro = null;
+    try { ro = new ResizeObserver(mesurer); ro.observe(document.body); } catch (e) {}
+    return () => { window.removeEventListener("scroll", mesurer); window.removeEventListener("resize", mesurer); if (ro) ro.disconnect(); };
+  }, []);
+  if (!pos.scrollable) return null;
+  const doux = (() => { try { return !window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { return true; } })();
+  const aller = (y) => { try { window.scrollTo({ top: y, behavior: doux ? "smooth" : "auto" }); } catch (e) { window.scrollTo(0, y); } };
+  return (<div className="scrollarrows no-print" aria-hidden={false}>
+    <button type="button" onClick={() => aller(0)} disabled={pos.haut} title="Remonter en haut de la page" aria-label="Remonter en haut de la page"><ArrowUp size={17} /></button>
+    <button type="button" onClick={() => aller(Math.max(document.documentElement.scrollHeight, document.body.scrollHeight))} disabled={pos.bas} title="Descendre en bas de la page" aria-label="Descendre en bas de la page"><ArrowDown size={17} /></button>
+  </div>);
+}
+
 // ============== PIPELINE KANBAN (deals par étape) ==============
 function PipelineKanban({ data, persist, go, embedded }) {
   const STAGES_K = [
@@ -13463,6 +13508,7 @@ export default function App() {
       {tab === "conn" && <Connexions key={"conn-" + navKey} data={data} persist={persist} autoBackup={autoBackup} />}
       </div>
     </main>
+    <ScrollArrows />
     {cmdkOpen && <SearchPalette data={data} onClose={() => setCmdkOpen(false)} onPick={(target) => { setCmdkOpen(false); go(target.tab, target.id); }} />}
     {helpOpen && <Modal title="Raccourcis clavier" onClose={() => setHelpOpen(false)} guard={false}>
       {(() => { const Kbd = ({ children }) => <kbd style={{ fontFamily: "inherit", fontSize: 11.5, fontWeight: 700, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 6, padding: "2px 7px", color: "var(--ink)", whiteSpace: "nowrap" }}>{children}</kbd>;
