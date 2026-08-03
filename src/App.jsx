@@ -10924,6 +10924,10 @@ const SAL_PART = 78;                // rémunération apprenti = 78 % du SMIC (b
 // (36ᵉ→43ᵉ h) sont payées +25 %, au-delà (44ᵉ h et plus) +50 %. Le taux HS 25 % = taux de base × 1,25
 // (vérifié : 9,6018 × 1,25 = 12,0023, exactement le taux du bulletin de juin).
 const SAL_MAJ_25 = 1.25, SAL_MAJ_50 = 1.5, SAL_SEUIL_50_MIN = 480; // 8 h/semaine = 480 min à +25 % avant +50 %
+// Taux horaire de base retenu tant qu'aucun n'a été mémorisé dans l'onglet « Salaire estimé ».
+// Constante partagée : l'écran retombait dessus, l'export retombait sur zéro, et l'export affichait
+// donc une paie nulle tant que le bouton « Mémoriser mon taux horaire » n'avait jamais été utilisé.
+const SAL_TAUX_DEFAUT = 9.6018;
 function estimateSalaire({ tauxBase, h25, h50, prime, commission = 0, part = SAL_PART, mutuelle = SAL_MUTUELLE }) {
   const tb = Number(tauxBase) || 0;
   const base = tb * SAL_BASE_HOURS;
@@ -10967,7 +10971,7 @@ function computeCommissionRows(data) {
 // pointage, indemnités kilométriques du mois versées en prime. Tout reste ajustable manuellement.
 function SalaireRH({ data, persist }) {
   const s = data.settings || {};
-  const [tauxBase, setTauxBase] = useState(s.salaireTauxBase != null ? s.salaireTauxBase : 9.6018);
+  const [tauxBase, setTauxBase] = useState(s.salaireTauxBase != null ? s.salaireTauxBase : SAL_TAUX_DEFAUT);
   const part = s.salairePart != null ? s.salairePart : SAL_PART;
   const mutuelle = s.salaireMutuelle != null ? s.salaireMutuelle : SAL_MUTUELLE;
   const monthPrefix = new Date().toISOString().slice(0, 7);
@@ -11172,7 +11176,7 @@ function buildRHNotion(data, monthPrefix) {
   // (les 8 premières à +25 %, au-delà à +50 %) : on suit donc un cumul hebdomadaire pour répartir
   // l'excédent de CHAQUE jour dans la bonne tranche. Sans ce cumul, une journée isolée de 10 h
   // serait majorée comme la première de la semaine, ce qui sous-évalue la fin de semaine.
-  const taux = Number((data.settings || {}).salaireTauxBase) || 0;
+  const taux = Number((data.settings || {}).salaireTauxBase) || SAL_TAUX_DEFAUT;
   const lundiDe = (ds) => { const d = new Date(ds + "T00:00:00"); const mo = new Date(d); mo.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return isoLocal(mo); };
   const cumulSemaine = {};
   L.push("| Date | Jour | Type | Arrivée | Départ | Pause | Heures | Salaire jour | Heures sup. | Heures sup. (€) |");
@@ -11194,7 +11198,7 @@ function buildRHNotion(data, monthPrefix) {
   });
   L.push("| **Total** |  |  |  |  |  | **" + hd(totH) + "** | **" + eur2(totFixe) + "** | **" + hd(totOT) + "** | **" + eur2(totSup) + "** |");
   L.push("");
-  L.push("_Valorisation au taux horaire de base de " + eur2(taux) + " (réglage « Mémoriser mon taux horaire », onglet Salaire estimé). Le salaire du jour rémunère les heures normales ; les heures supplémentaires sont majorées à +25 % pour les huit premières de la semaine, puis à +50 %. Montants bruts, avant cotisations._");
+  L.push("_Valorisation au taux horaire de base de " + eur2(taux) + ((data.settings || {}).salaireTauxBase != null ? " (réglage mémorisé dans l'onglet Salaire estimé)." : " (valeur par défaut : mémorisez votre taux dans l'onglet Salaire estimé pour l'ajuster).") + " Le salaire du jour rémunère les heures normales ; les heures supplémentaires sont majorées à +25 % pour les huit premières de la semaine, puis à +50 %. Montants bruts, avant cotisations._");
   L.push("");
   // Tableau 2 — Trajet domicile-travail (un jour de présence pointé = un aller-retour)
   const s = data.settings || {};
