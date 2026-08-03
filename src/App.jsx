@@ -214,7 +214,11 @@ const STAGES = [
   { id: "rdv", label: "RDV découverte", color: "#7c5cf0" }, { id: "referencement", label: "Client", color: "#FFD212" }, { id: "actif", label: "Client fidèle", color: "#2bb673" },
 ];
 const STAGE_ORDER = ["prospect", "contact", "rdv", "referencement", "actif"];
-const DEAL_STATUS = { brouillon: { label: "Brouillon", color: "#9aa6bd" }, envoye: { label: "Envoyé", color: "#5b8def" }, accepte: { label: "Accepté / Signé", color: "#2bb673" }, expediee: { label: "En cours de livraison", color: "#F8B133" }, refuse: { label: "Refusé", color: "#FF5A45" }, livre: { label: "Livré", color: "#3F60AA" } };
+const DEAL_STATUS = { brouillon: { label: "Brouillon", color: "#9aa6bd" }, envoye: { label: "Envoyé", color: "#5b8def" }, accepte: { label: "Accepté / Signé", color: "#2bb673" }, expediee: { label: "En cours de livraison", color: "#F8B133" }, refuse: { label: "Refusé", color: "#FF5A45" }, livre: { label: "Livré", color: "#3F60AA" }, paye: { label: "Livré et payé", color: "#128C6E" } };
+// « Livré » et « Livré et payé » sont deux fins de course : la marchandise est partie dans les deux
+// cas, seul l'encaissement les sépare. Tout ce qui distingue « en cours » de « terminé » doit donc
+// traiter les deux ensemble, sans quoi un document payé retomberait dans le pipeline ouvert.
+const DEAL_LIVRE = (s) => s === "livre" || s === "paye";
 // Définition métier (appliquée partout) : le « CA HT en attente » = les DEVIS (documents non encore
 // facturés), le « CA HT signé » = les FACTURES. Un devis refusé ou déjà converti ne compte plus en
 // attente ; les avoirs ne comptent pas comme CA signé.
@@ -1284,6 +1288,31 @@ function normalize(d) {
 // Marqueurs de « case sans valeur » produits par les exports de tableur. Comparaison sur la valeur
 // ENTIÈRE du champ, jamais sur une sous-chaîne : une note qui contient le mot « vide » reste intacte.
 const PLACEHOLDER_VALUE = /^(vide|vides|n\/?a|néant|neant|non renseign[ée]|non communiqu[ée]|non d[ée]fini[e]?|inconnu[e]?|aucun[e]?|null|undefined|-{1,3}|—|\.)$/i;
+// Le même marqueur laissé À L'INTÉRIEUR d'un texte : « Téléphone : VIDE », « VIDE, VIDE », une ligne
+// de notes réduite à « VIDE ». La règle ci-dessus ne les voyait pas, faute d'occuper tout le champ.
+// Deux garde-fous, parce qu'ici on touche à du texte rédigé :
+//  · le marqueur doit être EN CAPITALES — un import recopie la cellule telle quelle, tandis que le mot
+//    français d'une note (« rayon vide ») s'écrit en minuscules et doit rester ;
+//  · il doit occuper un SEGMENT ENTIER (entre deux séparateurs ou en fin de ligne), éventuellement
+//    précédé de son étiquette. « VIDE-GRENIER » n'est donc pas un segment marqueur et survit intact.
+const PLACEHOLDER_CAPS = "VIDES?|N\\/?A|N[EÉ]ANT|INCONNUE?S?|NON RENSEIGN[EÉ]E?S?|NON COMMUNIQU[EÉ]E?S?|NON D[EÉ]FINIE?S?|NULL|UNDEFINED";
+const PLACEHOLDER_SEGMENT = new RegExp("(^|[\\n,;·|])[ \\t]*(?:[^:\\n,;·|]{1,40}:[ \\t]*)?(?:" + PLACEHOLDER_CAPS + ")[ \\t]*(?=$|[\\n,;·|])", "g");
+function sansMentionsVides(t) {
+  const s = String(t);
+  if (s.indexOf("VIDE") === -1 && !/N\/?A|N[EÉ]ANT|INCONNU|NON RENSEIGN|NON COMMUNIQU|NON D[EÉ]FINI|NULL|UNDEFINED/.test(s)) return s;
+  const gardees = [];
+  for (const ligne of s.split("\n")) {
+    const net = ligne.replace(PLACEHOLDER_SEGMENT, "$1")
+      // Séparateurs devenus orphelins après la suppression.
+      .replace(/[ \t]*([,;·|])[ \t]*(?=[,;·|])/g, "")
+      .replace(/^[ \t,;·|]+|[ \t,;·|]+$/g, "")
+      .replace(/[ \t]{2,}/g, " ");
+    // Une ligne qui n'était QUE des marqueurs disparaît, au lieu de laisser un blanc au milieu du texte.
+    if (!net && ligne.trim()) continue;
+    gardees.push(net);
+  }
+  return gardees.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
 const EMAIL_FIELDS = ["email", "contactEmail", "contactMail", "emailMagasin"];
 const PHONE_FIELDS = ["telephone", "tel", "mobile", "fixe", "contactTel"];
 // Une adresse sans « @ » n'est pas une adresse ; un téléphone qui n'est pas fait de chiffres n'est pas
@@ -1300,13 +1329,30 @@ function scrubRecord(r) {
     if (!t) { if (v !== t) set(k, ""); return; }
     if (PLACEHOLDER_VALUE.test(t)) { set(k, ""); return; }
     if (EMAIL_FIELDS.includes(k)) { if (t.indexOf("@") === -1) set(k, ""); return; }
+    if (!PHONE_FIELDS.includes(k)) { const net = sansMentionsVides(t); if (net !== t) { set(k, net); return; } }
     if (PHONE_FIELDS.includes(k)) {
       // Chiffres et séparateurs usuels seulement (+ espace . - / parenthèses), et assez de chiffres
       // pour être un numéro : « vide », « à demander » ou « 06 » sont écartés.
       if (!/^\+?[\d\s.\-/()]+$/.test(t) || t.replace(/\D/g, "").length < 6) set(k, "");
     }
   });
+  // Une fonction sans personne n'est pas un interlocuteur : c'est une déduction de la forme juridique
+  // (SARL → « Gérant »), que l'IA et les registres produisent même quand ils n'ont trouvé personne.
+  // Affichée seule, elle fait croire que la fiche a un contact identifié, et elle finit dans les mails.
+  const nommee = (a, b) => Boolean(String(out[a] || "").trim() || String(out[b] || "").trim());
+  if (String(out.contactFonction || "").trim() && !nommee("contactPrenom", "contactNom")) set("contactFonction", "");
+  if (String(out.fonction || "").trim() && !nommee("prenom", "nom")) set("fonction", "");
   return out;
+}
+// Vrai si les données STOCKÉES portent encore quelque chose que l'assainissement retire. Sans cette
+// vérification, normalize nettoie l'affichage à chaque chargement mais la valeur fautive reste
+// enregistrée indéfiniment : elle ressort au premier export, à la première restauration, ou sur un
+// appareil resté sur une version antérieure. scrubRecord renvoie l'objet d'origine quand il n'a rien
+// changé : la comparaison de références suffit, et devient fausse dès la première réécriture.
+function donneesAAssainir(d) {
+  if (!d || typeof d !== "object") return false;
+  if (["prospects", "contacts", "accounts", "sites"].some((k) => (d[k] || []).some((r) => scrubRecord(r) !== r))) return true;
+  return (d.prospects || []).some((p) => dirigeantExclu(p) && !p.accountId && p.statut !== "converti");
 }
 // Dirigeants à ne jamais prospecter : leur enseigne achète exclusivement en centrale, une fiche à leur
 // nom est un cul-de-sac qui pollue le listing et le mailing. La règle est PRÉVENTIVE (aucune fiche
@@ -2914,8 +2960,15 @@ ${ACCENT_CSS}
 .filament{position:fixed;border-radius:3px;pointer-events:none;will-change:transform,opacity;}
 @keyframes filamentFly{0%{opacity:0;transform:translate(-50%,-50%) rotate(0) scaleX(.5);}12%{opacity:1;}100%{opacity:0;transform:translate(calc(-50% + var(--dx)),calc(-50% + var(--dy) + 70px)) rotate(var(--rot)) scaleX(1);}}
 .pu-root.dark .mapwrap{background:linear-gradient(180deg,#10172a,#0c1322);}
-.prospect-flash{animation:prospectFlash 1.6s ease-in-out 0s 6;border-color:var(--orange) !important;}
-@keyframes prospectFlash{0%,100%{box-shadow:0 0 0 0 rgba(248,177,51,0);}50%{box-shadow:0 0 0 4px rgba(248,177,51,.6);}}
+/* Mise en avant des fiches fraîchement trouvées. L'anneau est tracé en « outline » et non en
+   « box-shadow » : .tile définit sa propre ombre dans trois règles et la met en transition, l'anneau
+   s'y perdait. L'outline se peint hors de la bordure, aucune autre règle ne le revendique, et
+   overflow:hidden ne le rogne pas. */
+.card.prospect-flash{animation:prospectFlash 1.25s ease-in-out 0s 6;border-color:var(--orange) !important;position:relative;z-index:2;}
+@keyframes prospectFlash{0%,100%{outline:3px solid rgba(248,177,51,0);outline-offset:2px;}50%{outline:3px solid rgba(248,177,51,.95);outline-offset:5px;}}
+/* Mouvement réduit : l'animation est neutralisée plus bas par la règle générale. Un repère « voici ce
+   qui vient d'être trouvé » ne doit pas dépendre du mouvement — l'anneau reste alors fixe. */
+@media (prefers-reduced-motion: reduce){.card.prospect-flash{outline:3px solid rgba(248,177,51,.95) !important;outline-offset:4px !important;}}
 .sec-h{display:flex;align-items:center;justify-content:space-between;margin:0 0 12px;gap:10px;flex-wrap:wrap;}.sec-h h3{margin:0;font-size:15px;}.sec-h span{color:var(--muted);font-size:12px;}
 .badge{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:20px;}.dot{width:7px;height:7px;border-radius:50%;}
 .tbl{width:100%;border-collapse:collapse;font-size:13px;}
@@ -8391,6 +8444,9 @@ function enrichProspectAppliquer(p, out, text) {
   take("telephone", (o.telephone || "").trim()); take("email", (o.email || "").trim());
   take("contactPrenom", (c.prenom || "").trim()); take("contactNom", (c.nom || "").trim()); take("contactFonction", (c.fonction || "").trim()); take("contactEmail", (c.email || "").trim()); take("contactTel", (c.telephone || "").trim()); take("contactSource", (c.source || "").trim());
   take("notes", (o.notes || "").trim());
+  // Une fonction sans personne se déduit de la forme juridique (SARL → « Gérant ») : ce n'est pas un
+  // interlocuteur trouvé. On ne l'annonce donc pas dans le récapitulatif d'enrichissement.
+  if (!has(out.contactPrenom) && !has(out.contactNom)) out.contactFonction = "";
   if (o.confiance) out.confiance = out.confiance === "haute" ? "haute" : o.confiance;
   if (o.source) out.source = out.source ? out.source + " + " + String(o.source).trim() : String(o.source).trim();
   // Le code postal a pu arriver via l'IA : re-déduire département / région localement si besoin.
@@ -10616,7 +10672,7 @@ function dealAutomationEvents(prev, next, accounts) {
   const out = []; const was = prev ? prev.statut : null;
   const acc = (accounts || []).find((a) => a.id === next.accountId); const ens = acc ? acc.enseigne : "";
   const mk = (autoKey, days, titre) => ({ id: "ev_auto_" + autoKey.replace(/[^a-z0-9]/gi, "_"), date: isoLocal(new Date(Date.now() + days * 86400000)), heure: "", titre, notes: "Relance planifiée automatiquement par MITMIT.", type: "relance", color: EVENT_TYPES.relance.color, accountId: next.accountId || "", siteId: next.livraisonSiteId || next.siteId || "", contactId: "", dealId: next.id, auto: autoKey });
-  if (next.type === "Facture" && next.statut === "livre" && was !== "livre") out.push(mk("reassort:" + next.id, 45, "Relance réassort — " + (ens || next.ref || "client")));
+  if (next.type === "Facture" && DEAL_LIVRE(next.statut) && !DEAL_LIVRE(was)) out.push(mk("reassort:" + next.id, 45, "Relance réassort — " + (ens || next.ref || "client")));
   if (next.type === "Devis" && next.statut === "envoye" && was !== "envoye") out.push(mk("relancedevis:" + next.id, 7, "Relancer le devis " + (next.ref || "") + (ens ? " · " + ens : "")));
   return out;
 }
@@ -10808,6 +10864,7 @@ function PipelineKanban({ data, persist, go, embedded }) {
     { id: "accepte", label: "Accepté", color: "#2bb673" },
     { id: "expediee", label: "En cours de livraison", color: "#F8B133" },
     { id: "livre", label: "Livré", color: "#3F60AA" },
+    { id: "paye", label: "Livré et payé", color: "#128C6E" },
     { id: "refuse", label: "Refusé", color: "#FF5A45" },
   ];
   const accOf = (id) => data.accounts.find((a) => a.id === id);
@@ -12073,7 +12130,7 @@ function SearchPalette({ data, onClose, onPick }) {
 function assistantAnswer(qRaw, data) {
   const q = normStr(qRaw || "");
   const has = (...ws) => ws.some((w) => q.includes(normStr(w)));
-  const openDeals = data.deals.filter((d) => d.statut !== "livre" && d.statut !== "refuse");
+  const openDeals = data.deals.filter((d) => !DEAL_LIVRE(d.statut) && d.statut !== "refuse");
   if (!q.trim()) return { text: "Posez-moi une question sur vos groupes et établissements, votre pipeline, votre stock ou l'agenda." };
   // Aide / capacités
   if (has("aide", "help", "que sais-tu", "que peux-tu", "capacite", "comment ca marche", "?aide")) {
@@ -12096,7 +12153,7 @@ function assistantAnswer(qRaw, data) {
   }
   // CA signé
   if (has("ca ", "chiffre", "signe", "signé", "vendu", "facture accepte")) {
-    const ca = data.deals.filter((d) => d.statut === "accepte" || d.statut === "livre").reduce((s, d) => s + d.montant, 0);
+    const ca = data.deals.filter((d) => d.statut === "accepte" || DEAL_LIVRE(d.statut)).reduce((s, d) => s + d.montant, 0);
     return { text: `Chiffre d'affaires signé (devis acceptés + livrés) : ${eur(ca)}.`, actions: [{ label: "Voir les documents", tab: "deals" }] };
   }
   // Stock / ruptures
@@ -12725,7 +12782,17 @@ export default function App() {
       if (supabaseEnabled && supabase) {
         try {
           const { data: row, error } = await supabase.from("cockpit_state").select("data, updated_at").eq("id", "shared").maybeSingle();
-          if (!error && row && row.data) { current = normalize(row.data); lastSyncAt.current = row.updated_at || null; if (!cancelled) { setData(current); try { localStorage.setItem(KEY, JSON.stringify(current)); } catch (e) { } } }
+          if (!error && row && row.data) {
+            const aAssainir = donneesAAssainir(row.data);
+            current = normalize(row.data); lastSyncAt.current = row.updated_at || null;
+            if (!cancelled) { setData(current); try { localStorage.setItem(KEY, JSON.stringify(current)); } catch (e) { } }
+            // La base contient encore des valeurs que l'assainissement retire (fonction sans personne,
+            // marqueur « vide », dirigeant exclu…) : on réécrit la version propre UNE fois. Au chargement
+            // suivant la condition est fausse, donc aucune écriture répétée.
+            if (aAssainir && !cancelled) {
+              try { const ts = new Date().toISOString(); await supabase.from("cockpit_state").upsert({ id: "shared", data: current, updated_at: ts }, { onConflict: "id" }); lastSyncAt.current = ts; } catch (e) { }
+            }
+          }
         } catch (e) { }
       }
       // Sécurité données : on n'injecte les données de secours QUE s'il n'existe
@@ -13017,7 +13084,7 @@ export default function App() {
     const prestoAl = data.deals.filter((d) => d.type === "Devis" && d.statut === "accepte" && !d.converti).length + data.deals.filter((d) => d.type === "Commande" && d.prestoStatus === "a_transmettre").length;
     const todayStr = new Date().toISOString().slice(0, 10);
     const agendaAl = data.accounts.filter((a) => a.dateAction && a.dateAction <= todayStr).length;
-    return { accounts: data.accounts.length, repertoire: data.contacts.length, prospection: data.prospects.filter((p) => p.statut === "a_contacter").length, deals: data.deals.length, pipeline: data.deals.filter((d) => d.statut !== "livre" && d.statut !== "refuse").length, agenda: agendaAl, stock: stockAl, reassort: reAl, sav: savAl, presto: prestoAl };
+    return { accounts: data.accounts.length, repertoire: data.contacts.length, prospection: data.prospects.filter((p) => p.statut === "a_contacter").length, deals: data.deals.length, pipeline: data.deals.filter((d) => !DEAL_LIVRE(d.statut) && d.statut !== "refuse").length, agenda: agendaAl, stock: stockAl, reassort: reAl, sav: savAl, presto: prestoAl };
   }, [data]);
   const meta = TABS.find((t) => t.id === tab);
   return (<div className={cx("pu-root", navOpen && "nav-open", theme === "dark" && "dark", "color-" + bgColor, "pat-" + bgPattern, "acc-" + accent)}><style>{CSS}</style><ConfirmHost /><ClaudeBatchWatcher batch={data.claudeBatch} persist={persist} /><ClaudeSpendAlert usage={data.claudeUsage} onAck={(palier) => persist((p2) => ({ ...p2, claudeUsage: { ...(p2.claudeUsage || {}), alerte: { date: TODAY(), palier } } }))} /><FilamentConfetti />
