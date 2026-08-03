@@ -11168,17 +11168,33 @@ function buildRHNotion(data, monthPrefix) {
   // Tableau 1 — Heures pointées
   L.push("### Heures pointées" + (monthPrefix ? (" — " + new Date(monthPrefix + "-01T00:00:00").toLocaleDateString("fr-FR", { month: "long", year: "numeric" })) : " — tout l'historique"));
   L.push("");
-  L.push("| Date | Jour | Type | Arrivée | Départ | Pause | Heures | Heures sup. |");
-  L.push("| --- | --- | --- | --- | --- | --- | --- | --- |");
-  let totH = 0, totOT = 0;
+  // Valorisation jour après jour. La majoration des heures supplémentaires se compte par SEMAINE
+  // (les 8 premières à +25 %, au-delà à +50 %) : on suit donc un cumul hebdomadaire pour répartir
+  // l'excédent de CHAQUE jour dans la bonne tranche. Sans ce cumul, une journée isolée de 10 h
+  // serait majorée comme la première de la semaine, ce qui sous-évalue la fin de semaine.
+  const taux = Number((data.settings || {}).salaireTauxBase) || 0;
+  const lundiDe = (ds) => { const d = new Date(ds + "T00:00:00"); const mo = new Date(d); mo.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return isoLocal(mo); };
+  const cumulSemaine = {};
+  L.push("| Date | Jour | Type | Arrivée | Départ | Pause | Heures | Salaire jour | Heures sup. | Heures sup. (€) |");
+  L.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+  let totH = 0, totOT = 0, totFixe = 0, totSup = 0;
   pgs.forEach(([ds, rec]) => {
     const st = presenceDay(rec); if (!st || st.invalid) return;
     const mot = st.motif && st.motif !== "presence" ? PRESENCE_MOTIFS[st.motif] : null;
     const ot = otMinutes(ds, st);
-    totH += st.worked; totOT += ot;
-    L.push("| " + [dateFr(ds), jour(ds), cell(mot ? mot.label : "Présence"), mot ? "" : (st.arrivee || ""), mot ? "" : (st.depart || ""), mot ? "" : ((st.pause || 0) + " min"), hd(st.worked), hd(ot)].join(" | ") + " |");
+    // Le fixe du jour rémunère les heures NORMALES : tout ce qui n'est pas supplémentaire.
+    const fixe = ((st.worked - ot) / 60) * taux;
+    const k = lundiDe(ds); const dejaSemaine = cumulSemaine[k] || 0;
+    const min25 = Math.max(0, Math.min(ot, SAL_SEUIL_50_MIN - dejaSemaine));
+    const min50 = ot - min25;
+    cumulSemaine[k] = dejaSemaine + ot;
+    const sup = ((min25 / 60) * taux * SAL_MAJ_25) + ((min50 / 60) * taux * SAL_MAJ_50);
+    totH += st.worked; totOT += ot; totFixe += fixe; totSup += sup;
+    L.push("| " + [dateFr(ds), jour(ds), cell(mot ? mot.label : "Présence"), mot ? "" : (st.arrivee || ""), mot ? "" : (st.depart || ""), mot ? "" : ((st.pause || 0) + " min"), hd(st.worked), eur2(fixe), hd(ot), eur2(sup)].join(" | ") + " |");
   });
-  L.push("| **Total** |  |  |  |  |  | **" + hd(totH) + "** | **" + hd(totOT) + "** |");
+  L.push("| **Total** |  |  |  |  |  | **" + hd(totH) + "** | **" + eur2(totFixe) + "** | **" + hd(totOT) + "** | **" + eur2(totSup) + "** |");
+  L.push("");
+  L.push("_Valorisation au taux horaire de base de " + eur2(taux) + " (réglage « Mémoriser mon taux horaire », onglet Salaire estimé). Le salaire du jour rémunère les heures normales ; les heures supplémentaires sont majorées à +25 % pour les huit premières de la semaine, puis à +50 %. Montants bruts, avant cotisations._");
   L.push("");
   // Tableau 2 — Trajet domicile-travail (un jour de présence pointé = un aller-retour)
   const s = data.settings || {};
