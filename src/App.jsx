@@ -1275,6 +1275,10 @@ function normalize(d) {
   d.contacts = (d.contacts || []).map(scrubRecord);
   d.accounts = (d.accounts || []).map(scrubRecord);
   d.sites = (d.sites || []).map(scrubRecord);
+  // Dirigeants exclus de la prospection : la règle s'applique en continu (pas de drapeau de migration)
+  // pour que ces fiches ne puissent revenir par aucun chemin — import, recherche, synchronisation.
+  // Un prospect déjà converti en compte n'est plus un prospect : on ne touche pas à son historique.
+  d.prospects = d.prospects.filter((p) => !dirigeantExclu(p) || p.accountId || p.statut === "converti");
   return d;
 }
 // Marqueurs de « case sans valeur » produits par les exports de tableur. Comparaison sur la valeur
@@ -1303,6 +1307,20 @@ function scrubRecord(r) {
     }
   });
   return out;
+}
+// Dirigeants à ne jamais prospecter : leur enseigne achète exclusivement en centrale, une fiche à leur
+// nom est un cul-de-sac qui pollue le listing et le mailing. La règle est PRÉVENTIVE (aucune fiche
+// n'est créée à la recherche ni à l'import) et RÉTROACTIVE (les fiches déjà enregistrées sont retirées).
+const DIRIGEANTS_EXCLUS = ["philippe gueydon"];
+// Les registres renvoient tantôt « prénom nom », tantôt « nom prénom », et une colonne « dirigeant »
+// d'un fichier importé porte souvent le nom complet dans le seul champ « nom » : on compare les trois.
+function dirigeantExclu(r) {
+  if (!r) return false;
+  const norm = (s) => stripAccentsLow(String(s || "")).replace(/[^a-z]+/g, " ").trim();
+  const prenom = norm(r.contactPrenom), nom = norm(r.contactNom);
+  if (!prenom && !nom) return false;
+  const formes = [nom, [prenom, nom].filter(Boolean).join(" "), [nom, prenom].filter(Boolean).join(" ")];
+  return DIRIGEANTS_EXCLUS.some((d) => formes.includes(d));
 }
 
 const eur = (n) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(Number(n) || 0);
@@ -7725,7 +7743,10 @@ async function lookupSirene(query, villeHint) {
   const j = await res.json();
   const r = (j.results || [])[0]; if (!r) return null;
   const siege = r.siege || {};
-  const dir = (r.dirigeants || []).find((d) => d.type_dirigeant === "personne physique") || null;
+  // Le dirigeant sert à renseigner l'interlocuteur d'une fiche existante. Un dirigeant exclu de la
+  // prospection n'est donc jamais inscrit : la fiche reste, simplement sans nom de contact.
+  const dir = (r.dirigeants || []).find((d) => d.type_dirigeant === "personne physique"
+    && !dirigeantExclu({ contactPrenom: (d.prenoms || "").split(/\s+/)[0] || "", contactNom: d.nom || "" })) || null;
   const nb = r.nombre_etablissements || 0;
   const mono = nb === 1; // société mono-établissement → le siège EST l'établissement (adresse/SIRET fiables)
   // Société MULTI-établissements : l'API renvoie les établissements correspondant à la requête
@@ -8497,10 +8518,13 @@ function createDraftsWithDedup(drafts, data) {
   (data.accounts || []).forEach((a) => addKeys({ nom: a.enseigne, enseigne: a.enseigne, ville: a.ville, cp: a.cp, adresse: a.adressePostale || a.adresse, siren: a.siren, siret: a.siret, telephone: a.telephone }));
   (data.sites || []).forEach((s) => addKeys({ nom: s.label, enseigne: s.label, ville: s.ville, adresse: s.adresse, siret: s.siret }));
   const seen = new Set((data.prospects || []).map((p) => norm(p.nom || p.enseigne) + "|" + norm(p.ville)));
-  const created = []; let skipped = 0; const sieges = [];
+  const created = []; let skipped = 0; const sieges = []; const exclus = [];
   (drafts || []).forEach((d) => {
     const nameKey = norm(d.nom || d.enseigne) + "|" + norm(d.ville);
     if ((d.nom || d.enseigne) && seen.has(nameKey)) { skipped++; return; }
+    // Dirigeant exclu de la prospection : on refuse la ligne plutôt que d'effacer le nom, sans quoi la
+    // fiche serait créée quand même et il faudrait la trier à la main à chaque import.
+    if (dirigeantExclu(d)) { exclus.push(d.nom || d.enseigne || "(sans nom)"); seen.add(nameKey); return; }
     const g = ligneEstUnSiege(d, groupes);
     if (g) { sieges.push({ nom: d.nom || d.enseigne || "(sans nom)", groupe: g.label }); seen.add(nameKey); return; }
     const dKeys = identityKeys({ nom: d.nom, enseigne: d.enseigne, ville: d.ville, cp: d.cp, adresse: d.adresse, telephone: d.telephone, email: d.email, siret: d.siret, siren: d.siren });
@@ -8508,7 +8532,7 @@ function createDraftsWithDedup(drafts, data) {
     seen.add(nameKey); dKeys.forEach((k) => existingKeys.add(k)); // évite aussi les doublons internes au lot
     created.push({ id: uid("p_"), nom: d.nom || "", enseigne: d.enseigne || "", type: PROSPECT_TYPES[d.type] ? d.type : "autre", format: d.format || "", adresse: d.adresse || "", ville: d.ville || "", cp: d.cp || "", departement: d.departement || "", region: d.region || "", telephone: d.telephone || "", site: d.site || "", email: d.email || "", statut: PROSPECT_STATUT[d.statut] ? d.statut : "a_qualifier", potentiel: POTENTIEL_META[d.potentiel] ? d.potentiel : "", notes: d.notes || "", source: "Import", accountId: null, createdAt: TODAY(), siren: d.siren || "", siret: d.siret || "", raisonSociale: d.raisonSociale || "", formeJuridique: d.formeJuridique || "", contactPrenom: d.contactPrenom || "", contactNom: d.contactNom || "", contactFonction: d.contactFonction || "", contactEmail: d.contactEmail || "", contactTel: d.contactTel || "", contactSource: "", facebook: d.facebook || "", instagram: d.instagram || "", archived: false, archiveReason: "", archiveDate: "", archiveNote: "" });
   });
-  return { created, skipped, sieges };
+  return { created, skipped, sieges, exclus };
 }
 function ProspectImportModal({ onClose, onImport }) {
   // La recherche web IA post-import est OPT-IN (décochée par défaut) : c'est le poste de dépense n°1
@@ -8562,7 +8586,9 @@ function applyProspectEnrich(x, r) {
   if (r.site && estPageMagasin(r.site) && String(x.site || "").trim() && !estPageMagasin(x.site)) patch.site = r.site;
   setIf("siren", r.siren); setIf("siret", r.siret); setIf("raisonSociale", r.raisonSociale); setIf("formeJuridique", r.formeJuridique);
   setIf("adresse", r.adresse); setIf("cp", r.cp); setIf("ville", r.ville); setIf("departement", r.departement); setIf("region", r.region);
-  setIf("contactPrenom", r.contactPrenom); setIf("contactNom", r.contactNom); setIf("contactFonction", r.contactFonction);
+  // Un dirigeant exclu de la prospection n'est jamais inscrit sur une fiche : sinon l'enrichissement
+  // ferait disparaître la fiche à l'enregistrement suivant, sans que rien ne l'explique à l'écran.
+  if (!dirigeantExclu(r)) { setIf("contactPrenom", r.contactPrenom); setIf("contactNom", r.contactNom); setIf("contactFonction", r.contactFonction); }
   if (r.contactSource && !String(x.contactSource || "").trim()) patch.contactSource = r.contactSource;
   setIf("notes", r.notes);
   return Object.keys(patch).length ? { ...x, ...patch } : x;
@@ -8714,16 +8740,17 @@ function Prospection({ data, persist, go }) {
   // vente existant (clés d'identité : SIRET, adresse, SIREN+ville, cœur de rue, nom+localité…). Le libellé
   // d'un site (« King Jouet Cahors ») est traité comme le nom de sa fiche établissement.
   const doImport = (drafts, enrich) => {
-    const { created, skipped, sieges } = createDraftsWithDedup(drafts, data);
+    const { created, skipped, sieges, exclus } = createDraftsWithDedup(drafts, data);
     setImportOpen(false);
     const dup = skipped ? " " + skipped + " doublon(s) écarté(s) (prospect ou établissement déjà enregistré)." : "";
+    const ex = (exclus && exclus.length) ? " " + exclus.length + " ligne(s) refusée(s) : dirigeant exclu de la prospection." : "";
     // Lignes portant l'identité d'une centrale déjà suivie : on nomme les groupes concernés, sans quoi
     // le rejet paraîtrait arbitraire et la ligne serait réimportée telle quelle au fichier suivant.
     const sg = (sieges && sieges.length) ? " " + sieges.length + " ligne(s) refusée(s) : identité du siège d'un groupe déjà enregistré (" + [...new Set(sieges.map((x) => x.groupe))].slice(0, 4).join(", ") + ")." : "";
-    if (!created.length) { setEnrichMsg({ ok: false, t: "Aucun nouveau prospect importé." + dup + sg }); return; }
+    if (!created.length) { setEnrichMsg({ ok: false, t: "Aucun nouveau prospect importé." + dup + sg + ex }); return; }
     persist((d) => ({ ...d, prospects: [...created, ...(d.prospects || [])] }));
     setFlashIds(new Set(created.map((c) => c.id)));
-    setEnrichMsg({ ok: true, t: created.length + " prospect(s) importé(s)." + dup + sg + (enrich ? " Recherche web IA lancée en tâche de fond…" : "") });
+    setEnrichMsg({ ok: true, t: created.length + " prospect(s) importé(s)." + dup + sg + ex + (enrich ? " Recherche web IA lancée en tâche de fond…" : "") });
     if (enrich) enrichCreated(created);
   };
   // Mise à jour de fiches existantes depuis un fichier : chaque ligne est reliée à UNE fiche prospect
@@ -8843,7 +8870,12 @@ function Prospection({ data, persist, go }) {
   const groupKeys = gd.order ? gd.order.slice() : Array.from(new Set(list.map(gd.get))).sort((a, b) => String(a).localeCompare(String(b), "fr"));
   let groups = groupKeys.map((k) => ({ key: k, items: list.filter((p) => gd.get(p) === k).sort((a, b) => (a.ville || "").localeCompare(b.ville || "") || (a.nom || "").localeCompare(b.nom || "")) })).filter((g) => g.items.length);
   if (dir === "desc") groups = groups.slice().reverse().map((g) => ({ ...g, items: g.items.slice().reverse() }));
-  const save = (p) => { persist((d) => ({ ...d, prospects: d.prospects.some((x) => x.id === p.id) ? d.prospects.map((x) => x.id === p.id ? p : x) : [p, ...d.prospects] })); setEdit(null); };
+  const save = (p) => {
+    // Saisie manuelle d'un dirigeant exclu : on refuse à l'écran plutôt que de laisser la fiche
+    // disparaître silencieusement au chargement suivant, où plus rien n'expliquerait sa disparition.
+    if (dirigeantExclu(p)) { setPfMsg({ ok: false, t: "Fiche non enregistrée : " + [p.contactPrenom, p.contactNom].filter(Boolean).join(" ") + " est exclu de la prospection (achats en centrale)." }); return; }
+    persist((d) => ({ ...d, prospects: d.prospects.some((x) => x.id === p.id) ? d.prospects.map((x) => x.id === p.id ? p : x) : [p, ...d.prospects] })); setEdit(null);
+  };
   const del = (id) => { persist((d) => ({ ...d, prospects: d.prospects.filter((x) => x.id !== id) })); setEdit(null); };
   // Un prospect non converti ne porte pas d'agenda propre ; converti, il pointe un établissement qui,
   // lui, reste actif et garde donc ses rendez-vous. On ne retire ici que les événements qui référencent
@@ -9121,13 +9153,14 @@ function Prospection({ data, persist, go }) {
           // Dédoublonnage sur les mêmes clés que le reste de l'application : on ne recrée jamais une
           // fiche déjà présente (prospect, établissement ou groupe).
           const drafts = lignes.map((l) => ({ ...l, statut: "a_qualifier", potentiel: "", source: "Registre officiel · " + TODAY(), accountId: null, createdAt: TODAY() }));
-          const { created, skipped, sieges } = createDraftsWithDedup(drafts, data);
+          const { created, skipped, sieges, exclus } = createDraftsWithDedup(drafts, data);
           if (created.length) {
             persist((d) => ({ ...d, prospects: [...created, ...(d.prospects || [])] }));
             setQ(""); setFType("tous"); setFRegion("tous"); setFlashIds(new Set(created.map((c) => c.id)));
           }
           const dup = (skipped ? " " + skipped + " doublon(s) écarté(s)." : "")
-            + ((sieges && sieges.length) ? " " + sieges.length + " ligne(s) refusée(s) : identité du siège d'un groupe déjà enregistré." : "");
+            + ((sieges && sieges.length) ? " " + sieges.length + " ligne(s) refusée(s) : identité du siège d'un groupe déjà enregistré." : "")
+            + ((exclus && exclus.length) ? " " + exclus.length + " résultat(s) refusé(s) : dirigeant exclu de la prospection." : "");
           setAiMsg(created.length
             ? created.length + " " + libelle + " ajouté(s) au listing, sans aucune dépense." + dup + " À vérifier avant action."
             : ("Aucun nouveau résultat pour cette zone." + dup));
@@ -9148,11 +9181,15 @@ function Prospection({ data, persist, go }) {
         if (osmAdd.length >= 6) { setQ(""); setFType("tous"); setFRegion("tous"); setFlashIds(new Set(osmAdd.map((a) => a.id))); setAiMsg(osmAdd.length + " prospect(s) ajouté(s) depuis OpenStreetMap — gratuitement, sans crédit IA. Statut « À qualifier », à vérifier."); return; }
         const { stores: arr, usage } = await aiSearchStores(z, kind);
         const seen = new Set(data.prospects.concat(osmAdd).map((p) => ((p.nom || "") + "|" + (p.ville || "")).toLowerCase())); const today = TODAY(); const add = [];
+        let refusesDir = 0;
         arr.forEach((r) => { const nom = (r.nom || r.enseigne || "").trim(); if (!nom) return; const key = (nom + "|" + (r.ville || "")).toLowerCase(); if (seen.has(key)) return; seen.add(key); const ct = r.contact || {};
+          // Dirigeant exclu de la prospection : le résultat est jeté, pas rangé dans le listing.
+          if (dirigeantExclu({ contactPrenom: ct.prenom, contactNom: ct.nom })) { refusesDir++; return; }
           add.push({ id: "p_" + Date.now() + "_" + add.length, nom, enseigne: r.enseigne || "", type: ["cooperative", "chaine", "franchise", "independant", "specialiste", "gss", "autre"].includes(r.type) ? r.type : "autre", format: "", adresse: r.adresse || "", ville: r.ville || "", cp: r.cp || "", departement: r.departement || "", region: r.region || "", telephone: r.telephone || "", site: r.site || "", email: r.email || "", statut: "a_qualifier", potentiel: "", notes: r.notes || "", source: "Recherche IA · " + today, accountId: null, createdAt: today, siren: r.siren || "", siret: r.siret || "", raisonSociale: r.raisonSociale || "", formeJuridique: r.formeJuridique || "", contactPrenom: ct.prenom || "", contactNom: ct.nom || "", contactFonction: ct.fonction || "", contactEmail: ct.email || "", contactTel: ct.telephone || "", contactSource: ct.source || "" }); });
         persist((d) => ({ ...d, prospects: add.length ? [...add, ...d.prospects] : d.prospects, claudeUsage: addUsage(d.claudeUsage, usage) }));
         if (add.length) { setQ(""); setFType("tous"); setFRegion("tous"); setFlashIds(new Set(add.map((a) => a.id))); }
-        setAiMsg(add.length ? add.length + " prospect(s) ajouté(s) au listing, statut « À qualifier ». À vérifier avant action." : "Aucun nouveau prospect (déjà présents ou aucun résultat exploitable).");
+        const exDir = refusesDir ? " " + refusesDir + " résultat(s) refusé(s) : dirigeant exclu de la prospection." : "";
+        setAiMsg((add.length ? add.length + " prospect(s) ajouté(s) au listing, statut « À qualifier ». À vérifier avant action." : "Aucun nouveau prospect (déjà présents ou aucun résultat exploitable).") + exDir);
       } catch (e) { const m = String((e && e.message) || e); const slow = /50[24]|delai|timeout|aborted|abort/i.test(m); setAiErr(slow ? "La recherche IA a mis trop de temps à répondre (elle interroge le web et les registres officiels en direct). Réessaie, ou précise une zone plus petite / un établissement précis pour accélérer." : ("Recherche IA momentanément indisponible (" + m + "). Réessaie dans un instant.")); }
       finally { setBusy(false); }
     });
