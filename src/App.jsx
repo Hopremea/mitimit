@@ -3000,14 +3000,20 @@ ${ACCENT_CSS}
 .warntip{position:relative;display:inline-flex;align-items:center;cursor:help;flex-shrink:0;}
 /* Flèches de défilement, en bas à droite. z-index 35 : au-dessus du contenu, mais SOUS la barre de
    sélection groupée (40) et les fenêtres modales (50), qu'elles ne doivent jamais recouvrir. */
-.scrollarrows{position:fixed;right:16px;bottom:16px;z-index:35;display:flex;flex-direction:column;gap:8px;}
+/* Empilées AU-DESSUS de l'assistant Dood & Bloop, pas à côté : ce bouton est fixé en bas à droite
+   (22 px des bords, 58 px de côté) et les flèches se posaient dessus. Elles sont centrées sur son axe
+   — 22 + 58/2 = 51 px du bord droit — pour former une colonne de commandes plutôt qu'un amas.
+   La barre de sélection groupée, centrée en bas, ne les croise plus non plus. */
+.scrollarrows{position:fixed;right:32px;bottom:92px;z-index:35;display:flex;flex-direction:column;gap:8px;}
 .scrollarrows button{width:38px;height:38px;display:grid;place-items:center;border-radius:50%;cursor:pointer;color:var(--blue);background:var(--card);border:1px solid var(--line);box-shadow:0 4px 14px rgba(20,32,58,.16);transition:transform .16s cubic-bezier(.2,.8,.2,1),box-shadow .18s ease,opacity .18s ease;}
 .scrollarrows button:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 10px 24px rgba(20,32,58,.24);}
 .scrollarrows button:active:not(:disabled){transform:translateY(0) scale(.94);}
 /* Bout de course : la flèche s'efface sans disparaître, pour que la paire ne saute pas d'un cran. */
 .scrollarrows button:disabled{opacity:.32;cursor:default;box-shadow:none;}
 .pu-root.dark .scrollarrows button{box-shadow:0 4px 14px rgba(0,0,0,.45);}
-@media (max-width: 760px){.scrollarrows{right:10px;bottom:10px;}.scrollarrows button{width:34px;height:34px;}}
+/* L'assistant garde la même taille et la même position sur mobile : les flèches restent alignées sur
+   son axe, seule leur taille diminue (51 − 34/2 = 34 px du bord droit). */
+@media (max-width: 760px){.scrollarrows{right:34px;}.scrollarrows button{width:34px;height:34px;}}
 .hoverpop{position:fixed;z-index:9999;background:#fff;color:#3a4358;border:1px solid #e2e7f0;border-radius:12px;padding:10px 12px;font-size:12px;line-height:1.5;text-align:left;box-shadow:0 12px 32px rgba(20,32,58,.26);pointer-events:none;font-family:'Plus Jakarta Sans',system-ui,sans-serif;}
 .warntip-pop{display:block;position:fixed;z-index:9999;background:#fff;color:#3a4358;border:1px solid #f0c36d;border-radius:10px;padding:9px 11px;font-size:11.5px;line-height:1.5;font-weight:500;text-align:left;box-shadow:0 10px 28px rgba(20,32,58,.28);white-space:normal;pointer-events:none;font-family:'Plus Jakarta Sans',system-ui,sans-serif;}
 .tile:active{transform:translateY(-1px);box-shadow:0 6px 14px rgba(20,32,58,.12);}
