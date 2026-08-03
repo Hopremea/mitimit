@@ -2976,7 +2976,7 @@ ${ACCENT_CSS}
    « box-shadow » : .tile définit sa propre ombre dans trois règles et la met en transition, l'anneau
    s'y perdait. L'outline se peint hors de la bordure, aucune autre règle ne le revendique, et
    overflow:hidden ne le rogne pas. */
-.card.prospect-flash{animation:prospectFlash 1.25s ease-in-out 0s 6;border-color:var(--orange) !important;position:relative;z-index:2;}
+.card.prospect-flash{animation:prospectFlash 1.25s ease-in-out 0s infinite;border-color:var(--orange) !important;position:relative;z-index:2;}
 @keyframes prospectFlash{0%,100%{outline:3px solid rgba(248,177,51,0);outline-offset:2px;}50%{outline:3px solid rgba(248,177,51,.95);outline-offset:5px;}}
 /* Mouvement réduit : l'animation est neutralisée plus bas par la règle générale. Un repère « voici ce
    qui vient d'être trouvé » ne doit pas dépendre du mouvement — l'anneau reste alors fixe. */
@@ -7102,6 +7102,14 @@ overlay.addEventListener("click", function(e){ if(e.target===overlay) overlay.cl
 }
 // Identifiants Shopify : stockés LOCALEMENT (par appareil), jamais dans le blob synchronisé sur
 // Supabase — le jeton Admin est un secret. Le serveur (variables Vercel) reste prioritaire.
+// Fiches prospect signalées comme « fraîchement trouvées ». Marqueur d'AFFICHAGE, propre à l'appareil :
+// il n'a rien à faire dans la base partagée, où il ferait clignoter les fiches sur l'écran de l'autre
+// utilisateur. Stocké hors de la base pour survivre aux rechargements, jusqu'au « Mettre à jour ».
+const FLASH_LOCAL_KEY = "penup_prospects_flash";
+const flashLocalGet = () => { try { const a = JSON.parse(localStorage.getItem(FLASH_LOCAL_KEY) || "[]"); return new Set(Array.isArray(a) ? a : []); } catch (e) { return new Set(); } };
+const flashLocalSet = (ids) => { try { const a = [...(ids || [])]; if (a.length) localStorage.setItem(FLASH_LOCAL_KEY, JSON.stringify(a)); else localStorage.removeItem(FLASH_LOCAL_KEY); } catch (e) {} };
+const flashLocalClear = () => { try { localStorage.removeItem(FLASH_LOCAL_KEY); } catch (e) {} };
+
 const SHOPIFY_LOCAL_KEY = "penup_shopify_creds";
 const shopifyLocalGet = () => { try { return JSON.parse(localStorage.getItem(SHOPIFY_LOCAL_KEY) || "{}"); } catch (e) { return {}; } };
 const shopifyLocalSet = (d) => { try { localStorage.setItem(SHOPIFY_LOCAL_KEY, JSON.stringify(d || {})); } catch (e) {} };
@@ -9077,7 +9085,7 @@ function Prospection({ data, persist, go }) {
     const sg = (sieges && sieges.length) ? " " + sieges.length + " ligne(s) refusée(s) : identité du siège d'un groupe déjà enregistré (" + [...new Set(sieges.map((x) => x.groupe))].slice(0, 4).join(", ") + ")." : "";
     if (!created.length) { setEnrichMsg({ ok: false, t: "Aucun nouveau prospect importé." + dup + sg + ex }); return; }
     persist((d) => ({ ...d, prospects: [...created, ...(d.prospects || [])] }));
-    setFlashIds(new Set(created.map((c) => c.id)));
+    marquerNouveaux(created.map((c) => c.id));
     setEnrichMsg({ ok: true, t: created.length + " prospect(s) importé(s)." + dup + sg + ex + (enrich ? " Recherche web IA lancée en tâche de fond…" : "") });
     if (enrich) enrichCreated(created);
   };
@@ -9121,8 +9129,8 @@ function Prospection({ data, persist, go }) {
     if (created.length) parts.push(created.length + " nouvelle(s) fiche(s)");
     const noMatch = unmatched.length - created.length;
     if (noMatch > 0) parts.push(noMatch + " ligne(s) sans correspondance" + (addUnmatched ? "" : " (ignorée(s))"));
-    const flash = new Set([...touched, ...created.map((c) => c.id)]);
-    if (flash.size) setFlashIds(flash);
+    const flash = [...touched, ...created.map((c) => c.id)];
+    if (flash.length) marquerNouveaux(flash);
     setEnrichMsg({ ok: (updated || created.length) > 0, t: parts.length ? ("Mise à jour depuis fichier : " + parts.join(" · ") + ".") : "Aucune correspondance trouvée : rien à mettre à jour." });
   };
   const enrichProspect = async () => {
@@ -9148,14 +9156,38 @@ function Prospection({ data, persist, go }) {
     } catch (e) { const m = String((e && e.message) || e); const slow = /50[24]|delai|timeout|abort/i.test(m); setPfMsg({ ok: false, t: slow ? "La recherche IA a mis trop de temps à répondre (interrogation web en direct). Réessaie." : ("Recherche IA momentanément indisponible (" + m + "). Réessaie.") }); }
     finally { setPfBusy(false); }
   };
-  const [flashIds, setFlashIds] = useState(null); const cardRefs = useRef({});
-  // Met en avant les prospects fraîchement trouvés : clignotement lent + défilement vers la 1re tuile.
+  // Repère « fiches fraîchement trouvées ». Il vit sur l'APPAREIL et non en mémoire : le clignotement
+  // doit survivre aux rechargements et ne s'éteindre qu'au bouton « Mettre à jour », qui vaut accusé
+  // de réception. Une minuterie l'aurait éteint avant même qu'on ait fini de parcourir la liste.
+  // Les identifiants sont élagués des fiches disparues (supprimées, converties) : sans cela le repère
+  // enflerait indéfiniment sur un appareil qui ne clique jamais « Mettre à jour ».
+  const [flashIds, setFlashIds] = useState(() => {
+    const gardes = flashLocalGet();
+    return gardes.size ? gardes : null;
+  });
+  const cardRefs = useRef({});
+  const flashInitial = useRef(true);
   useEffect(() => {
     if (!flashIds || !flashIds.size) return;
-    const t1 = setTimeout(() => { const els = [...flashIds].map((id) => cardRefs.current[id]).filter(Boolean); if (els.length) { els.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top); try { els[0].scrollIntoView({ behavior: "smooth", block: "center" }); } catch {} } }, 140);
-    const t2 = setTimeout(() => setFlashIds(null), 10000);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
+    const vivants = new Set(prospects.map((p) => p.id));
+    const restants = new Set([...flashIds].filter((id) => vivants.has(id)));
+    if (restants.size !== flashIds.size) { setFlashIds(restants.size ? restants : null); flashLocalSet(restants); }
+  }, [flashIds, prospects]);
+  // Défilement vers la première fiche marquée — seulement quand le repère vient d'être posé, pas à
+  // chaque ouverture de l'onglet : reprendre la main sur le défilement à chaque visite serait pénible.
+  useEffect(() => {
+    if (flashInitial.current) { flashInitial.current = false; return; }
+    if (!flashIds || !flashIds.size) return;
+    const t = setTimeout(() => { const els = [...flashIds].map((id) => cardRefs.current[id]).filter(Boolean); if (els.length) { els.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top); try { els[0].scrollIntoView({ behavior: "smooth", block: "center" }); } catch {} } }, 140);
+    return () => clearTimeout(t);
   }, [flashIds]);
+  // Plusieurs recherches peuvent s'enchaîner avant un « Mettre à jour » : les lots s'ajoutent, aucun
+  // n'efface le précédent, sinon des fiches trouvées seraient démarquées sans avoir été vues.
+  const marquerNouveaux = (ids) => setFlashIds((prev) => {
+    const n = new Set([...(prev || []), ...ids]);
+    flashLocalSet(n);
+    return n.size ? n : null;
+  });
   const upE = (k, v) => setEdit((e) => ({ ...e, [k]: v }));
   const regions = Array.from(new Set(prospects.map((p) => p.region).filter(Boolean))).sort();
   const rank = { fort: 0, moyen: 1, faible: 2, "": 3 };
@@ -9486,7 +9518,7 @@ function Prospection({ data, persist, go }) {
           const { created, skipped, sieges, exclus } = createDraftsWithDedup(drafts, data);
           if (created.length) {
             persist((d) => ({ ...d, prospects: [...created, ...(d.prospects || [])] }));
-            setQ(""); setFType("tous"); setFRegion("tous"); setFlashIds(new Set(created.map((c) => c.id)));
+            setQ(""); setFType("tous"); setFRegion("tous"); marquerNouveaux(created.map((c) => c.id));
           }
           const dup = (skipped ? " " + skipped + " doublon(s) écarté(s)." : "")
             + ((sieges && sieges.length) ? " " + sieges.length + " ligne(s) refusée(s) : identité du siège d'un groupe déjà enregistré." : "")
@@ -9511,7 +9543,7 @@ function Prospection({ data, persist, go }) {
         const osmAdd = osmNew.map((s, i) => ({ id: "p_osm_" + Date.now() + "_" + i, nom: s.nom, enseigne: s.enseigne || "", type: s.enseigne ? "chaine" : "independant", format: "", adresse: s.adresse || "", ville: s.ville || "", cp: s.cp || "", departement: cpToDepartement(s.cp) || "", region: DEPT_REGION[cpToDepartement(s.cp)] || "", telephone: s.telephone || "", site: s.site || "", email: s.email || "", facebook: s.facebook || "", instagram: s.instagram || "", horaires: s.horaires || "", statut: "a_qualifier", potentiel: "", notes: "", source: "OpenStreetMap (gratuit) · " + today0, accountId: null, createdAt: today0, siren: "", siret: "", raisonSociale: "", formeJuridique: "", contactPrenom: "", contactNom: "", contactFonction: "", contactEmail: "", contactTel: "", contactSource: "", lat: s.lat, lng: s.lng }));
         if (osmAdd.length) persist((d) => ({ ...d, prospects: [...osmAdd, ...d.prospects] }));
         // OSM a suffi : on s'arrête là, sans dépenser un seul crédit IA.
-        if (osmAdd.length >= 6) { setQ(""); setFType("tous"); setFRegion("tous"); setFlashIds(new Set(osmAdd.map((a) => a.id))); setAiMsg(osmAdd.length + " prospect(s) ajouté(s) depuis OpenStreetMap — gratuitement, sans crédit IA. Statut « À qualifier », à vérifier."); return; }
+        if (osmAdd.length >= 6) { setQ(""); setFType("tous"); setFRegion("tous"); marquerNouveaux(osmAdd.map((a) => a.id)); setAiMsg(osmAdd.length + " prospect(s) ajouté(s) depuis OpenStreetMap — gratuitement, sans crédit IA. Statut « À qualifier », à vérifier."); return; }
         const { stores: arr, usage } = await aiSearchStores(z, kind);
         const seen = new Set(data.prospects.concat(osmAdd).map((p) => ((p.nom || "") + "|" + (p.ville || "")).toLowerCase())); const today = TODAY(); const add = [];
         let refusesDir = 0; let horsCible = 0;
@@ -9524,7 +9556,7 @@ function Prospection({ data, persist, go }) {
           if (!cibleAccepte(kind, r.type)) { horsCible++; return; }
           add.push({ id: "p_" + Date.now() + "_" + add.length, nom, enseigne: r.enseigne || "", type: ["cooperative", "chaine", "franchise", "independant", "specialiste", "gss", "autre"].includes(r.type) ? r.type : "autre", format: "", adresse: r.adresse || "", ville: r.ville || "", cp: r.cp || "", departement: r.departement || "", region: r.region || "", telephone: r.telephone || "", site: r.site || "", email: r.email || "", statut: "a_qualifier", potentiel: "", notes: r.notes || "", source: "Recherche IA · " + today, accountId: null, createdAt: today, siren: r.siren || "", siret: r.siret || "", raisonSociale: r.raisonSociale || "", formeJuridique: r.formeJuridique || "", contactPrenom: ct.prenom || "", contactNom: ct.nom || "", contactFonction: ct.fonction || "", contactEmail: ct.email || "", contactTel: ct.telephone || "", contactSource: ct.source || "" }); });
         persist((d) => ({ ...d, prospects: add.length ? [...add, ...d.prospects] : d.prospects, claudeUsage: addUsage(d.claudeUsage, usage) }));
-        if (add.length) { setQ(""); setFType("tous"); setFRegion("tous"); setFlashIds(new Set(add.map((a) => a.id))); }
+        if (add.length) { setQ(""); setFType("tous"); setFRegion("tous"); marquerNouveaux(add.map((a) => a.id)); }
         const exDir = (refusesDir ? " " + refusesDir + " résultat(s) refusé(s) : dirigeant exclu de la prospection (achats en centrale, ou magasin détenu par sa tête de réseau)." : "")
           + (horsCible ? " " + horsCible + " hors cible « " + CIBLE_LABEL[kind] + " »." : "");
         setAiMsg((add.length ? add.length + " prospect(s) ajouté(s) au listing, statut « À qualifier ». À vérifier avant action." : "Aucun nouveau prospect (déjà présents ou aucun résultat exploitable).") + exDir);
@@ -13260,6 +13292,10 @@ export default function App() {
       try { const u = new URL(window.location.href); u.searchParams.set("_v", Date.now().toString(36)); window.location.replace(u.toString()); }
       catch (e) { try { window.location.reload(); } catch (e2) { } }
     };
+    // Ce bouton vaut accusé de réception des fiches fraîchement trouvées : leur clignotement s'arrête
+    // ici, et nulle part ailleurs. Levé AVANT le rechargement, et avant le filet de sécurité, pour
+    // qu'un rechargement anticipé ne laisse pas le repère en place.
+    flashLocalClear();
     const filet = setTimeout(go, 5000);
     const borne = (promesse, ms) => Promise.race([Promise.resolve(promesse).catch(() => null), new Promise((r) => setTimeout(r, ms))]);
     // Vide d'abord toute écriture Supabase en attente (persist est débouncé de 800 ms) : sinon une
