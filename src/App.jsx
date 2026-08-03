@@ -8455,24 +8455,60 @@ function mapProspectRows(json) {
 }
 // Construit des fiches prospect à partir de brouillons importés, en écartant les doublons (prospect,
 // compte / groupe ou site déjà enregistré) via les clés d'identité. Renvoie { created, skipped }.
+// Identités légales des GROUPES déjà enregistrés (centrales d'achat, sièges). Sert à refuser les lignes
+// d'import qui décrivent en réalité le siège du réseau et non un magasin : dans beaucoup de fichiers,
+// la colonne « dirigeant » ou « raison sociale » d'un point de vente est remplie avec celles de la
+// centrale. Une telle ligne créerait un faux prospect, portant l'identité d'un groupe déjà suivi.
+function identitesDeGroupes(data) {
+  const norm = (x) => stripAccentsLow(String(x || "")).replace(/[^a-z0-9]/g, "");
+  const digits = (x) => String(x || "").replace(/\D/g, "");
+  return (data.accounts || []).filter((a) => isGroupe(a)).map((a) => ({
+    label: a.enseigne || a.raisonSociale || "ce groupe",
+    siren: digits(a.siren).slice(0, 9),
+    siret: digits(a.siret),
+    raison: norm(a.raisonSociale),
+    adresse: norm(a.adressePostale || a.adresseLivraison || ""),
+  })).filter((g) => g.siren || g.siret || g.raison);
+}
+// Renvoie le groupe dont la ligne reprend l'identité, ou null. Un établissement RÉEL d'un réseau garde
+// le SIREN de sa centrale mais possède son propre SIRET (cas King Jouet) : il n'est donc écarté que
+// s'il ne se distingue par aucun SIRET propre, ou s'il porte l'adresse même du siège.
+function ligneEstUnSiege(d, groupes) {
+  const norm = (x) => stripAccentsLow(String(x || "")).replace(/[^a-z0-9]/g, "");
+  const digits = (x) => String(x || "").replace(/\D/g, "");
+  const siret = digits(d.siret), siren = digits(d.siren).slice(0, 9);
+  const raison = norm(d.raisonSociale), adr = norm(d.adresse);
+  const propre = siret.length === 14;
+  for (const g of groupes) {
+    if (g.siret && siret && siret === g.siret) return g;                                  // le SIRET du siège lui-même
+    const memeSiren = g.siren && siren && siren === g.siren;
+    const memeRaison = g.raison && raison && raison === g.raison;
+    if ((memeSiren || memeRaison) && !propre) return g;                                    // rien qui distingue du siège
+    if (memeSiren && g.adresse && adr && adr === g.adresse) return g;                      // adresse du siège
+  }
+  return null;
+}
 function createDraftsWithDedup(drafts, data) {
   const norm = (s) => stripAccentsLow(String(s || "")).replace(/[^a-z0-9]/g, "");
+  const groupes = identitesDeGroupes(data);
   const existingKeys = new Set();
   const addKeys = (o) => identityKeys(o).forEach((k) => existingKeys.add(k));
   (data.prospects || []).forEach(addKeys);
   (data.accounts || []).forEach((a) => addKeys({ nom: a.enseigne, enseigne: a.enseigne, ville: a.ville, cp: a.cp, adresse: a.adressePostale || a.adresse, siren: a.siren, siret: a.siret, telephone: a.telephone }));
   (data.sites || []).forEach((s) => addKeys({ nom: s.label, enseigne: s.label, ville: s.ville, adresse: s.adresse, siret: s.siret }));
   const seen = new Set((data.prospects || []).map((p) => norm(p.nom || p.enseigne) + "|" + norm(p.ville)));
-  const created = []; let skipped = 0;
+  const created = []; let skipped = 0; const sieges = [];
   (drafts || []).forEach((d) => {
     const nameKey = norm(d.nom || d.enseigne) + "|" + norm(d.ville);
     if ((d.nom || d.enseigne) && seen.has(nameKey)) { skipped++; return; }
+    const g = ligneEstUnSiege(d, groupes);
+    if (g) { sieges.push({ nom: d.nom || d.enseigne || "(sans nom)", groupe: g.label }); seen.add(nameKey); return; }
     const dKeys = identityKeys({ nom: d.nom, enseigne: d.enseigne, ville: d.ville, cp: d.cp, adresse: d.adresse, telephone: d.telephone, email: d.email, siret: d.siret, siren: d.siren });
     if (dKeys.length && dKeys.some((k) => existingKeys.has(k))) { skipped++; seen.add(nameKey); return; }
     seen.add(nameKey); dKeys.forEach((k) => existingKeys.add(k)); // évite aussi les doublons internes au lot
     created.push({ id: uid("p_"), nom: d.nom || "", enseigne: d.enseigne || "", type: PROSPECT_TYPES[d.type] ? d.type : "autre", format: d.format || "", adresse: d.adresse || "", ville: d.ville || "", cp: d.cp || "", departement: d.departement || "", region: d.region || "", telephone: d.telephone || "", site: d.site || "", email: d.email || "", statut: PROSPECT_STATUT[d.statut] ? d.statut : "a_qualifier", potentiel: POTENTIEL_META[d.potentiel] ? d.potentiel : "", notes: d.notes || "", source: "Import", accountId: null, createdAt: TODAY(), siren: d.siren || "", siret: d.siret || "", raisonSociale: d.raisonSociale || "", formeJuridique: d.formeJuridique || "", contactPrenom: d.contactPrenom || "", contactNom: d.contactNom || "", contactFonction: d.contactFonction || "", contactEmail: d.contactEmail || "", contactTel: d.contactTel || "", contactSource: "", facebook: d.facebook || "", instagram: d.instagram || "", archived: false, archiveReason: "", archiveDate: "", archiveNote: "" });
   });
-  return { created, skipped };
+  return { created, skipped, sieges };
 }
 function ProspectImportModal({ onClose, onImport }) {
   // La recherche web IA post-import est OPT-IN (décochée par défaut) : c'est le poste de dépense n°1
@@ -8678,13 +8714,16 @@ function Prospection({ data, persist, go }) {
   // vente existant (clés d'identité : SIRET, adresse, SIREN+ville, cœur de rue, nom+localité…). Le libellé
   // d'un site (« King Jouet Cahors ») est traité comme le nom de sa fiche établissement.
   const doImport = (drafts, enrich) => {
-    const { created, skipped } = createDraftsWithDedup(drafts, data);
+    const { created, skipped, sieges } = createDraftsWithDedup(drafts, data);
     setImportOpen(false);
     const dup = skipped ? " " + skipped + " doublon(s) écarté(s) (prospect ou établissement déjà enregistré)." : "";
-    if (!created.length) { setEnrichMsg({ ok: false, t: "Aucun nouveau prospect importé (tous déjà présents)." + dup }); return; }
+    // Lignes portant l'identité d'une centrale déjà suivie : on nomme les groupes concernés, sans quoi
+    // le rejet paraîtrait arbitraire et la ligne serait réimportée telle quelle au fichier suivant.
+    const sg = (sieges && sieges.length) ? " " + sieges.length + " ligne(s) refusée(s) : identité du siège d'un groupe déjà enregistré (" + [...new Set(sieges.map((x) => x.groupe))].slice(0, 4).join(", ") + ")." : "";
+    if (!created.length) { setEnrichMsg({ ok: false, t: "Aucun nouveau prospect importé." + dup + sg }); return; }
     persist((d) => ({ ...d, prospects: [...created, ...(d.prospects || [])] }));
     setFlashIds(new Set(created.map((c) => c.id)));
-    setEnrichMsg({ ok: true, t: created.length + " prospect(s) importé(s)." + dup + (enrich ? " Recherche web IA lancée en tâche de fond…" : "") });
+    setEnrichMsg({ ok: true, t: created.length + " prospect(s) importé(s)." + dup + sg + (enrich ? " Recherche web IA lancée en tâche de fond…" : "") });
     if (enrich) enrichCreated(created);
   };
   // Mise à jour de fiches existantes depuis un fichier : chaque ligne est reliée à UNE fiche prospect
@@ -9082,12 +9121,13 @@ function Prospection({ data, persist, go }) {
           // Dédoublonnage sur les mêmes clés que le reste de l'application : on ne recrée jamais une
           // fiche déjà présente (prospect, établissement ou groupe).
           const drafts = lignes.map((l) => ({ ...l, statut: "a_qualifier", potentiel: "", source: "Registre officiel · " + TODAY(), accountId: null, createdAt: TODAY() }));
-          const { created, skipped } = createDraftsWithDedup(drafts, data);
+          const { created, skipped, sieges } = createDraftsWithDedup(drafts, data);
           if (created.length) {
             persist((d) => ({ ...d, prospects: [...created, ...(d.prospects || [])] }));
             setQ(""); setFType("tous"); setFRegion("tous"); setFlashIds(new Set(created.map((c) => c.id)));
           }
-          const dup = skipped ? " " + skipped + " doublon(s) écarté(s)." : "";
+          const dup = (skipped ? " " + skipped + " doublon(s) écarté(s)." : "")
+            + ((sieges && sieges.length) ? " " + sieges.length + " ligne(s) refusée(s) : identité du siège d'un groupe déjà enregistré." : "");
           setAiMsg(created.length
             ? created.length + " " + libelle + " ajouté(s) au listing, sans aucune dépense." + dup + " À vérifier avant action."
             : ("Aucun nouveau résultat pour cette zone." + dup));
