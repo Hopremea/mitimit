@@ -11,6 +11,7 @@ import { BUCKET, storageAdmin, cheminValide, creerDepot, supprimerDepot } from "
 //   batch:*   : lots de requetes Claude, factures 50 % moins cher (cle ANTHROPIC_API_KEY)
 //   piece     : depot d'une piece jointe volumineuse, hors du corps de requete (stockage Supabase)
 //   locator   : liste des pages magasin d'une enseigne, depuis son sitemap (gratuit, aucune IA)
+//   qonto     : lecture des comptes et des transactions bancaires (cles QONTO_LOGIN + QONTO_SECRET_KEY)
 //
 // Le regroupement n'est pas cosmetique : Vercel compte chaque fichier de api/ comme une fonction
 // serverless, et le plan Hobby en autorise 12 par deploiement. Quatre fichiers separes faisaient
@@ -200,6 +201,8 @@ export default async function handler(req, res) {
     if (action === "piece") return await actionPiece(body, res);
     // ---------- Pages magasin d'une enseigne (sitemap) ----------
     if (action === "locator") return await actionLocator(body, res);
+    // ---------- Banque Qonto (lecture seule) ----------
+    if (action === "qonto") return await actionQonto(body, res);
     res.status(400).json({ error: "Action inconnue : " + action });
   } catch (e) {
     res.status(502).json({ error: "Service indisponible : " + (e && e.message ? e.message : String(e)) });
@@ -432,4 +435,111 @@ async function actionBatch(sousAction, body, res) {
     return;
   }
   res.status(400).json({ error: "Sous-action de lot inconnue : " + sousAction });
+}
+
+// ===== Banque Qonto (LECTURE SEULE) =====
+// Relais serveur vers la Business API de Qonto. Les identifiants restent cote serveur : ils ne sont
+// jamais envoyes au navigateur, jamais stockes dans la base partagee, jamais journalises.
+//
+// Variables d'environnement attendues (Vercel > Settings > Environment Variables) :
+//   QONTO_LOGIN       identifiant d'organisation, ex. « penup-3d-1234 »
+//   QONTO_SECRET_KEY  cle secrete associee
+//
+// L'authentification Qonto n'est ni « Bearer » ni du Basic encode : l'en-tete vaut litteralement
+// « login:cle_secrete ». Une erreur ici se traduit par un 401 muet, d'ou le renvoi tel quel du
+// message de Qonto plus bas : c'est le seul moyen de distinguer identifiants faux, plan sans acces
+// API et compte non autorise.
+const QONTO_BASE = "https://thirdparty.qonto.com/v2";
+
+async function qontoFetch(chemin, login, cle) {
+  const r = await fetch(QONTO_BASE + chemin, {
+    headers: { Authorization: login + ":" + cle, Accept: "application/json" },
+  });
+  const texte = await r.text();
+  let json = null;
+  try { json = texte ? JSON.parse(texte) : null; } catch (e) {}
+  if (!r.ok) {
+    // Message de Qonto tel quel quand il existe : « Unauthorized », « Forbidden »… Sans lui,
+    // l'utilisateur ne saurait pas s'il doit corriger sa cle ou activer l'API sur son plan.
+    const detail = (json && (json.message || (Array.isArray(json.errors) && json.errors.map((x) => x.detail || x.title || x.code).filter(Boolean).join(" ; ")))) || texte.slice(0, 300);
+    const err = new Error("Qonto " + r.status + (detail ? " — " + detail : ""));
+    err.statut = r.status;
+    throw err;
+  }
+  return json || {};
+}
+
+async function actionQonto(body, res) {
+  const login = String(process.env.QONTO_LOGIN || "").trim();
+  const cle = String(process.env.QONTO_SECRET_KEY || "").trim();
+  if (!login || !cle) {
+    res.status(503).json({ error: "Qonto non configure : definissez QONTO_LOGIN et QONTO_SECRET_KEY dans les variables d'environnement Vercel (Settings > Environment Variables), puis redeployez." });
+    return;
+  }
+  const quoi = String(body.quoi || "organisation");
+  try {
+    // --- Organisation : sert a la fois de test de connexion et de liste des comptes bancaires ---
+    if (quoi === "organisation") {
+      const j = await qontoFetch("/organization", login, cle);
+      const org = j.organization || {};
+      res.status(200).json({
+        organisation: { slug: org.slug || "", nom: org.legal_name || org.slug || "" },
+        comptes: (org.bank_accounts || []).map((c) => ({
+          id: c.id, nom: c.name || "Compte", iban: c.iban || "", bic: c.bic || "",
+          devise: c.currency || "EUR",
+          solde: typeof c.balance === "number" ? c.balance : Number(c.balance || 0),
+          soldeAutorise: typeof c.authorized_balance === "number" ? c.authorized_balance : null,
+          statut: c.status || "",
+        })),
+      });
+      return;
+    }
+    // --- Transactions d'un compte ---
+    if (quoi === "transactions") {
+      const compte = String(body.compte || "").trim();
+      if (!compte) { res.status(400).json({ error: "Compte bancaire non precise." }); return; }
+      const p = new URLSearchParams();
+      p.set("bank_account_id", compte);
+      p.set("sort_by", "settled_at:desc");
+      p.set("per_page", String(Math.min(Math.max(Number(body.parPage) || 100, 1), 100)));
+      p.set("current_page", String(Math.max(Number(body.page) || 1, 1)));
+      // Bornes de date optionnelles : Qonto attend de l'ISO 8601.
+      if (body.du) p.set("settled_at_from", new Date(String(body.du) + "T00:00:00Z").toISOString());
+      if (body.au) p.set("settled_at_to", new Date(String(body.au) + "T23:59:59Z").toISOString());
+      const j = await qontoFetch("/transactions?" + p.toString(), login, cle);
+      const meta = j.meta || {};
+      res.status(200).json({
+        // Montants ramenes en euros signes : le signe porte le sens (debit negatif), plus lisible
+        // qu'un champ « side » a reinterpreter partout dans l'interface.
+        transactions: (j.transactions || []).map((t) => {
+          const montant = Number(t.amount || 0);
+          return {
+            id: t.transaction_id || t.id || "",
+            libelle: t.label || "",
+            tiers: t.counterparty_name || t.label || "",
+            montant: t.side === "debit" ? -montant : montant,
+            devise: t.currency || "EUR",
+            date: (t.settled_at || t.emitted_at || "").slice(0, 10),
+            statut: t.status || "",
+            operation: t.operation_type || "",
+            categorie: t.category || "",
+            reference: t.reference || "",
+            note: t.note || "",
+            piecesJointes: (t.attachment_ids || []).length,
+          };
+        }),
+        page: meta.current_page || 1,
+        pages: meta.total_pages || 1,
+        total: meta.total_count || 0,
+      });
+      return;
+    }
+    res.status(400).json({ error: "Sous-action Qonto inconnue : " + quoi });
+  } catch (e) {
+    const st = e && e.statut === 401 ? 401 : 502;
+    const aide = e && e.statut === 401
+      ? ". Verifiez QONTO_LOGIN (l'identifiant d'organisation, pas votre adresse e-mail) et QONTO_SECRET_KEY."
+      : "";
+    res.status(st).json({ error: (e && e.message ? e.message : String(e)) + aide });
+  }
 }

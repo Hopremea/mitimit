@@ -14,6 +14,7 @@ import {
   Clock, Hourglass, Flame, Trophy, Award, Coffee,
   GitBranch, Save, FileDown, ArrowDown, ArrowUp, Undo2,
   Globe, Facebook, Instagram, Menu, Home,
+  Landmark,
   Filter as FunnelIcon, PieChart as PieIcon
 } from "lucide-react";
 import {
@@ -159,6 +160,16 @@ async function shopifyApi(action, creds) {
   const res = await fetch("/api/shopify", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify(payload) });
   let dt = {}; try { dt = await res.json(); } catch (e) {}
   if (!res.ok) throw new Error((dt && dt.error) ? dt.error : ("Erreur Shopify (" + res.status + ")"));
+  return dt;
+}
+
+// Lecture de la banque Qonto via le relais serveur /api/outils (action « qonto »). Les identifiants
+// vivent UNIQUEMENT dans les variables d'environnement Vercel : rien ne transite par le navigateur,
+// rien n'est enregistré dans la base partagée. La lecture est seule permise, aucune écriture bancaire.
+async function qontoApi(quoi, params) {
+  const res = await fetch("/api/outils", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "qonto", quoi, ...(params || {}) }) });
+  let dt = {}; try { dt = await res.json(); } catch (e) {}
+  if (!res.ok) throw new Error((dt && dt.error) ? dt.error : ("Erreur Qonto (" + res.status + ")"));
   return dt;
 }
 
@@ -4358,6 +4369,123 @@ function KpiTile({ label, value, note, color, state, big }) {
     {note && <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 5, lineHeight: 1.45 }}>{note}</div>}
   </div>);
 }
+// ============== BANQUE (Qonto, lecture seule) ==============
+// Rien n'est enregistré : les transactions sont lues à la demande et restent en mémoire. La banque
+// est la source de vérité, la recopier dans la base ne ferait que créer une seconde version à
+// maintenir — et exposerait des données bancaires dans une base partagée qui n'en a pas besoin.
+function Banque() {
+  const [comptes, setComptes] = useState(null); const [orga, setOrga] = useState(null);
+  const [compte, setCompte] = useState("");
+  const [tx, setTx] = useState(null); const [meta, setMeta] = useState(null);
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState(null);
+  const moisCourant = new Date().toISOString().slice(0, 7);
+  const [mois, setMois] = useState(moisCourant);
+  const [q, setQ] = useState("");
+
+  // Connexion : /organization sert à la fois de test d'identifiants et de liste des comptes.
+  const charger = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const d = await qontoApi("organisation");
+      setOrga(d.organisation || null); setComptes(d.comptes || []);
+      if (!compte && (d.comptes || []).length) setCompte(d.comptes[0].id);
+    } catch (e) { setErr((e && e.message) || String(e)); setComptes([]); }
+    finally { setBusy(false); }
+  };
+  useEffect(() => { charger(); }, []);
+
+  const bornes = (m) => {
+    if (!m) return {};
+    const [a, mm] = m.split("-").map(Number);
+    const fin = new Date(Date.UTC(a, mm, 0)).toISOString().slice(0, 10);
+    return { du: m + "-01", au: fin };
+  };
+  const chargerTx = async () => {
+    if (!compte) return;
+    setBusy(true); setErr(null);
+    try {
+      const d = await qontoApi("transactions", { compte, ...bornes(mois) });
+      setTx(d.transactions || []); setMeta({ page: d.page, pages: d.pages, total: d.total });
+    } catch (e) { setErr((e && e.message) || String(e)); setTx([]); setMeta(null); }
+    finally { setBusy(false); }
+  };
+  useEffect(() => { if (compte) chargerTx(); }, [compte, mois]);
+
+  const cpt = (comptes || []).find((c) => c.id === compte) || null;
+  const liste = (tx || []).filter((t) => {
+    if (!q.trim()) return true;
+    const h = normStr((t.libelle || "") + " " + (t.tiers || "") + " " + (t.reference || ""));
+    return h.includes(normStr(q));
+  });
+  const entrees = liste.filter((t) => t.montant > 0).reduce((s, t) => s + t.montant, 0);
+  const sorties = liste.filter((t) => t.montant < 0).reduce((s, t) => s + t.montant, 0);
+  // Douze derniers mois : au-delà, on saisit la date à la main plutôt que de dérouler une liste sans fin.
+  const moisOptions = Array.from({ length: 12 }, (_, i) => { const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - i); return d.toISOString().slice(0, 7); });
+  const moisLabel = (m) => { const [a, mm] = m.split("-"); return ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"][Number(mm) - 1] + " " + a; };
+
+  if (comptes && comptes.length === 0 && err) return (<div className="fade">
+    <div className="card" style={{ borderLeft: "4px solid var(--red)" }}>
+      <div style={{ fontWeight: 800, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}><AlertTriangle size={17} color="var(--red)" /> Banque non connectée</div>
+      <div style={{ fontSize: 13, lineHeight: 1.6, color: "var(--muted)" }}>{err}</div>
+      <div style={{ fontSize: 13, lineHeight: 1.65, marginTop: 12 }}>
+        Les identifiants Qonto se posent <strong>côté serveur</strong>, jamais dans l'application : dans Vercel, projet <strong>mitimit</strong>, <em>Settings → Environment Variables</em>, puis un redéploiement.
+        <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
+          <li><code>QONTO_LOGIN</code> — l'identifiant d'organisation, du type <code>penup-3d-1234</code> (pas votre adresse e-mail)</li>
+          <li><code>QONTO_SECRET_KEY</code> — la clé secrète associée</li>
+        </ul>
+        <div style={{ marginTop: 8 }}>Les deux se trouvent dans Qonto : <em>Paramètres → Intégrations et partenaires → Clé API</em>. L'onglet Intégrations de MITMIT indique ensuite si elles sont bien vues par le serveur.</div>
+      </div>
+      <button className="btn btn-g btn-s" style={{ marginTop: 12 }} onClick={charger} disabled={busy}><RefreshCw size={14} className={busy ? "spin" : ""} /> Réessayer</button>
+    </div>
+  </div>);
+
+  return (<div className="fade">
+    <div className="card" style={{ marginBottom: 14, display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+      <div className="fld" style={{ minWidth: 240, marginBottom: 0, flex: 1 }}><label>Compte</label>
+        <select value={compte} onChange={(e) => setCompte(e.target.value)} disabled={!comptes || !comptes.length}>
+          {(comptes || []).map((c) => <option key={c.id} value={c.id}>{c.nom}{c.iban ? " · " + c.iban.slice(-6) : ""}</option>)}
+          {(!comptes || !comptes.length) && <option value="">—</option>}
+        </select>
+      </div>
+      <div className="fld" style={{ minWidth: 170, marginBottom: 0 }}><label>Mois</label>
+        <select value={mois} onChange={(e) => setMois(e.target.value)}>{moisOptions.map((m) => <option key={m} value={m}>{moisLabel(m)}</option>)}</select>
+      </div>
+      <div className="fld" style={{ minWidth: 200, marginBottom: 0, flex: 1 }}><label>Rechercher</label>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Libellé, tiers, référence…" />
+      </div>
+      <button className="btn btn-g btn-s" onClick={() => { charger(); chargerTx(); }} disabled={busy}><RefreshCw size={14} className={busy ? "spin" : ""} /> Actualiser</button>
+    </div>
+
+    {err && <div className="card" style={{ borderLeft: "4px solid var(--red)", marginBottom: 14, fontSize: 12.5, color: "var(--red)", fontWeight: 600 }}>{err}</div>}
+
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginBottom: 14 }}>
+      <KpiTile label="Solde du compte" value={cpt ? eur2(cpt.solde) : "—"} state={cpt ? "ok" : "todo"} color="var(--blue)" note={orga ? orga.nom : ""} />
+      <KpiTile label={"Entrées · " + moisLabel(mois)} value={eur2(entrees)} state={tx ? "ok" : "todo"} color="var(--green)" />
+      <KpiTile label={"Sorties · " + moisLabel(mois)} value={eur2(sorties)} state={tx ? "ok" : "todo"} color="var(--red)" />
+      <KpiTile label="Solde du mois" value={eur2(entrees + sorties)} state={tx ? "ok" : "todo"} color={entrees + sorties >= 0 ? "var(--green)" : "var(--red)"} note={liste.length + " transaction(s)"} />
+    </div>
+
+    <div className="card">
+      <div className="sec-h"><h3 className="pu-display">Transactions</h3><span>{meta && meta.total > liste.length ? liste.length + " affichée(s) sur " + meta.total : liste.length + " transaction(s)"}</span></div>
+      {!tx ? <div className="empty">{busy ? "Lecture du compte…" : "Choisissez un compte."}</div>
+        : liste.length === 0 ? <div className="empty">Aucune transaction sur {moisLabel(mois)}{q ? " pour cette recherche" : ""}.</div>
+        : <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Date</th><th>Tiers</th><th>Libellé</th><th>Type</th><th style={{ textAlign: "right" }}>Montant</th></tr></thead><tbody>
+          {liste.map((t) => (<tr key={t.id} className="hrow">
+            <td className="tnum" style={{ whiteSpace: "nowrap" }}>{t.date}</td>
+            <td style={{ fontWeight: 700 }}>{t.tiers || "—"}</td>
+            <td style={{ color: "var(--muted)" }}>{t.libelle}{t.reference ? " · " + t.reference : ""}</td>
+            {/* Badge dérive ses teintes du hexadécimal (concaténation d'alpha + assombrissement) : une
+                variable CSS y produirait une couleur invalide. */}
+            <td>{t.statut === "pending" ? <Badge color="#F8B133">En attente</Badge> : t.statut === "declined" ? <Badge color="#FF5A45">Refusée</Badge> : <span style={{ fontSize: 11.5, color: "var(--muted)" }}>{t.operation || "—"}</span>}</td>
+            <td className="tnum" style={{ textAlign: "right", fontWeight: 800, whiteSpace: "nowrap", color: t.montant >= 0 ? "var(--green)" : "var(--ink)" }}>{t.montant >= 0 ? "+" : ""}{eur2(t.montant)}</td>
+          </tr>))}
+        </tbody></table></div>}
+      {meta && meta.pages > 1 && <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 10 }}>Page {meta.page} sur {meta.pages} — seules les 100 transactions les plus récentes du mois sont affichées.</div>}
+    </div>
+    <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 12, lineHeight: 1.5 }}>Lecture seule. Aucune transaction n'est enregistrée dans MITMIT : les données sont relues chez Qonto à chaque affichage, et les identifiants restent côté serveur.</div>
+  </div>);
+}
+
 function Performance({ data, go }) {
   const K = computeKPIs(data);
   const f2 = (x) => x == null ? "—" : "×" + x.toFixed(2);
@@ -10848,6 +10976,7 @@ const TABS = [
   { id: "sav", group: "Support", label: "SAV", icon: LifeBuoy, title: "Service après-vente", sub: "Incidents et réclamations" },
   // Outils
   { id: "pointage", group: "Outils", label: "RH", icon: Clock, title: "RH", sub: "Temps de présence, pointage et frais kilométriques" },
+  { id: "banque", group: "Outils", label: "Banque", icon: Landmark, title: "Banque", sub: "Comptes et transactions Qonto (lecture seule)" },
   { id: "calc", group: "Outils", label: "Calculateur", icon: Calculator, title: "Calculateur", sub: "Coefficients, TVA, change, logistique" },
   { id: "conn", group: "Outils", label: "Intégrations", icon: Plug, title: "Intégrations & paramètres", sub: "Connexions, imports, sauvegarde et préférences" },
 ];
@@ -13175,6 +13304,7 @@ export default function App() {
       {tab === "reassort" && <Reassort key={"reassort-" + navKey} data={data} persist={persist} />}
       {tab === "sav" && <Sav key={"sav-" + navKey} data={data} persist={persist} />}
       {tab === "pointage" && <RH key={"pointage-" + navKey} data={data} persist={persist} go={go} />}
+      {tab === "banque" && <Banque key={"banque-" + navKey} />}
       {tab === "calc" && <Calculateur data={data} persist={persist} />}
       {tab === "conn" && <Connexions key={"conn-" + navKey} data={data} persist={persist} autoBackup={autoBackup} />}
       </div>

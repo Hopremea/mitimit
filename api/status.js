@@ -43,6 +43,8 @@ export default async function handler(req, res) {
     { key: "GOOGLE_REFRESH_TOKEN", group: "Gmail (envoi)", label: "Refresh token", optional: true },
     { key: "GMAIL_FROM_NAME", group: "Gmail (envoi)", label: "Nom expéditeur", optional: true, publicPreview: true },
     { key: "NEXT_PUBLIC_APP_URL", group: "Gmail (envoi)", label: "URL app (surcharge)", optional: true, publicPreview: true },
+    { key: "QONTO_LOGIN", group: "Qonto (banque)", label: "Identifiant d'organisation", optional: true, publicPreview: true },
+    { key: "QONTO_SECRET_KEY", group: "Qonto (banque)", label: "Clé secrète", optional: true },
     { key: "ORS_API_KEY", group: "Cartographie (isochrones)", label: "Clé OpenRouteService", optional: true },
     { key: "LAPOSTE_API_KEY", group: "Suivi de colis", label: "Clé La Poste / Colissimo", optional: true },
   ];
