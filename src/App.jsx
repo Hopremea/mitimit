@@ -5930,13 +5930,14 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
   // laisserait croire que le contact a été relancé.
   const [drafting, setDrafting] = useState(false);
   const createGmailDraft = async () => {
-    if (!recipient || !recipient.email) { setSentMsg("❌ Le destinataire n'a pas d'adresse e-mail."); return; }
+    // Pas d'adresse connue ? On crée quand même le brouillon, sans destinataire : c'est précisément
+    // le cas où l'on veut garder le message sous la main et compléter l'adresse dans Gmail.
     setDrafting(true); setSentMsg("");
     try {
-      const res = await fetch("/api/gmail-draft", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ to: recipient.email, subject: subject || ("PEN'UP 3D : " + estabName), body: out }) });
+      const res = await fetch("/api/gmail-draft", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ to: (recipient && recipient.email) || "", subject: subject || ("PEN'UP 3D : " + estabName), body: out }) });
       const dt = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(dt.error || ("Erreur " + res.status));
-      setSentMsg("✅ Brouillon créé dans Gmail pour " + recipient.email + ". Rien n'a été envoyé.");
+      setSentMsg(recMail ? ("✅ Brouillon créé dans Gmail pour " + recipient.email + ". Rien n'a été envoyé.") : "✅ Brouillon créé dans Gmail, sans destinataire : ajoutez l'adresse dans Gmail avant d'envoyer.");
     } catch (e) { setSentMsg("❌ Échec de la création du brouillon : " + (e && e.message ? e.message : String(e))); }
     finally { setDrafting(false); }
   };
@@ -6032,9 +6033,10 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
         <span style={{ fontSize: 11, color: "var(--muted)", marginRight: "auto" }}>Brouillon conservé : vous pouvez fermer cette fenêtre et la rouvrir sur le même message.</span>
         <button className="btn btn-ghost btn-s" onClick={async () => { const ok = await appConfirm("Effacer ce brouillon et repartir d'une page vierge ?", { title: "Effacer le brouillon", confirmLabel: "Effacer" }); if (ok) clearDraft(); }} title="Vide le message conservé pour ce destinataire"><X size={14} /> Effacer le brouillon</button>
-        {canal === "email" && recMail && <>
+        {canal === "email" && !recMail && <span style={{ fontSize: 11.5, color: "var(--muted)" }} title="L'envoi exige une adresse ; le brouillon, non.">Aucune adresse : envoi indisponible</span>}
+        {canal === "email" && <>
           <button className="btn btn-g" onClick={createGmailDraft} disabled={drafting} title="Dépose le message dans vos brouillons Gmail, sans ouvrir d'onglet et sans envoyer"><Mail size={15} className={drafting ? "spin" : ""} /> {drafting ? "Création…" : "Créer le brouillon Gmail"}</button>
-          <button className="btn btn-p" onClick={sendViaGmail} disabled={sending}><Send size={15} className={sending ? "spin" : ""} /> {sending ? "Envoi…" : "Envoyer via Gmail"}</button>
+          {recMail && <button className="btn btn-p" onClick={sendViaGmail} disabled={sending}><Send size={15} className={sending ? "spin" : ""} /> {sending ? "Envoi…" : "Envoyer via Gmail"}</button>}
         </>}
         {canal === "sms" && smsHref && <a className="btn btn-p" href={smsHref}><MessageSquare size={15} /> Ouvrir l'app SMS</a>}
         {canal === "linkedin" && <a className="btn btn-p" href={recipient && recipient.linkedin ? ensureHttp(recipient.linkedin) : linkedinSearch(recipient || {}, account && account.enseigne)} target="_blank" rel="noreferrer"><Linkedin size={15} /> Ouvrir LinkedIn</a>}
