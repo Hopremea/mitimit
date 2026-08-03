@@ -1306,6 +1306,12 @@ function scrubRecord(r) {
       if (!/^\+?[\d\s.\-/()]+$/.test(t) || t.replace(/\D/g, "").length < 6) set(k, "");
     }
   });
+  // Une fonction sans personne n'est pas un interlocuteur : c'est une déduction de la forme juridique
+  // (SARL → « Gérant »), que l'IA et les registres produisent même quand ils n'ont trouvé personne.
+  // Affichée seule, elle fait croire que la fiche a un contact identifié, et elle finit dans les mails.
+  const nommee = (a, b) => Boolean(String(out[a] || "").trim() || String(out[b] || "").trim());
+  if (String(out.contactFonction || "").trim() && !nommee("contactPrenom", "contactNom")) set("contactFonction", "");
+  if (String(out.fonction || "").trim() && !nommee("prenom", "nom")) set("fonction", "");
   return out;
 }
 // Dirigeants à ne jamais prospecter : leur enseigne achète exclusivement en centrale, une fiche à leur
@@ -2914,8 +2920,15 @@ ${ACCENT_CSS}
 .filament{position:fixed;border-radius:3px;pointer-events:none;will-change:transform,opacity;}
 @keyframes filamentFly{0%{opacity:0;transform:translate(-50%,-50%) rotate(0) scaleX(.5);}12%{opacity:1;}100%{opacity:0;transform:translate(calc(-50% + var(--dx)),calc(-50% + var(--dy) + 70px)) rotate(var(--rot)) scaleX(1);}}
 .pu-root.dark .mapwrap{background:linear-gradient(180deg,#10172a,#0c1322);}
-.prospect-flash{animation:prospectFlash 1.6s ease-in-out 0s 6;border-color:var(--orange) !important;}
-@keyframes prospectFlash{0%,100%{box-shadow:0 0 0 0 rgba(248,177,51,0);}50%{box-shadow:0 0 0 4px rgba(248,177,51,.6);}}
+/* Mise en avant des fiches fraîchement trouvées. L'anneau est tracé en « outline » et non en
+   « box-shadow » : .tile définit sa propre ombre dans trois règles et la met en transition, l'anneau
+   s'y perdait. L'outline se peint hors de la bordure, aucune autre règle ne le revendique, et
+   overflow:hidden ne le rogne pas. */
+.card.prospect-flash{animation:prospectFlash 1.25s ease-in-out 0s 6;border-color:var(--orange) !important;position:relative;z-index:2;}
+@keyframes prospectFlash{0%,100%{outline:3px solid rgba(248,177,51,0);outline-offset:2px;}50%{outline:3px solid rgba(248,177,51,.95);outline-offset:5px;}}
+/* Mouvement réduit : l'animation est neutralisée plus bas par la règle générale. Un repère « voici ce
+   qui vient d'être trouvé » ne doit pas dépendre du mouvement — l'anneau reste alors fixe. */
+@media (prefers-reduced-motion: reduce){.card.prospect-flash{outline:3px solid rgba(248,177,51,.95) !important;outline-offset:4px !important;}}
 .sec-h{display:flex;align-items:center;justify-content:space-between;margin:0 0 12px;gap:10px;flex-wrap:wrap;}.sec-h h3{margin:0;font-size:15px;}.sec-h span{color:var(--muted);font-size:12px;}
 .badge{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:20px;}.dot{width:7px;height:7px;border-radius:50%;}
 .tbl{width:100%;border-collapse:collapse;font-size:13px;}
@@ -8391,6 +8404,9 @@ function enrichProspectAppliquer(p, out, text) {
   take("telephone", (o.telephone || "").trim()); take("email", (o.email || "").trim());
   take("contactPrenom", (c.prenom || "").trim()); take("contactNom", (c.nom || "").trim()); take("contactFonction", (c.fonction || "").trim()); take("contactEmail", (c.email || "").trim()); take("contactTel", (c.telephone || "").trim()); take("contactSource", (c.source || "").trim());
   take("notes", (o.notes || "").trim());
+  // Une fonction sans personne se déduit de la forme juridique (SARL → « Gérant ») : ce n'est pas un
+  // interlocuteur trouvé. On ne l'annonce donc pas dans le récapitulatif d'enrichissement.
+  if (!has(out.contactPrenom) && !has(out.contactNom)) out.contactFonction = "";
   if (o.confiance) out.confiance = out.confiance === "haute" ? "haute" : o.confiance;
   if (o.source) out.source = out.source ? out.source + " + " + String(o.source).trim() : String(o.source).trim();
   // Le code postal a pu arriver via l'IA : re-déduire département / région localement si besoin.
