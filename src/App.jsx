@@ -8593,7 +8593,9 @@ const DEPT_REGION = {}; Object.entries(REGIONS_DEPTS).forEach(([r, ds]) => ds.fo
 // les sources gratuites ont tout couvert (aucun appel payant à faire).
 // Ce découpage permet d'envoyer la phase IA soit immédiatement (fiche unique), soit en LOT via
 // l'API Batch d'Anthropic (enrichissement de masse, 50 % moins cher sur les tokens).
-async function enrichProspectPreparer(p, instruction) {
+// `cles` : ensemble des champs à demander à l'IA, issu des cases « informations à chercher ».
+// null = tout ce qui manque (comportement d'origine).
+async function enrichProspectPreparer(p, instruction, cles) {
   // Enrichissement ÉCONOME en trois temps :
   // 1) SIRENE / annuaire-entreprises (GRATUIT) pour toute l'identité légale (SIREN, SIRET, raison
   //    sociale, forme juridique, dirigeant, adresse si société mono-établissement) ;
@@ -8601,7 +8603,7 @@ async function enrichProspectPreparer(p, instruction) {
   // 3) l'IA (payante : tokens + recherches web) UNIQUEMENT pour les champs encore manquants —
   //    et, pour les grandes enseignes, sans chercher le site web ni les réseaux sociaux.
   const has = (v) => Boolean(String(v || "").trim());
-  const out = { nom: "", site: "", facebook: "", instagram: "", siren: "", siret: "", raisonSociale: "", formeJuridique: "", adresse: "", cp: "", ville: "", departement: "", region: "", telephone: "", email: "", contactPrenom: "", contactNom: "", contactFonction: "", contactEmail: "", contactTel: "", contactSource: "", notes: "", confiance: "?", source: "", usage: null };
+  const out = { nom: "", site: "", facebook: "", instagram: "", siren: "", siret: "", raisonSociale: "", formeJuridique: "", adresse: "", cp: "", ville: "", departement: "", region: "", telephone: "", email: "", horaires: "", contactPrenom: "", contactNom: "", contactFonction: "", contactEmail: "", contactTel: "", contactSource: "", notes: "", confiance: "?", source: "", usage: null };
   // 1) Registre officiel SIRENE — gratuit, sans crédit IA. L'indice « ville » permet, pour une
   //    société multi-établissements, de récupérer le SIRET et l'adresse EXACTS du magasin.
   try {
@@ -8655,6 +8657,9 @@ async function enrichProspectPreparer(p, instruction) {
       if (place) {
         if (!has(out.telephone)) out.telephone = place.telephone;
         if (!has(out.email)) out.email = place.email;
+        // Les horaires viennent gratuitement d'OpenStreetMap : les prendre ici évite de les
+        // redemander à l'IA, et alimente la pastille d'ouverture du listing.
+        if (!has(out.horaires)) out.horaires = place.horaires;
         // Pour une grande enseigne on ne garde le site que s'il pointe la page du magasin : la
         // racine de la marque n'apporte que les coordonnées du siège. Les réseaux sociaux restent
         // exclus, ce sont ceux de la marque.
@@ -8702,7 +8707,10 @@ async function enrichProspectPreparer(p, instruction) {
   }
   // 3) Champs restants → IA. Grandes enseignes : ni site web ni réseaux sociaux (ceux de la marque).
   const misses = [];
-  const need = (cond, key, desc) => { if (cond) misses.push({ key, desc }); };
+  // Un champ non coché n'est PAS demandé : la requête raccourcit, la dépense baisse, et la réponse
+  // ne ramène pas ce qu'on n'a pas demandé. Sans ce filtre, les cases n'auraient servi à rien.
+  const voulu = (key) => !cles || cles.has(key);
+  const need = (cond, key, desc) => { if (cond && voulu(key)) misses.push({ key, desc }); };
   need(!has(p.nom) && !has(out.nom), "nom", "nom commercial de CE point de vente (ex. « King Jouet Cahors »), reconstitué depuis les autres données");
   need(!has(p.adresse) && !has(out.adresse), "adresse", "adresse postale complète de l'établissement");
   need(!has(p.cp) && !has(out.cp), "cp", "code postal");
@@ -8722,6 +8730,7 @@ async function enrichProspectPreparer(p, instruction) {
   need(!has(p.raisonSociale) && !has(out.raisonSociale), "raisonSociale", "raison sociale (registres officiels)");
   need(!has(p.formeJuridique) && !has(out.formeJuridique), "formeJuridique", "forme juridique");
   need(!has(p.contactNom) && !has(out.contactNom), "contact", "dirigeant ou responsable identifié (prénom, nom, fonction, e-mail, téléphone, source de l'info)");
+  need(!has(p.horaires) && !has(out.horaires), "horaires", "horaires d'ouverture habituels de CE magasin (fiche Google Business / site officiel), les 7 jours, un par jour, séparés par des points-virgules, au format français : « Lun 10h-19h; Mar 10h-19h; …; Dim fermé » — les coupures méridiennes s'écrivent « 9h30-12h30, 14h-19h »");
   need(!has(p.notes) && !has(out.notes), "notes", "une phrase factuelle (univers produits, implantation)");
   const consigne = (instruction || "").trim();
   if (!misses.length && !consigne) return { out, body: null }; // tout est couvert par les sources gratuites : zéro appel payant
@@ -9013,12 +9022,36 @@ function applyProspectEnrich(x, r) {
   // détermine si le magasin se démarche en direct, et une société exclue fait retirer la fiche.
   setIf("dirigeantSiren", r.dirigeantSiren); setIf("dirigeantSociete", r.dirigeantSociete);
   if (r.contactSource && !String(x.contactSource || "").trim()) patch.contactSource = r.contactSource;
+  // Un horaire n'est retenu que s'il porte une heure : sans ce contrôle, une phrase vague comme
+  // « ouvert toute la semaine » se logerait dans le champ et rendrait la pastille indéchiffrable.
+  if (r.horaires && !String(x.horaires || "").trim() && /\d\s*[h:]/.test(r.horaires)) patch.horaires = r.horaires;
   setIf("notes", r.notes);
   return Object.keys(patch).length ? { ...x, ...patch } : x;
 }
 // Sélection des fiches à enrichir : par catégorie (type de prospect) et, si voulu, en limitant le nombre.
 // Évite d'enrichir « toutes » les fiches d'un coup (crédits + temps) — on cible « indépendants », « autres »,
 // « franchisés », etc., et on peut plafonner le nombre traité.
+// Informations que l'enrichissement peut aller chercher. Chaque entrée regroupe les champs RÉELLEMENT
+// demandés à l'IA : cocher « Site web » retire donc vraiment les autres de la requête, ce n'est pas un
+// libellé d'affichage. Moins de champs demandés = requête plus courte, moins chère et plus ciblée.
+const CHAMPS_ENRICH = [
+  { id: "email", label: "Adresse e-mail", cles: ["email"] },
+  { id: "telephone", label: "Téléphone", cles: ["telephone"] },
+  { id: "site", label: "Site web", cles: ["site"] },
+  { id: "reseaux", label: "Réseaux sociaux", cles: ["facebook", "instagram"] },
+  { id: "horaires", label: "Horaires d'ouverture", cles: ["horaires"] },
+  { id: "identite", label: "Identité légale (SIREN, SIRET, raison sociale)", cles: ["siren", "siret", "raisonSociale", "formeJuridique"] },
+  { id: "contact", label: "Dirigeant / interlocuteur", cles: ["contact"] },
+  { id: "adresse", label: "Adresse et localisation", cles: ["nom", "adresse", "cp", "ville"] },
+  { id: "notes", label: "Note de contexte", cles: ["notes"] },
+];
+// Ensemble des clés de champs correspondant aux informations cochées. Vide ou complet = tout demander.
+function clesEnrich(ids) {
+  if (!ids || !ids.size) return null;
+  const out = new Set();
+  CHAMPS_ENRICH.forEach((c) => { if (ids.has(c.id)) c.cles.forEach((k) => out.add(k)); });
+  return out.size ? out : null;
+}
 function EnrichSelectModal({ prospects, onClose, onLaunch }) {
   const targets = (prospects || []).filter((p) => !p.accountId && hasProspectIdentity(p));
   const counts = {}; targets.forEach((p) => { const t = p.type || "autre"; counts[t] = (counts[t] || 0) + 1; });
@@ -9029,6 +9062,11 @@ function EnrichSelectModal({ prospects, onClose, onLaunch }) {
   // Mode strictement GRATUIT : registres officiels, OpenStreetMap, base adresse et lecture du site
   // du magasin uniquement. Aucune recherche web IA, donc aucun coût.
   const [gratuitSeul, setGratuitSeul] = useState(false);
+  // Informations à chercher : tout par défaut, pour que le comportement d'origine reste celui
+  // qu'on obtient sans rien toucher. Décocher restreint réellement la requête envoyée à l'IA.
+  const [champs, setChamps] = useState(() => new Set(CHAMPS_ENRICH.map((c) => c.id)));
+  const toggleChamp = (id) => setChamps((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const tousChamps = champs.size === CHAMPS_ENRICH.length;
   const toggle = (t) => setSel((s) => { const n = new Set(s); n.has(t) ? n.delete(t) : n.add(t); return n; });
   const allOn = typeKeys.length > 0 && typeKeys.every((t) => sel.has(t));
   const selTypes = typeKeys.filter((t) => sel.has(t));
@@ -9052,12 +9090,28 @@ function EnrichSelectModal({ prospects, onClose, onLaunch }) {
           <span style={{ display: "block", fontWeight: 500, color: "var(--muted)", marginTop: 3, lineHeight: 1.5 }}>Registre des entreprises, OpenStreetMap, base adresse nationale et lecture du site officiel du magasin. Aucune recherche web IA n'est lancée : la complétion est moins large, mais la dépense est nulle.</span>
         </span>
       </label>
+      {/* Choix des informations à chercher. Sans coche, la recherche ratissait tout ce qui manquait
+          sur la fiche : impossible de dire « je ne veux que les sites web ». */}
+      {!gratuitSeul && <div style={{ marginBottom: 12 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 700, paddingBottom: 8, marginBottom: 8, borderBottom: "1px solid var(--line)" }}>
+          <input type="checkbox" checked={tousChamps} onChange={() => setChamps(tousChamps ? new Set() : new Set(CHAMPS_ENRICH.map((c) => c.id)))} style={{ width: 15, height: 15 }} />
+          Toutes les informations
+          {!tousChamps && <span style={{ color: "var(--blue)", fontWeight: 700 }}>· {champs.size} sélectionnée(s)</span>}
+        </label>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 6 }}>
+          {CHAMPS_ENRICH.map((c) => (<label key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 600 }}>
+            <input type="checkbox" checked={champs.has(c.id)} onChange={() => toggleChamp(c.id)} style={{ width: 15, height: 15, flexShrink: 0 }} />
+            {c.label}
+          </label>))}
+        </div>
+        {!champs.size && <div style={{ fontSize: 11.5, color: "var(--red)", fontWeight: 600, marginTop: 6 }}>Sélectionnez au moins une information à chercher.</div>}
+      </div>}
       <div className="fld"><label>Limiter le nombre de fiches (optionnel)</label><input type="number" min="1" value={limit} onChange={(e) => setLimit(e.target.value)} placeholder={"Toutes (" + selCount + ")"} style={{ width: 200 }} /></div>
       {!gratuitSeul && <div className="fld"><label>Que voulez-vous enrichir en priorité ? (optionnel)</label><textarea rows={3} value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder={"Ex. : trouver l'e-mail du responsable achats et les horaires d'ouverture ; vérifier le SIRET et la surface de vente ; récupérer les réseaux sociaux…"} style={{ width: "100%", fontSize: 12.5 }} /><span style={{ fontSize: 11, color: "var(--muted)" }}>Laissez vide pour la recherche standard (e-mails et téléphones manquants en priorité).</span></div>}
     </>}
     <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
       <button className="btn btn-g" onClick={onClose}>Annuler</button>
-      <button className={cx("btn", gratuitSeul ? "btn-p" : "btn-ai")} disabled={!finalCount} onClick={() => onLaunch(new Set(selTypes), capped, gratuitSeul ? "" : instruction, gratuitSeul)}>{gratuitSeul ? <Globe size={15} /> : <Sparkles size={15} />} Enrichir {finalCount || ""}{gratuitSeul ? " (gratuit)" : ""}</button>
+      <button className={cx("btn", gratuitSeul ? "btn-p" : "btn-ai")} disabled={!finalCount || (!gratuitSeul && !champs.size)} onClick={() => onLaunch(new Set(selTypes), capped, gratuitSeul ? "" : instruction, gratuitSeul, gratuitSeul ? null : clesEnrich(champs))}>{gratuitSeul ? <Globe size={15} /> : <Sparkles size={15} />} Enrichir {finalCount || ""}{gratuitSeul ? " (gratuit)" : ""}</button>
     </div>
   </Modal>);
 }
@@ -9099,7 +9153,7 @@ function Prospection({ data, persist, go }) {
   // ET par les actions groupées « Enrichir la sélection »).
   // Exécution commune (sans confirmation) : phase gratuite appliquée au fil de l'eau, puis envoi en
   // LOT de ce qui reste. Partagée par l'enrichissement en masse et la recherche post-import.
-  const lancerEnrich = (queue, consigne, libelle, gratuitSeul) => {
+  const lancerEnrich = (queue, consigne, libelle, gratuitSeul, cles) => {
     if (aiJobs.has("prospects:enrich")) { setEnrichMsg({ ok: false, t: "Un enrichissement est déjà en cours." }); return; }
     if (data.claudeBatch && data.claudeBatch.id) { setEnrichMsg({ ok: false, t: "Un lot d'enrichissement est déjà en cours de traitement. Attendez sa fin (ou abandonnez-le) avant d'en lancer un autre." }); return; }
     setEnrichMsg(null);
@@ -9109,7 +9163,7 @@ function Prospection({ data, persist, go }) {
       const aFaire = []; let nGratuit = 0;
       for (const p of queue) {
         try {
-          const { out, body } = await enrichProspectPreparer(p, consigne);
+          const { out, body } = await enrichProspectPreparer(p, consigne, cles);
           if (out.source) { persist((d) => ({ ...d, prospects: d.prospects.map((x) => x.id === p.id ? applyProspectEnrich(x, out) : x) })); nGratuit++; }
           if (body && !gratuitSeul) aFaire.push({ id: p.id, out, body });
         } catch (e) {}
@@ -9133,7 +9187,7 @@ function Prospection({ data, persist, go }) {
       }
     });
   };
-  const runEnrichQueue = (queue, instruction, gratuitSeul) => {
+  const runEnrichQueue = (queue, instruction, gratuitSeul, cles) => {
     if (aiJobs.has("prospects:enrich")) { setEnrichMsg({ ok: false, t: "Un enrichissement est déjà en cours." }); return; }
     if (!queue || !queue.length) { setEnrichMsg({ ok: false, t: "Aucune fiche enrichissable." }); return; }
     const consigne = (instruction || "").trim();
@@ -9144,10 +9198,10 @@ function Prospection({ data, persist, go }) {
       return;
     }
     appConfirm("Enrichir " + queue.length + " fiche(s) prospect ? Déroulé : les sources officielles GRATUITES (SIRENE, OpenStreetMap, base adresse, site du magasin) sont interrogées d'abord et appliquées immédiatement ; seuls les champs encore manquants partent ensuite à l'IA, groupés en un LOT facturé 50 % moins cher sur les tokens. Le lot met généralement moins d'une heure (24 h au maximum) : vous pouvez fermer l'application, les résultats seront appliqués au retour. Coût estimé : ~" + (queue.length * 0.03).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " € maximum. Rien n'est inventé, à vérifier ensuite.", { title: "Enrichir les fiches", confirmLabel: "Lancer" }).then((ok) => {
-      if (ok) lancerEnrich(queue, consigne, "Enrichir les prospects", false);
+      if (ok) lancerEnrich(queue, consigne, "Enrichir les prospects", false, cles);
     });
   };
-  const enrichAll = (types, limit, instruction, gratuitSeul) => {
+  const enrichAll = (types, limit, instruction, gratuitSeul, cles) => {
     let targets = prospects.filter((p) => !p.accountId && hasProspectIdentity(p));
     if (types && types.size) targets = targets.filter((p) => types.has(p.type || "autre"));
     if (!targets.length) { setEnrichMsg({ ok: false, t: "Aucun prospect à enrichir." }); return; }
@@ -9155,7 +9209,7 @@ function Prospection({ data, persist, go }) {
     const rest = targets.filter((p) => (p.email || "").trim() && (p.telephone || "").trim());
     let queue = [...missing, ...rest]; // priorité aux fiches sans e-mail / téléphone
     if (limit && limit > 0) queue = queue.slice(0, limit);
-    runEnrichQueue(queue, instruction, gratuitSeul);
+    runEnrichQueue(queue, instruction, gratuitSeul, cles);
   };
   // Recherche lancée sur les prospects fraîchement importés (option cochée à l'import) : même
   // déroulé que l'enrichissement en masse — sources gratuites d'abord, puis lot IA.
@@ -9834,7 +9888,7 @@ function Prospection({ data, persist, go }) {
       </div>
     )}
     {importOpen && <ProspectImportModal onClose={() => setImportOpen(false)} onImport={(drafts, enrich, mode, opts) => mode === "update" ? doUpdateImport(drafts, opts) : doImport(drafts, enrich)} />}
-    {enrichOpen && <EnrichSelectModal prospects={prospects} onClose={() => setEnrichOpen(false)} onLaunch={(types, limit, instruction, gratuitSeul) => { setEnrichOpen(false); enrichAll(types, limit, instruction, gratuitSeul); }} />}
+    {enrichOpen && <EnrichSelectModal prospects={prospects} onClose={() => setEnrichOpen(false)} onLaunch={(types, limit, instruction, gratuitSeul, cles) => { setEnrichOpen(false); enrichAll(types, limit, instruction, gratuitSeul); }} />}
     {edit && <Modal title={edit.nom ? edit.nom : "Nouveau prospect"} onClose={() => { setEdit(null); setPfMsg(null); setSirMsg(null); }} wide>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
         <button type="button" className="btn btn-ai btn-s" onClick={enrichProspect} disabled={pfBusy || !hasProspectIdentity(edit)} title="Recherche « produit en croix » : à partir de n'importe quelle info connue (nom, SIRET, adresse, téléphone…), retrouver et compléter les champs vides, y compris le nom"><Sparkles size={14} className={pfBusy ? "spin" : ""} /> {pfBusy ? ("Recherche… " + fmtElapsed(pfElapsed)) : "Approfondir la recherche IA"}</button>
