@@ -1284,6 +1284,31 @@ function normalize(d) {
 // Marqueurs de « case sans valeur » produits par les exports de tableur. Comparaison sur la valeur
 // ENTIÈRE du champ, jamais sur une sous-chaîne : une note qui contient le mot « vide » reste intacte.
 const PLACEHOLDER_VALUE = /^(vide|vides|n\/?a|néant|neant|non renseign[ée]|non communiqu[ée]|non d[ée]fini[e]?|inconnu[e]?|aucun[e]?|null|undefined|-{1,3}|—|\.)$/i;
+// Le même marqueur laissé À L'INTÉRIEUR d'un texte : « Téléphone : VIDE », « VIDE, VIDE », une ligne
+// de notes réduite à « VIDE ». La règle ci-dessus ne les voyait pas, faute d'occuper tout le champ.
+// Deux garde-fous, parce qu'ici on touche à du texte rédigé :
+//  · le marqueur doit être EN CAPITALES — un import recopie la cellule telle quelle, tandis que le mot
+//    français d'une note (« rayon vide ») s'écrit en minuscules et doit rester ;
+//  · il doit occuper un SEGMENT ENTIER (entre deux séparateurs ou en fin de ligne), éventuellement
+//    précédé de son étiquette. « VIDE-GRENIER » n'est donc pas un segment marqueur et survit intact.
+const PLACEHOLDER_CAPS = "VIDES?|N\\/?A|N[EÉ]ANT|INCONNUE?S?|NON RENSEIGN[EÉ]E?S?|NON COMMUNIQU[EÉ]E?S?|NON D[EÉ]FINIE?S?|NULL|UNDEFINED";
+const PLACEHOLDER_SEGMENT = new RegExp("(^|[\\n,;·|])[ \\t]*(?:[^:\\n,;·|]{1,40}:[ \\t]*)?(?:" + PLACEHOLDER_CAPS + ")[ \\t]*(?=$|[\\n,;·|])", "g");
+function sansMentionsVides(t) {
+  const s = String(t);
+  if (s.indexOf("VIDE") === -1 && !/N\/?A|N[EÉ]ANT|INCONNU|NON RENSEIGN|NON COMMUNIQU|NON D[EÉ]FINI|NULL|UNDEFINED/.test(s)) return s;
+  const gardees = [];
+  for (const ligne of s.split("\n")) {
+    const net = ligne.replace(PLACEHOLDER_SEGMENT, "$1")
+      // Séparateurs devenus orphelins après la suppression.
+      .replace(/[ \t]*([,;·|])[ \t]*(?=[,;·|])/g, "")
+      .replace(/^[ \t,;·|]+|[ \t,;·|]+$/g, "")
+      .replace(/[ \t]{2,}/g, " ");
+    // Une ligne qui n'était QUE des marqueurs disparaît, au lieu de laisser un blanc au milieu du texte.
+    if (!net && ligne.trim()) continue;
+    gardees.push(net);
+  }
+  return gardees.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
 const EMAIL_FIELDS = ["email", "contactEmail", "contactMail", "emailMagasin"];
 const PHONE_FIELDS = ["telephone", "tel", "mobile", "fixe", "contactTel"];
 // Une adresse sans « @ » n'est pas une adresse ; un téléphone qui n'est pas fait de chiffres n'est pas
@@ -1300,6 +1325,7 @@ function scrubRecord(r) {
     if (!t) { if (v !== t) set(k, ""); return; }
     if (PLACEHOLDER_VALUE.test(t)) { set(k, ""); return; }
     if (EMAIL_FIELDS.includes(k)) { if (t.indexOf("@") === -1) set(k, ""); return; }
+    if (!PHONE_FIELDS.includes(k)) { const net = sansMentionsVides(t); if (net !== t) { set(k, net); return; } }
     if (PHONE_FIELDS.includes(k)) {
       // Chiffres et séparateurs usuels seulement (+ espace . - / parenthèses), et assez de chiffres
       // pour être un numéro : « vide », « à demander » ou « 06 » sont écartés.
