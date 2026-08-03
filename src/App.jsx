@@ -214,7 +214,11 @@ const STAGES = [
   { id: "rdv", label: "RDV découverte", color: "#7c5cf0" }, { id: "referencement", label: "Client", color: "#FFD212" }, { id: "actif", label: "Client fidèle", color: "#2bb673" },
 ];
 const STAGE_ORDER = ["prospect", "contact", "rdv", "referencement", "actif"];
-const DEAL_STATUS = { brouillon: { label: "Brouillon", color: "#9aa6bd" }, envoye: { label: "Envoyé", color: "#5b8def" }, accepte: { label: "Accepté / Signé", color: "#2bb673" }, expediee: { label: "En cours de livraison", color: "#F8B133" }, refuse: { label: "Refusé", color: "#FF5A45" }, livre: { label: "Livré", color: "#3F60AA" } };
+const DEAL_STATUS = { brouillon: { label: "Brouillon", color: "#9aa6bd" }, envoye: { label: "Envoyé", color: "#5b8def" }, accepte: { label: "Accepté / Signé", color: "#2bb673" }, expediee: { label: "En cours de livraison", color: "#F8B133" }, refuse: { label: "Refusé", color: "#FF5A45" }, livre: { label: "Livré", color: "#3F60AA" }, paye: { label: "Livré et payé", color: "#128C6E" } };
+// « Livré » et « Livré et payé » sont deux fins de course : la marchandise est partie dans les deux
+// cas, seul l'encaissement les sépare. Tout ce qui distingue « en cours » de « terminé » doit donc
+// traiter les deux ensemble, sans quoi un document payé retomberait dans le pipeline ouvert.
+const DEAL_LIVRE = (s) => s === "livre" || s === "paye";
 // Définition métier (appliquée partout) : le « CA HT en attente » = les DEVIS (documents non encore
 // facturés), le « CA HT signé » = les FACTURES. Un devis refusé ou déjà converti ne compte plus en
 // attente ; les avoirs ne comptent pas comme CA signé.
@@ -10668,7 +10672,7 @@ function dealAutomationEvents(prev, next, accounts) {
   const out = []; const was = prev ? prev.statut : null;
   const acc = (accounts || []).find((a) => a.id === next.accountId); const ens = acc ? acc.enseigne : "";
   const mk = (autoKey, days, titre) => ({ id: "ev_auto_" + autoKey.replace(/[^a-z0-9]/gi, "_"), date: isoLocal(new Date(Date.now() + days * 86400000)), heure: "", titre, notes: "Relance planifiée automatiquement par MITMIT.", type: "relance", color: EVENT_TYPES.relance.color, accountId: next.accountId || "", siteId: next.livraisonSiteId || next.siteId || "", contactId: "", dealId: next.id, auto: autoKey });
-  if (next.type === "Facture" && next.statut === "livre" && was !== "livre") out.push(mk("reassort:" + next.id, 45, "Relance réassort — " + (ens || next.ref || "client")));
+  if (next.type === "Facture" && DEAL_LIVRE(next.statut) && !DEAL_LIVRE(was)) out.push(mk("reassort:" + next.id, 45, "Relance réassort — " + (ens || next.ref || "client")));
   if (next.type === "Devis" && next.statut === "envoye" && was !== "envoye") out.push(mk("relancedevis:" + next.id, 7, "Relancer le devis " + (next.ref || "") + (ens ? " · " + ens : "")));
   return out;
 }
@@ -10860,6 +10864,7 @@ function PipelineKanban({ data, persist, go, embedded }) {
     { id: "accepte", label: "Accepté", color: "#2bb673" },
     { id: "expediee", label: "En cours de livraison", color: "#F8B133" },
     { id: "livre", label: "Livré", color: "#3F60AA" },
+    { id: "paye", label: "Livré et payé", color: "#128C6E" },
     { id: "refuse", label: "Refusé", color: "#FF5A45" },
   ];
   const accOf = (id) => data.accounts.find((a) => a.id === id);
@@ -12125,7 +12130,7 @@ function SearchPalette({ data, onClose, onPick }) {
 function assistantAnswer(qRaw, data) {
   const q = normStr(qRaw || "");
   const has = (...ws) => ws.some((w) => q.includes(normStr(w)));
-  const openDeals = data.deals.filter((d) => d.statut !== "livre" && d.statut !== "refuse");
+  const openDeals = data.deals.filter((d) => !DEAL_LIVRE(d.statut) && d.statut !== "refuse");
   if (!q.trim()) return { text: "Posez-moi une question sur vos groupes et établissements, votre pipeline, votre stock ou l'agenda." };
   // Aide / capacités
   if (has("aide", "help", "que sais-tu", "que peux-tu", "capacite", "comment ca marche", "?aide")) {
@@ -12148,7 +12153,7 @@ function assistantAnswer(qRaw, data) {
   }
   // CA signé
   if (has("ca ", "chiffre", "signe", "signé", "vendu", "facture accepte")) {
-    const ca = data.deals.filter((d) => d.statut === "accepte" || d.statut === "livre").reduce((s, d) => s + d.montant, 0);
+    const ca = data.deals.filter((d) => d.statut === "accepte" || DEAL_LIVRE(d.statut)).reduce((s, d) => s + d.montant, 0);
     return { text: `Chiffre d'affaires signé (devis acceptés + livrés) : ${eur(ca)}.`, actions: [{ label: "Voir les documents", tab: "deals" }] };
   }
   // Stock / ruptures
@@ -13079,7 +13084,7 @@ export default function App() {
     const prestoAl = data.deals.filter((d) => d.type === "Devis" && d.statut === "accepte" && !d.converti).length + data.deals.filter((d) => d.type === "Commande" && d.prestoStatus === "a_transmettre").length;
     const todayStr = new Date().toISOString().slice(0, 10);
     const agendaAl = data.accounts.filter((a) => a.dateAction && a.dateAction <= todayStr).length;
-    return { accounts: data.accounts.length, repertoire: data.contacts.length, prospection: data.prospects.filter((p) => p.statut === "a_contacter").length, deals: data.deals.length, pipeline: data.deals.filter((d) => d.statut !== "livre" && d.statut !== "refuse").length, agenda: agendaAl, stock: stockAl, reassort: reAl, sav: savAl, presto: prestoAl };
+    return { accounts: data.accounts.length, repertoire: data.contacts.length, prospection: data.prospects.filter((p) => p.statut === "a_contacter").length, deals: data.deals.length, pipeline: data.deals.filter((d) => !DEAL_LIVRE(d.statut) && d.statut !== "refuse").length, agenda: agendaAl, stock: stockAl, reassort: reAl, sav: savAl, presto: prestoAl };
   }, [data]);
   const meta = TABS.find((t) => t.id === tab);
   return (<div className={cx("pu-root", navOpen && "nav-open", theme === "dark" && "dark", "color-" + bgColor, "pat-" + bgPattern, "acc-" + accent)}><style>{CSS}</style><ConfirmHost /><ClaudeBatchWatcher batch={data.claudeBatch} persist={persist} /><ClaudeSpendAlert usage={data.claudeUsage} onAck={(palier) => persist((p2) => ({ ...p2, claudeUsage: { ...(p2.claudeUsage || {}), alerte: { date: TODAY(), palier } } }))} /><FilamentConfetti />

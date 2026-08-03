@@ -20,7 +20,7 @@ const TYPES_INDEP = ["independant", "specialiste"];
 // Statuts qui signifient « pas encore contacté » : tout le reste vaut contact établi.
 const STATUTS_NON_CONTACTE = new Set(["", "a_qualifier", "a_contacter"]);
 // Un devis au statut brouillon, envoyé ou refusé n'est pas une commande.
-const STATUTS_GAGNES = new Set(["accepte", "expediee", "livre"]);
+const STATUTS_GAGNES = new Set(["accepte", "expediee", "livre", "paye"]);
 
 const MOIS = ["Jan", "Fév", "Mar", "Avr", "Mai", "Juin", "Juil", "Août", "Sep", "Oct", "Nov", "Déc"];
 
