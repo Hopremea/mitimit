@@ -103,7 +103,11 @@ export default async function handler(req, res) {
   const to = (body.to || "").trim();
   const subject = (body.subject || "").trim();
   const text = body.body || "";
-  if (!to || !subject) { res.status(400).json({ error: "Destinataire et objet requis." }); return; }
+  // Le destinataire est FACULTATIF : un brouillon sert justement à finir un message plus tard, et
+  // Gmail accepte un brouillon sans en-tete To (createDraft l'omet alors). L'exiger ici privait de
+  // brouillon toute fiche sans adresse connue, alors que c'est le cas ou l'on en a le plus besoin.
+  // L'objet, lui, reste requis : un brouillon sans objet est introuvable dans la boite.
+  if (!subject) { res.status(400).json({ error: "Objet requis." }); return; }
 
   const brut = Array.isArray(body.attachments) ? body.attachments : [];
   if (brut.length > MAX_NB) { res.status(400).json({ error: "Trop de pièces jointes (max " + MAX_NB + ")." }); return; }
