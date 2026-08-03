@@ -10866,6 +10866,11 @@ const pMin = (t) => { if (!t || !/^\d{1,2}:\d{2}$/.test(t)) return null; const [
 const fmtDur = (min, opts = {}) => { const v = Math.round(min || 0); const sign = v < 0 ? "−" : (opts.plus && v > 0 ? "+" : ""); const a = Math.abs(v); const h = Math.floor(a / 60), m = a % 60; return sign + (m ? `${h} h ${String(m).padStart(2, "0")}` : `${h} h`); };
 const isoLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const isWeekendDs = (ds) => { const wd = new Date(ds + "T00:00:00").getDay(); return wd === 0 || wd === 6; };
+// Excédent d'une journée sur l'objectif contractuel, en minutes. Définition UNIQUE, partagée par
+// l'écran RH et l'export : les deux la calculaient séparément et divergeaient. Un jour de week-end
+// n'a pas d'objectif, tout ce qui y est travaillé est donc de l'heure supplémentaire ; un forfait
+// (congés, cours, férié) vaut 7 h et ne produit rien, sauf si des heures ont été saisies au-dessus.
+const otMinutes = (ds, st) => (!st || st.invalid) ? 0 : Math.max(0, st.worked - (isWeekendDs(ds) ? 0 : PRESENCE_TARGET));
 // Décompte d'une journée à partir d'un enregistrement { arrivee, depart, pause, pauseMin }.
 function presenceDay(rec) {
   if (!rec) return null;
@@ -10973,7 +10978,7 @@ function SalaireRH({ data, persist }) {
     const byWeek = {};
     Object.entries(data.pointages || {}).filter(([ds]) => ds.startsWith(monthPrefix)).forEach(([ds, rec]) => {
       const st = presenceDay(rec); if (!st || st.invalid) return;
-      const ot = Math.max(0, st.worked - (isWeekendDs(ds) ? 0 : PRESENCE_TARGET)); if (ot <= 0) return;
+      const ot = otMinutes(ds, st); if (ot <= 0) return;
       const d = new Date(ds + "T00:00:00"); const mo = new Date(d); mo.setDate(d.getDate() - ((d.getDay() + 6) % 7));
       const k = isoLocal(mo); byWeek[k] = (byWeek[k] || 0) + ot;
     });
@@ -11150,15 +11155,18 @@ function CommissionsRH({ data, persist, go }) {
 // Export Excel des données RH en un seul classeur, une feuille par nature : heures pointées,
 // trajets domicile-travail et déplacements ponctuels (frais professionnels), sous forme de tableaux
 // Markdown à coller directement dans Notion (le tableau s'y convertit automatiquement).
-function buildRHNotion(data) {
+function buildRHNotion(data, monthPrefix) {
   const jour = (ds) => new Date(ds + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "short" });
   const dateFr = (ds) => new Date(ds + "T00:00:00").toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
   const hd = (min) => (min / 60).toFixed(2).replace(".", ",");
   const cell = (v) => String(v == null ? "" : v).replace(/\|/g, "/");
-  const pgs = Object.entries(data.pointages || {}).sort((a, b) => a[0].localeCompare(b[0]));
+  // Période exportée : par défaut le mois affiché à l'écran, sinon tout l'historique. Sans ce filtre,
+  // l'export couvrait plusieurs mois alors que les écrans RH en montrent un seul, et les totaux ne
+  // pouvaient pas coïncider.
+  const pgs = Object.entries(data.pointages || {}).filter(([ds]) => !monthPrefix || ds.startsWith(monthPrefix)).sort((a, b) => a[0].localeCompare(b[0]));
   const L = [];
   // Tableau 1 — Heures pointées
-  L.push("### Heures pointées");
+  L.push("### Heures pointées" + (monthPrefix ? (" — " + new Date(monthPrefix + "-01T00:00:00").toLocaleDateString("fr-FR", { month: "long", year: "numeric" })) : " — tout l'historique"));
   L.push("");
   L.push("| Date | Jour | Type | Arrivée | Départ | Pause | Heures | Heures sup. |");
   L.push("| --- | --- | --- | --- | --- | --- | --- | --- |");
@@ -11166,7 +11174,7 @@ function buildRHNotion(data) {
   pgs.forEach(([ds, rec]) => {
     const st = presenceDay(rec); if (!st || st.invalid) return;
     const mot = st.motif && st.motif !== "presence" ? PRESENCE_MOTIFS[st.motif] : null;
-    const ot = isChronoMotif(st.motif) && !isWeekendDs(ds) ? Math.max(0, st.worked - PRESENCE_TARGET) : 0;
+    const ot = otMinutes(ds, st);
     totH += st.worked; totOT += ot;
     L.push("| " + [dateFr(ds), jour(ds), cell(mot ? mot.label : "Présence"), mot ? "" : (st.arrivee || ""), mot ? "" : (st.depart || ""), mot ? "" : ((st.pause || 0) + " min"), hd(st.worked), hd(ot)].join(" | ") + " |");
   });
@@ -11198,6 +11206,9 @@ function buildRHNotion(data) {
 function RH({ data, persist, go }) {
   const [sub, setSub] = useState("presence");
   const [exportOpen, setExportOpen] = useState(false); const [copied, setCopied] = useState(false);
+  // Période de l'export : le mois en cours par défaut, pour coïncider avec ce qu'affichent les écrans.
+  const [expMois, setExpMois] = useState(() => isoLocal(new Date()).slice(0, 7));
+  const moisDispo = useMemo(() => [...new Set(Object.keys(data.pointages || {}).map((ds) => ds.slice(0, 7)))].sort().reverse(), [data.pointages]);
   const subs = [{ id: "presence", label: "Temps de présence", icon: Clock }, { id: "frais", label: "Frais kilométriques", icon: Navigation }, { id: "salaire", label: "Salaire estimé", icon: Calculator }, { id: "commission", label: "Commissions", icon: Percent }];
   return (<div className="fade">
     <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>{subs.map((x) => { const Ic = x.icon; return <button key={x.id} className={cx("chip", sub === x.id && "on")} onClick={() => setSub(x.id)} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Ic size={14} />{x.label}</button>; })}<button className="btn btn-g btn-s" style={{ marginLeft: "auto" }} onClick={() => { setCopied(false); setExportOpen(true); }} title="Exporter (copier-coller Notion) : heures, trajets domicile-travail et déplacements ponctuels"><Copy size={14} /> Exporter (Notion)</button></div>
@@ -11205,8 +11216,9 @@ function RH({ data, persist, go }) {
     <div style={{ display: sub === "frais" ? "block" : "none" }}><FraisKm data={data} persist={persist} /></div>
     <div style={{ display: sub === "salaire" ? "block" : "none" }}><SalaireRH data={data} persist={persist} /></div>
     <div style={{ display: sub === "commission" ? "block" : "none" }}><CommissionsRH data={data} persist={persist} go={go} /></div>
-    {exportOpen && (() => { const txt = buildRHNotion(data); const copy = async () => { try { await navigator.clipboard.writeText(txt); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch (e) { const ta = document.getElementById("rh-export-ta"); if (ta) { ta.focus(); ta.select(); try { document.execCommand("copy"); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch (e2) { } } } }; return (<Modal title="Exporter (copier-coller Notion)" onClose={() => setExportOpen(false)} wide>
+    {exportOpen && (() => { const txt = buildRHNotion(data, expMois || null); const copy = async () => { try { await navigator.clipboard.writeText(txt); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch (e) { const ta = document.getElementById("rh-export-ta"); if (ta) { ta.focus(); ta.select(); try { document.execCommand("copy"); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch (e2) { } } } }; return (<Modal title="Exporter (copier-coller Notion)" onClose={() => setExportOpen(false)} wide>
       <div style={{ fontSize: 12.5, color: "var(--muted)", marginBottom: 10, lineHeight: 1.5 }}>Trois tableaux : heures pointées, trajets domicile-travail et déplacements ponctuels (frais professionnels). Cliquez sur <strong>Copier</strong>, puis collez dans Notion : chaque tableau s'y convertit automatiquement.</div>
+      <div className="fld" style={{ marginBottom: 10, maxWidth: 340 }}><label>Période exportée</label><select value={expMois} onChange={(e) => setExpMois(e.target.value)}>{moisDispo.map((m) => <option key={m} value={m}>{new Date(m + "-01T00:00:00").toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}</option>)}<option value="">Tout l'historique</option></select><span style={{ fontSize: 11, color: "var(--muted)" }}>Un mois donne exactement le même relevé que l'onglet « Temps de présence ».</span></div>
       <textarea id="rh-export-ta" readOnly value={txt} onFocus={(e) => e.target.select()} rows={Math.min(24, txt.split("\n").length + 1)} style={{ width: "100%", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, lineHeight: 1.5, whiteSpace: "pre", overflowX: "auto" }} />
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}><button className="btn btn-p" onClick={copy}>{copied ? <><CheckCircle2 size={15} /> Copié !</> : <><Copy size={15} /> Copier</>}</button></div>
     </Modal>); })()}
