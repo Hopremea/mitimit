@@ -450,18 +450,19 @@ function seedSites() {
 const PROSPECT_TYPES = { cooperative: { label: "Coopérative", color: "#3F60AA" }, chaine: { label: "Chaîne / réseau (via centrale)", color: "#7c5cf0" }, franchise: { label: "Franchisé (commande seul)", color: "#5b54c9" }, independant: { label: "Indépendant", color: "#2bb673" }, specialiste: { label: "Spécialiste / Concept store", color: "#F8B133" }, gss: { label: "GSS / Grande surface", color: "#FF5A45" },
   // Cibles hors retail : elles n'ont ni SIRET commercial ni enseigne, mais leurs propres
   // identifiants (UAI pour un établissement scolaire, RNA pour une association).
-  scolaire: { label: "Scolaire (école, collège, lycée)", color: "#0EA5A4" }, periscolaire: { label: "Périscolaire / Centre de loisirs", color: "#14b8a6" }, petite_enfance: { label: "Crèche / Petite enfance", color: "#22c55e" }, association: { label: "Association / Ludothèque", color: "#d97706" }, mediatheque: { label: "Médiathèque / Bibliothèque", color: "#8b5cf6" },
+  scolaire: { label: "Scolaire (école, collège, lycée)", color: "#0EA5A4" }, periscolaire: { label: "Périscolaire / Centre de loisirs", color: "#14b8a6" }, petite_enfance: { label: "Crèche / Petite enfance", color: "#22c55e" }, association: { label: "Association / Ludothèque", color: "#d97706" }, mediatheque: { label: "Médiathèque / Bibliothèque", color: "#8b5cf6" }, medico_educatif: { label: "IME / Médico-éducatif", color: "#0891b2" },
   autre: { label: "Autre", color: "#9aa6bd" } };
 // Types dont l'identité ne repose PAS sur le registre du commerce : l'écran, l'import et
 // l'enrichissement doivent leur présenter les bons champs.
-const TYPES_HORS_RETAIL = new Set(["scolaire", "periscolaire", "petite_enfance", "association", "mediatheque"]);
+const TYPES_HORS_RETAIL = new Set(["scolaire", "periscolaire", "petite_enfance", "association", "mediatheque", "medico_educatif"]);
 const estHorsRetail = (p) => TYPES_HORS_RETAIL.has(String((p && p.type) || ""));
 // Identifiant officiel pertinent selon le type : UAI pour une école (identifiant national de
 // l'Éducation nationale), RNA pour une association (W + 9 chiffres), SIRET/SIREN pour le reste.
 function identifiantProspect(p) {
   if (!p) return null;
   const t = String(p.type || "");
-  if (t === "scolaire") return p.uai ? { label: "UAI", value: p.uai, titre: "Identifiant national de l'établissement scolaire" } : null;
+  // Un IME est recensé par l'Éducation nationale comme un établissement : il porte un UAI, pas un SIRET.
+  if (t === "scolaire" || t === "medico_educatif") return p.uai ? { label: "UAI", value: p.uai, titre: "Identifiant national de l'établissement" } : null;
   if (t === "association") { const rna = /^W\d{9}$/i.test(String(p.siren || "")) ? p.siren : ""; return rna ? { label: "RNA", value: rna, titre: "Numéro d'association au répertoire national" } : (p.siren ? { label: "SIREN", value: p.siren, titre: "Association immatriculée au registre des entreprises" } : null); }
   if (p.siret) return { label: "SIRET", value: p.siret, titre: "SIRET de l'établissement" };
   return p.siren ? { label: "SIREN", value: p.siren, titre: "SIREN de la société" } : null;
@@ -8201,29 +8202,44 @@ async function geoResolveZone(zone) {
   const z = String(zone || "").trim(); if (!z) return null;
   if (/^\d{2}$|^\d{3}$/.test(z)) return { departement: z, cp: "", nom: z };
   if (/^\d{5}$/.test(z)) return { departement: cpToDepartement(z), cp: z, nom: z };
+  const clef = (s) => stripAccentsLow(String(s || "")).replace(/[^a-z0-9]+/g, " ").trim();
+  // La recherche de communes est APPROCHANTE : « Gironde » y répondait « Girondelle », village de 153
+  // habitants des Ardennes, et toute la recherche partait dans le mauvais département. On n'accepte
+  // donc une commune que si son nom correspond vraiment ; sinon le département est essayé d'abord, et
+  // la commune approchante ne sert que de dernier recours.
+  let commune = null;
   try {
     const r = await fetch("https://geo.api.gouv.fr/communes?nom=" + encodeURIComponent(z) + "&fields=nom,code,codeDepartement,codesPostaux,population&limit=1&boost=population");
     // Le code INSEE de la commune est conservé : c'est le seul moyen de restreindre une recherche au
     // territoire d'une ville. Le code postal n'y suffit pas — Toulouse en compte six, n'en retenir
     // qu'un couperait les deux tiers des résultats (22 sociétés au lieu de 31).
-    if (r.ok) { const j = await r.json(); const c = j && j[0]; if (c) return { departement: c.codeDepartement || "", cp: (c.codesPostaux || [])[0] || "", code: c.code || "", nom: c.nom, commune: c.nom, population: c.population || 0 }; }
+    if (r.ok) { const j = await r.json(); const c = j && j[0]; if (c) commune = { departement: c.codeDepartement || "", cp: (c.codesPostaux || [])[0] || "", code: c.code || "", nom: c.nom, commune: c.nom, population: c.population || 0 }; }
   } catch (e) {}
+  if (commune && clef(commune.nom) === clef(z)) return commune;
   try {
     const r = await fetch("https://geo.api.gouv.fr/departements?nom=" + encodeURIComponent(z) + "&fields=nom,code&limit=1");
-    if (r.ok) { const j = await r.json(); const d = j && j[0]; if (d) return { departement: d.code, cp: "", nom: d.nom }; }
+    if (r.ok) { const j = await r.json(); const d = j && j[0]; if (d && clef(d.nom) === clef(z)) return { departement: d.code, cp: "", nom: d.nom }; }
   } catch (e) {}
-  return null;
+  return commune;
 }
 // Écoles, collèges et lycées — annuaire officiel de l'Éducation nationale. Fournit l'adresse, le
 // téléphone ET l'e-mail institutionnel, ce qu'aucune autre source publique ne donne aussi largement.
-async function educationSearch(zone, limit = 60) {
-  const g = await geoResolveZone(zone); if (!g) return [];
-  const where = g.commune ? `nom_commune like "${String(g.commune).replace(/"/g, "")}"` : (g.cp ? `code_postal="${g.cp}"` : `code_departement="${g.departement}"`);
-  const url = "https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/fr-en-annuaire-education/records?limit=" + Math.min(limit, 100) + "&where=" + encodeURIComponent(where + ' and etat="OUVERT"');
-  const r = await fetch(url); if (!r.ok) throw new Error("API éducation " + r.status);
-  const j = await r.json();
-  return (j.results || []).map((e) => ({
-    nom: e.nom_etablissement || "", type: "scolaire",
+// Code département tel que l'annuaire de l'Éducation nationale l'écrit : TROIS caractères, complétés
+// par un zéro à gauche — « 031 », « 02A », « 971 ». La recherche envoyait « 31 » et ne renvoyait donc
+// jamais rien dès qu'on cherchait par département, alors qu'il y a 1 256 établissements en 031.
+const depEducation = (d) => String(d || "").trim().toUpperCase().padStart(3, "0");
+// Filtre géographique commun à toutes les recherches dans l'annuaire : commune si la zone en désigne
+// une, sinon code postal, sinon département.
+function whereEducation(g) {
+  if (g.commune) return `nom_commune like "${String(g.commune).replace(/"/g, "")}"`;
+  if (g.cp) return `code_postal="${g.cp}"`;
+  return `code_departement="${depEducation(g.departement)}"`;
+}
+// Un enregistrement de l'annuaire -> une fiche prospect. Le même format sert aux écoles et aux IME,
+// seul le type diffère : ces établissements n'ont pas de SIRET commercial mais un UAI.
+function ficheEducation(e, type) {
+  return {
+    nom: e.nom_etablissement || "", type,
     uai: e.identifiant_de_l_etablissement || "",
     siret: /^\d{14}$/.test(String(e.siren_siret || "")) ? e.siren_siret : "",
     adresse: e.adresse_1 || "", cp: e.code_postal || "", ville: e.nom_commune || "",
@@ -8231,7 +8247,34 @@ async function educationSearch(zone, limit = 60) {
     telephone: e.telephone || "", email: e.mail || "", site: e.web || "",
     notes: [e.type_etablissement, e.statut_public_prive, e.appartenance_education_prioritaire && e.appartenance_education_prioritaire !== "N" ? "Éducation prioritaire" : ""].filter(Boolean).join(" · "),
     lat: e.latitude || null, lng: e.longitude || null,
-  })).filter((x) => x.nom);
+  };
+}
+async function recordsEducation(where, limit) {
+  const url = "https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/fr-en-annuaire-education/records?limit=" + Math.min(limit, 100) + "&where=" + encodeURIComponent(where + ' and etat="OUVERT"');
+  const r = await fetch(url); if (!r.ok) throw new Error("API éducation " + r.status);
+  const j = await r.json();
+  return j.results || [];
+}
+async function educationSearch(zone, limit = 60) {
+  const g = await geoResolveZone(zone); if (!g) return [];
+  const rs = await recordsEducation(whereEducation(g), limit);
+  return rs.map((e) => ficheEducation(e, "scolaire")).filter((x) => x.nom);
+}
+// Instituts médico-éducatifs. Ils ne sont NI au registre du commerce (le SIREN n'y désigne que
+// l'association gestionnaire, pas l'établissement), NI dans OpenStreetMap de façon fiable : c'est
+// l'annuaire de l'Éducation nationale qui les recense, sous le type « Médico-social », avec l'adresse,
+// le téléphone et l'adresse électronique institutionnelle.
+//
+// Ce type regroupe aussi les ITEP, IEM, SESSAD et centres de rééducation. Le tri se fait donc sur le
+// NOM, côté application : la catégorie fine n'existe pas comme champ interrogeable. Mesuré en
+// Haute-Garonne : 46 établissements médico-sociaux, 23 retenus, les écartés étant bien des ITEP et
+// des centres de rééducation.
+const RE_IME = /(m[ée]dico[\s-]*[ée]ducatif|m[ée]dico[\s-]*professionnel|\bI\.?M\.?E\.?\b|\bI\.?M\.?Pro\b)/i;
+async function imeSearch(zone, limit = 100) {
+  const g = await geoResolveZone(zone); if (!g) return [];
+  const rs = await recordsEducation(whereEducation(g) + ' and type_etablissement="Médico-social"', limit);
+  return rs.map((e) => ficheEducation(e, "medico_educatif"))
+    .filter((x) => x.nom && RE_IME.test(x.nom));
 }
 // Associations et ludothèques — registre national des entreprises (les associations y sont
 // immatriculées). Le dirigeant déclaré sert de premier interlocuteur.
@@ -9433,6 +9476,7 @@ function Prospection({ data, persist, go }) {
           if (!gz) { setAiErr("Zone « " + z + " » non reconnue, ou service d'annuaire momentanément indisponible. Saisissez une ville, un numéro de département (ex. 31) ou un nom de département, puis réessayez."); return; }
           let lignes = [], libelle = "";
           if (source === "ecoles") { lignes = await educationSearch(z); libelle = "établissement(s) scolaire(s)"; }
+          else if (source === "ime") { lignes = await imeSearch(z); libelle = "IME"; }
           else if (source === "associations") { lignes = await associationSearch(z, assoMot); libelle = "association(s)"; }
           else if (source === "naf") { lignes = await nafSearch(z, naf, { taille, forme, cible: kind }); libelle = "entreprise(s)"; }
           else if (source === "mediatheques") { lignes = await osmSearchLieux(z, '["amenity"="library"]', "mediatheque"); libelle = "médiathèque(s)"; }
@@ -9565,6 +9609,7 @@ function Prospection({ data, persist, go }) {
           <option value="magasins">Magasins de jouets / loisirs</option>
           <option value="naf">Commerces par code d'activité (NAF)</option>
           <option value="ecoles">Scolaire (écoles, collèges, lycées)</option>
+          <option value="ime">IME & instituts médico-éducatifs</option>
           <option value="associations">Associations & ludothèques</option>
           <option value="mediatheques">Médiathèques & bibliothèques</option>
         </select></div>
@@ -9579,6 +9624,7 @@ function Prospection({ data, persist, go }) {
         {source === "magasins" && "OpenStreetMap d'abord (gratuit) ; l'IA ne complète que si la zone est peu cartographiée."}
         {source === "naf" && "Registre national des entreprises : recensement exhaustif d'un code d'activité sur un département. Gratuit, sans IA."}
         {source === "ecoles" && "Annuaire officiel de l'Éducation nationale : adresse, téléphone et e-mail institutionnel de chaque établissement. Gratuit, sans IA."}
+        {source === "ime" && "Annuaire de l'Éducation nationale, catégorie « Médico-social » : instituts médico-éducatifs et médico-professionnels, avec adresse, téléphone et e-mail institutionnel. Les ITEP, IEM et centres de rééducation sont écartés. Gratuit, sans IA. À noter : le registre des entreprises ne connaît que l'association gestionnaire, pas l'établissement — d'où cette source."}
         {source === "associations" && "Registre national des entreprises (les associations y sont immatriculées), avec le dirigeant déclaré. Gratuit, sans IA."}
         {source === "mediatheques" && "OpenStreetMap : bibliothèques et médiathèques de la zone. Gratuit, sans IA."}
       </div>
