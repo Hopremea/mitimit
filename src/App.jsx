@@ -1312,15 +1312,42 @@ function scrubRecord(r) {
 // nom est un cul-de-sac qui pollue le listing et le mailing. La règle est PRÉVENTIVE (aucune fiche
 // n'est créée à la recherche ni à l'import) et RÉTROACTIVE (les fiches déjà enregistrées sont retirées).
 const DIRIGEANTS_EXCLUS = ["philippe gueydon"];
+// Sociétés dirigeantes exclues : quand la tête de réseau dirige elle-même ses magasins, aucun d'eux
+// ne se démarche en direct. Le SIREN est le critère fiable ; la dénomination rattrape les fichiers
+// importés, où la colonne « dirigeant » ne porte qu'un nom de société.
+const SOCIETES_DIRIGEANTES_EXCLUES = [
+  { siren: "519780795", label: "SOCULTUR (NEW LOISIRS & CULTURE - CULTURA)", noms: ["socultur", "new loisirs culture", "new loisirs et culture"] },
+];
 // Les registres renvoient tantôt « prénom nom », tantôt « nom prénom », et une colonne « dirigeant »
 // d'un fichier importé porte souvent le nom complet dans le seul champ « nom » : on compare les trois.
 function dirigeantExclu(r) {
   if (!r) return false;
   const norm = (s) => stripAccentsLow(String(s || "")).replace(/[^a-z]+/g, " ").trim();
+  const digits9 = (s) => String(s || "").replace(/\D/g, "").slice(0, 9);
+  const dirSiren = digits9(r.dirigeantSiren), propreSiren = digits9(r.siren);
+  const libelles = [norm(r.contactNom), norm([r.contactPrenom, r.contactNom].filter(Boolean).join(" "))].filter(Boolean);
+  // Société dirigeante : par son SIREN, par sa dénomination, ou parce que la fiche EST un établissement
+  // qu'elle exploite en direct (le magasin porte alors le SIREN de la société elle-même).
+  if (SOCIETES_DIRIGEANTES_EXCLUES.some((s) => (dirSiren && dirSiren === s.siren)
+    || (propreSiren && propreSiren === s.siren)
+    || s.noms.some((n) => libelles.some((x) => x.includes(n))))) return true;
   const prenom = norm(r.contactPrenom), nom = norm(r.contactNom);
   if (!prenom && !nom) return false;
-  const formes = [nom, [prenom, nom].filter(Boolean).join(" "), [nom, prenom].filter(Boolean).join(" ")];
-  return DIRIGEANTS_EXCLUS.some((d) => formes.includes(d));
+  // Comparaison sur les mots triés : « Philippe Gueydon », « Gueydon Philippe » et le couple
+  // prénom + nom se ramènent à la même clé. Un patronyme seul ne suffit jamais — trop ambigu pour
+  // supprimer une fiche.
+  const cle = (s) => s.split(" ").filter(Boolean).sort().join(" ");
+  const formes = [cle(nom), cle([prenom, nom].filter(Boolean).join(" "))];
+  return DIRIGEANTS_EXCLUS.some((d) => formes.includes(cle(d)));
+}
+// Motif lisible du refus, pour ne pas laisser croire à un bug quand une ligne disparaît du listing.
+function motifDirigeantExclu(r) {
+  const norm = (s) => stripAccentsLow(String(s || "")).replace(/[^a-z]+/g, " ").trim();
+  const digits9 = (s) => String(s || "").replace(/\D/g, "").slice(0, 9);
+  const soc = SOCIETES_DIRIGEANTES_EXCLUES.find((s) => digits9(r.dirigeantSiren) === s.siren || digits9(r.siren) === s.siren
+    || s.noms.some((n) => norm(r.contactNom).includes(n)));
+  if (soc) return "magasin dirigé par " + soc.label + ", non démarchable en direct";
+  return [r.contactPrenom, r.contactNom].filter(Boolean).join(" ") + " est exclu de la prospection (achats en centrale)";
 }
 
 const eur = (n) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(Number(n) || 0);
@@ -7743,10 +7770,11 @@ async function lookupSirene(query, villeHint) {
   const j = await res.json();
   const r = (j.results || [])[0]; if (!r) return null;
   const siege = r.siege || {};
-  // Le dirigeant sert à renseigner l'interlocuteur d'une fiche existante. Un dirigeant exclu de la
-  // prospection n'est donc jamais inscrit : la fiche reste, simplement sans nom de contact.
-  const dir = (r.dirigeants || []).find((d) => d.type_dirigeant === "personne physique"
-    && !dirigeantExclu({ contactPrenom: (d.prenoms || "").split(/\s+/)[0] || "", contactNom: d.nom || "" })) || null;
+  const dir = (r.dirigeants || []).find((d) => d.type_dirigeant === "personne physique") || null;
+  // Dirigeant PERSONNE MORALE : le magasin est détenu par une société, souvent la tête de réseau.
+  // Le registre le donne, mais l'application ne l'exploitait pas — c'est pourtant lui qui dit si
+  // l'établissement se démarche en direct ou seulement via sa maison mère.
+  const dirM = (r.dirigeants || []).find((d) => d.type_dirigeant === "personne morale") || null;
   const nb = r.nombre_etablissements || 0;
   const mono = nb === 1; // société mono-établissement → le siège EST l'établissement (adresse/SIRET fiables)
   // Société MULTI-établissements : l'API renvoie les établissements correspondant à la requête
@@ -7768,6 +7796,8 @@ async function lookupSirene(query, villeHint) {
     dirigeantNom: dir ? (dir.nom || "") : "",
     dirigeantPrenom: dir ? ((dir.prenoms || "").split(/\s+/)[0] || "") : "",
     dirigeantFonction: dir ? (dir.qualite && dir.qualite !== "Autre" ? dir.qualite : "Dirigeant") : "",
+    dirigeantSociete: dirM ? (dirM.denomination || dirM.nom || "") : "",
+    dirigeantSiren: dirM ? (dirM.siren || "") : "",
     siegeAdresse: siege.adresse || "",
     nbEtab: nb,
     mono,
@@ -8053,8 +8083,11 @@ async function nafSearch(zone, naf, limit = 50) {
     const etabs = (e.matching_etablissements || []).filter((x) => String(x.etat_administratif || "A") === "A");
     const loc = etabs.find((x) => cpToDepartement(x.code_postal) === g.departement) || etabs[0] || e.siege || {};
     const d = (e.dirigeants || []).find((x) => x.type_dirigeant === "personne physique") || null;
+    // Société dirigeante : c'est elle qui dit si l'établissement se démarche en direct.
+    const dm = (e.dirigeants || []).find((x) => x.type_dirigeant === "personne morale") || null;
     return {
       nom: e.nom_complet || e.nom_raison_sociale || "", type: typeNaf || (e.nombre_etablissements > 3 ? "chaine" : "independant"),
+      dirigeantSiren: dm ? (dm.siren || "") : "", dirigeantSociete: dm ? (dm.denomination || dm.nom || "") : "",
       siren: e.siren || "", siret: loc.siret || "", raisonSociale: e.nom_raison_sociale || "", formeJuridique: natureJuridiqueLabel(e.nature_juridique),
       adresse: loc.adresse || "", cp: loc.code_postal || "", ville: loc.libelle_commune || "",
       departement: cpToDepartement(loc.code_postal), region: "",
@@ -8208,6 +8241,9 @@ async function enrichProspectPreparer(p, instruction) {
         out.siren = r.siren || ""; out.raisonSociale = r.raisonSociale || ""; out.formeJuridique = r.formeJuridique || "";
         if (r.mono || r.etabMatch) { out.siret = r.siret || ""; out.adresse = r.adresse || ""; out.cp = r.cp || ""; out.ville = r.ville || ""; }
         out.contactNom = r.dirigeantNom || ""; out.contactPrenom = r.dirigeantPrenom || ""; out.contactFonction = r.dirigeantFonction || "";
+        // Société dirigeante : reportée sur la fiche, car c'est ce qui détermine si le magasin est
+        // démarchable en direct. Une société exclue fait retirer la fiche à l'enregistrement.
+        out.dirigeantSiren = r.dirigeantSiren || ""; out.dirigeantSociete = r.dirigeantSociete || "";
         if (r.dirigeantNom) out.contactSource = "RNE/INSEE (annuaire-entreprises)";
         out.source = "SIRENE (annuaire-entreprises)"; out.confiance = "haute";
       }
@@ -8524,13 +8560,13 @@ function createDraftsWithDedup(drafts, data) {
     if ((d.nom || d.enseigne) && seen.has(nameKey)) { skipped++; return; }
     // Dirigeant exclu de la prospection : on refuse la ligne plutôt que d'effacer le nom, sans quoi la
     // fiche serait créée quand même et il faudrait la trier à la main à chaque import.
-    if (dirigeantExclu(d)) { exclus.push(d.nom || d.enseigne || "(sans nom)"); seen.add(nameKey); return; }
+    if (dirigeantExclu(d)) { exclus.push({ nom: d.nom || d.enseigne || "(sans nom)", motif: motifDirigeantExclu(d) }); seen.add(nameKey); return; }
     const g = ligneEstUnSiege(d, groupes);
     if (g) { sieges.push({ nom: d.nom || d.enseigne || "(sans nom)", groupe: g.label }); seen.add(nameKey); return; }
     const dKeys = identityKeys({ nom: d.nom, enseigne: d.enseigne, ville: d.ville, cp: d.cp, adresse: d.adresse, telephone: d.telephone, email: d.email, siret: d.siret, siren: d.siren });
     if (dKeys.length && dKeys.some((k) => existingKeys.has(k))) { skipped++; seen.add(nameKey); return; }
     seen.add(nameKey); dKeys.forEach((k) => existingKeys.add(k)); // évite aussi les doublons internes au lot
-    created.push({ id: uid("p_"), nom: d.nom || "", enseigne: d.enseigne || "", type: PROSPECT_TYPES[d.type] ? d.type : "autre", format: d.format || "", adresse: d.adresse || "", ville: d.ville || "", cp: d.cp || "", departement: d.departement || "", region: d.region || "", telephone: d.telephone || "", site: d.site || "", email: d.email || "", statut: PROSPECT_STATUT[d.statut] ? d.statut : "a_qualifier", potentiel: POTENTIEL_META[d.potentiel] ? d.potentiel : "", notes: d.notes || "", source: "Import", accountId: null, createdAt: TODAY(), siren: d.siren || "", siret: d.siret || "", raisonSociale: d.raisonSociale || "", formeJuridique: d.formeJuridique || "", contactPrenom: d.contactPrenom || "", contactNom: d.contactNom || "", contactFonction: d.contactFonction || "", contactEmail: d.contactEmail || "", contactTel: d.contactTel || "", contactSource: "", facebook: d.facebook || "", instagram: d.instagram || "", archived: false, archiveReason: "", archiveDate: "", archiveNote: "" });
+    created.push({ id: uid("p_"), dirigeantSiren: d.dirigeantSiren || "", dirigeantSociete: d.dirigeantSociete || "", nom: d.nom || "", enseigne: d.enseigne || "", type: PROSPECT_TYPES[d.type] ? d.type : "autre", format: d.format || "", adresse: d.adresse || "", ville: d.ville || "", cp: d.cp || "", departement: d.departement || "", region: d.region || "", telephone: d.telephone || "", site: d.site || "", email: d.email || "", statut: PROSPECT_STATUT[d.statut] ? d.statut : "a_qualifier", potentiel: POTENTIEL_META[d.potentiel] ? d.potentiel : "", notes: d.notes || "", source: "Import", accountId: null, createdAt: TODAY(), siren: d.siren || "", siret: d.siret || "", raisonSociale: d.raisonSociale || "", formeJuridique: d.formeJuridique || "", contactPrenom: d.contactPrenom || "", contactNom: d.contactNom || "", contactFonction: d.contactFonction || "", contactEmail: d.contactEmail || "", contactTel: d.contactTel || "", contactSource: "", facebook: d.facebook || "", instagram: d.instagram || "", archived: false, archiveReason: "", archiveDate: "", archiveNote: "" });
   });
   return { created, skipped, sieges, exclus };
 }
@@ -8586,9 +8622,10 @@ function applyProspectEnrich(x, r) {
   if (r.site && estPageMagasin(r.site) && String(x.site || "").trim() && !estPageMagasin(x.site)) patch.site = r.site;
   setIf("siren", r.siren); setIf("siret", r.siret); setIf("raisonSociale", r.raisonSociale); setIf("formeJuridique", r.formeJuridique);
   setIf("adresse", r.adresse); setIf("cp", r.cp); setIf("ville", r.ville); setIf("departement", r.departement); setIf("region", r.region);
-  // Un dirigeant exclu de la prospection n'est jamais inscrit sur une fiche : sinon l'enrichissement
-  // ferait disparaître la fiche à l'enregistrement suivant, sans que rien ne l'explique à l'écran.
-  if (!dirigeantExclu(r)) { setIf("contactPrenom", r.contactPrenom); setIf("contactNom", r.contactNom); setIf("contactFonction", r.contactFonction); }
+  setIf("contactPrenom", r.contactPrenom); setIf("contactNom", r.contactNom); setIf("contactFonction", r.contactFonction);
+  // La société dirigeante est reprise même quand la fiche a déjà un interlocuteur : c'est elle qui
+  // détermine si le magasin se démarche en direct, et une société exclue fait retirer la fiche.
+  setIf("dirigeantSiren", r.dirigeantSiren); setIf("dirigeantSociete", r.dirigeantSociete);
   if (r.contactSource && !String(x.contactSource || "").trim()) patch.contactSource = r.contactSource;
   setIf("notes", r.notes);
   return Object.keys(patch).length ? { ...x, ...patch } : x;
@@ -8743,7 +8780,7 @@ function Prospection({ data, persist, go }) {
     const { created, skipped, sieges, exclus } = createDraftsWithDedup(drafts, data);
     setImportOpen(false);
     const dup = skipped ? " " + skipped + " doublon(s) écarté(s) (prospect ou établissement déjà enregistré)." : "";
-    const ex = (exclus && exclus.length) ? " " + exclus.length + " ligne(s) refusée(s) : dirigeant exclu de la prospection." : "";
+    const ex = (exclus && exclus.length) ? " " + exclus.length + " ligne(s) refusée(s) : " + [...new Set(exclus.map((x) => x.motif))].slice(0, 2).join(" ; ") + "." : "";
     // Lignes portant l'identité d'une centrale déjà suivie : on nomme les groupes concernés, sans quoi
     // le rejet paraîtrait arbitraire et la ligne serait réimportée telle quelle au fichier suivant.
     const sg = (sieges && sieges.length) ? " " + sieges.length + " ligne(s) refusée(s) : identité du siège d'un groupe déjà enregistré (" + [...new Set(sieges.map((x) => x.groupe))].slice(0, 4).join(", ") + ")." : "";
@@ -8873,7 +8910,7 @@ function Prospection({ data, persist, go }) {
   const save = (p) => {
     // Saisie manuelle d'un dirigeant exclu : on refuse à l'écran plutôt que de laisser la fiche
     // disparaître silencieusement au chargement suivant, où plus rien n'expliquerait sa disparition.
-    if (dirigeantExclu(p)) { setPfMsg({ ok: false, t: "Fiche non enregistrée : " + [p.contactPrenom, p.contactNom].filter(Boolean).join(" ") + " est exclu de la prospection (achats en centrale)." }); return; }
+    if (dirigeantExclu(p)) { setPfMsg({ ok: false, t: "Fiche non enregistrée : " + motifDirigeantExclu(p) + "." }); return; }
     persist((d) => ({ ...d, prospects: d.prospects.some((x) => x.id === p.id) ? d.prospects.map((x) => x.id === p.id ? p : x) : [p, ...d.prospects] })); setEdit(null);
   };
   const del = (id) => { persist((d) => ({ ...d, prospects: d.prospects.filter((x) => x.id !== id) })); setEdit(null); };
@@ -9053,6 +9090,7 @@ function Prospection({ data, persist, go }) {
           base.siret = "";
         }
         if (!v.siret && !base.contactNom && v.dirigeantNom) { base.contactNom = v.dirigeantNom; base.contactPrenom = v.dirigeantPrenom || ""; base.contactFonction = v.dirigeantFonction || ""; }
+        if (v.dirigeantSiren && !base.dirigeantSiren) { base.dirigeantSiren = v.dirigeantSiren; base.dirigeantSociete = v.dirigeantSociete || ""; }
         base.notes = (base.notes ? base.notes + "\n— " : "") + "Identité vérifiée au registre (annuaire-entreprises) le " + TODAY() + (contredit ? " — la ville du registre (" + (v.ville || "?") + ") diffère de la fiche : identifiants d'établissement laissés en l'état, à contrôler." : "") + ".";
       }
       mergedById[base.id] = base; groups++;
@@ -9160,7 +9198,7 @@ function Prospection({ data, persist, go }) {
           }
           const dup = (skipped ? " " + skipped + " doublon(s) écarté(s)." : "")
             + ((sieges && sieges.length) ? " " + sieges.length + " ligne(s) refusée(s) : identité du siège d'un groupe déjà enregistré." : "")
-            + ((exclus && exclus.length) ? " " + exclus.length + " résultat(s) refusé(s) : dirigeant exclu de la prospection." : "");
+            + ((exclus && exclus.length) ? " " + exclus.length + " résultat(s) refusé(s) : " + [...new Set(exclus.map((x) => x.motif))].slice(0, 2).join(" ; ") + "." : "");
           setAiMsg(created.length
             ? created.length + " " + libelle + " ajouté(s) au listing, sans aucune dépense." + dup + " À vérifier avant action."
             : ("Aucun nouveau résultat pour cette zone." + dup));
@@ -9184,11 +9222,11 @@ function Prospection({ data, persist, go }) {
         let refusesDir = 0;
         arr.forEach((r) => { const nom = (r.nom || r.enseigne || "").trim(); if (!nom) return; const key = (nom + "|" + (r.ville || "")).toLowerCase(); if (seen.has(key)) return; seen.add(key); const ct = r.contact || {};
           // Dirigeant exclu de la prospection : le résultat est jeté, pas rangé dans le listing.
-          if (dirigeantExclu({ contactPrenom: ct.prenom, contactNom: ct.nom })) { refusesDir++; return; }
+          if (dirigeantExclu({ contactPrenom: ct.prenom, contactNom: ct.nom, siren: r.siren })) { refusesDir++; return; }
           add.push({ id: "p_" + Date.now() + "_" + add.length, nom, enseigne: r.enseigne || "", type: ["cooperative", "chaine", "franchise", "independant", "specialiste", "gss", "autre"].includes(r.type) ? r.type : "autre", format: "", adresse: r.adresse || "", ville: r.ville || "", cp: r.cp || "", departement: r.departement || "", region: r.region || "", telephone: r.telephone || "", site: r.site || "", email: r.email || "", statut: "a_qualifier", potentiel: "", notes: r.notes || "", source: "Recherche IA · " + today, accountId: null, createdAt: today, siren: r.siren || "", siret: r.siret || "", raisonSociale: r.raisonSociale || "", formeJuridique: r.formeJuridique || "", contactPrenom: ct.prenom || "", contactNom: ct.nom || "", contactFonction: ct.fonction || "", contactEmail: ct.email || "", contactTel: ct.telephone || "", contactSource: ct.source || "" }); });
         persist((d) => ({ ...d, prospects: add.length ? [...add, ...d.prospects] : d.prospects, claudeUsage: addUsage(d.claudeUsage, usage) }));
         if (add.length) { setQ(""); setFType("tous"); setFRegion("tous"); setFlashIds(new Set(add.map((a) => a.id))); }
-        const exDir = refusesDir ? " " + refusesDir + " résultat(s) refusé(s) : dirigeant exclu de la prospection." : "";
+        const exDir = refusesDir ? " " + refusesDir + " résultat(s) refusé(s) : dirigeant exclu de la prospection (achats en centrale, ou magasin détenu par sa tête de réseau)." : "";
         setAiMsg((add.length ? add.length + " prospect(s) ajouté(s) au listing, statut « À qualifier ». À vérifier avant action." : "Aucun nouveau prospect (déjà présents ou aucun résultat exploitable).") + exDir);
       } catch (e) { const m = String((e && e.message) || e); const slow = /50[24]|delai|timeout|aborted|abort/i.test(m); setAiErr(slow ? "La recherche IA a mis trop de temps à répondre (elle interroge le web et les registres officiels en direct). Réessaie, ou précise une zone plus petite / un établissement précis pour accélérer." : ("Recherche IA momentanément indisponible (" + m + "). Réessaie dans un instant.")); }
       finally { setBusy(false); }
@@ -9205,6 +9243,10 @@ function Prospection({ data, persist, go }) {
     try {
       const r = await lookupSirene(q2, villeHintOf(edit));
       if (!r) { setSirMsg({ ok: false, t: "Aucune entreprise trouvée dans le registre officiel." }); return; }
+      // Magasin détenu par une société exclue : on le dit franchement plutôt que de compléter une
+      // fiche qui serait retirée du listing juste après.
+      const idReg = { contactPrenom: r.dirigeantPrenom, contactNom: r.dirigeantNom, dirigeantSiren: r.dirigeantSiren, siren: r.siren || edit.siren };
+      if (dirigeantExclu(idReg)) { setSirMsg({ ok: false, t: "Fiche non complétée : " + motifDirigeantExclu(idReg) + "." }); return; }
       const patch = {}; const filled = [];
       const fill = (k, v, label) => { if (v && !String(edit[k] || "").trim()) { patch[k] = v; filled.push(label); } };
       fill("siren", r.siren, "SIREN"); fill("raisonSociale", r.raisonSociale, "raison sociale"); fill("formeJuridique", r.formeJuridique, "forme juridique");
