@@ -3561,18 +3561,66 @@ function parseHoraires(txt) {
   const segs = String(txt).split(/[;,\n]/).map((x) => x.trim()).filter(Boolean);
   const grid = new Array(7).fill(null);
   let touched = false;
+  // Un créneau sans jour PROLONGE le segment précédent : « Lun-Ven 9h30-12h30, 14h-19h » décrit une
+  // coupure méridienne, la façon la plus courante d'ouvrir en France — et le format que produit
+  // OpenStreetMap. Sans cela l'après-midi était purement perdu et le magasin déclaré fermé à 15 h.
+  let derniersJours = [];
   segs.forEach((seg) => {
     const days = _parseDays(seg);
     const closed = /ferm/i.test(seg);
     const ranges = _parseRanges(seg);
     if (!ranges.length && !closed) return;
-    const targets = days.length ? days : (segs.length === 1 ? [0, 1, 2, 3, 4, 5, 6] : []);
-    targets.forEach((d) => { grid[d] = closed && !ranges.length ? { closed: true } : { ranges }; touched = true; });
+    let targets;
+    if (days.length) { targets = days; derniersJours = days; }
+    else if (segs.length === 1) { targets = [0, 1, 2, 3, 4, 5, 6]; derniersJours = targets; }
+    else targets = ranges.length ? derniersJours : [];
+    const prolonge = !days.length && segs.length > 1;
+    targets.forEach((d) => {
+      touched = true;
+      if (closed && !ranges.length) { grid[d] = { closed: true }; return; }
+      // Le prolongement s'AJOUTE au jour ; une nouvelle mention de jour le redéfinit.
+      const cumul = prolonge && grid[d] && grid[d].ranges ? [...grid[d].ranges, ...ranges] : ranges;
+      grid[d] = { ranges: cumul.slice().sort((a, b) => a[0] - b[0]) };
+    });
   });
   if (!touched) return null;
   // Jour non mentionné = considéré fermé (comportement Google).
   for (let d = 0; d < 7; d++) if (!grid[d]) grid[d] = { closed: true };
   return grid;
+}
+// État d'ouverture à l'instant présent, déduit du champ `horaires`. Trois issues seulement, car
+// « horaires absents » n'est PAS « fermé » : ne pas les distinguer laisserait croire qu'un magasin
+// est fermé alors qu'on ignore simplement ses horaires.
+//   ouvert / ferme  : horaires interprétés, comparés à l'heure courante
+//   inconnu         : champ vide, ou texte que l'analyse n'a pas su lire
+const HORAIRE_ETATS = {
+  ouvert: { couleur: "#2bb673", libelle: "Ouvert" },
+  ferme: { couleur: "#c0392b", libelle: "Fermé" },
+  inconnu: { couleur: "#F8B133", libelle: "Horaires non renseignés" },
+};
+function statutHoraire(txt) {
+  const grid = parseHoraires(txt);
+  if (!grid) return { etat: "inconnu", info: String(txt || "").trim() ? "Horaires non interprétables : « " + String(txt).trim() + " »" : "" };
+  const te = grid[todayJourIdx()];
+  const now = new Date(); const nowMin = now.getHours() * 60 + now.getMinutes();
+  if (te && te.ranges && te.ranges.length) {
+    const cur = te.ranges.find((r) => nowMin >= r[0] && nowMin < r[1]);
+    if (cur) return { etat: "ouvert", info: "Ferme à " + _fmtHM(cur[1]) };
+    const next = te.ranges.find((r) => nowMin < r[0]);
+    return { etat: "ferme", info: next ? "Ouvre à " + _fmtHM(next[0]) : "" };
+  }
+  return { etat: "ferme", info: "Fermé aujourd'hui" };
+}
+// Pastille d'ouverture, à poser à côté d'un nom. Le titre porte le détail : la couleur seule ne
+// suffirait pas, ni pour l'accessibilité ni pour distinguer « fermé » de « horaires inconnus ».
+function PastilleHoraire({ txt, taille = 9 }) {
+  const { etat, info } = statutHoraire(txt);
+  const m = HORAIRE_ETATS[etat];
+  return (<span
+    title={m.libelle + (info ? " · " + info : "")}
+    aria-label={m.libelle}
+    style={{ width: taille, height: taille, borderRadius: "50%", background: m.couleur, display: "inline-block", flexShrink: 0, border: "1px solid rgba(255,255,255,.7)", boxShadow: "0 0 0 1px rgba(20,32,58,.18)" }}
+  />);
 }
 // Voyant + liste verticale des horaires. Aujourd'hui est mis en gras ; le statut Ouvert/Fermé est
 // calculé sur l'heure courante. Repli sur le texte brut si l'analyse échoue.
@@ -3580,14 +3628,8 @@ function HorairesJours({ txt }) {
   const grid = parseHoraires(txt);
   if (!grid) return (<div style={{ color: "var(--muted)", fontSize: 13, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 6 }}><Clock size={14} />{txt}</div>);
   const today = todayJourIdx();
-  const now = new Date(); const nowMin = now.getHours() * 60 + now.getMinutes();
-  const te = grid[today];
-  let open = false, hint = "";
-  if (te && te.ranges && te.ranges.length) {
-    const cur = te.ranges.find((r) => nowMin >= r[0] && nowMin < r[1]);
-    if (cur) { open = true; hint = "Ferme à " + _fmtHM(cur[1]); }
-    else { const next = te.ranges.find((r) => nowMin < r[0]); if (next) hint = "Ouvre à " + _fmtHM(next[0]); }
-  }
+  const st = statutHoraire(txt);
+  const open = st.etat === "ouvert", hint = st.info;
   return (
     <div style={{ marginTop: 8 }}>
       <div style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13 }}>
@@ -4834,7 +4876,7 @@ function Accounts({ data, persist, go, focus }) {
       </div>
       {pdvRows.length === 0 ? <div className="empty">Aucun point de vente enregistré.</div> : visibleRows.length === 0 ? <div className="empty">Aucun établissement ne correspond à la recherche.</div> : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(238px, 1fr))", gap: 10 }}>{visibleRows.map((r) => { const acc = r.acc; const st = acc ? stageMeta(acc.stage) : null; const adr = r.kind === "site" ? (r.site.adresse || "") : (acc && (acc.ville || acc.adressePostale) || ""); const surf = r.kind === "site" ? r.site.typeSurface : (acc && acc.typeSurface); const ens = r.kind === "site" && acc ? acc.enseigne : ""; return (
         <button key={r.key} className="tile" onClick={() => openStore(r)} style={{ textAlign: "left", border: "1px solid var(--line)", borderRadius: 12, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4, fontFamily: "inherit" }}>
-          {(() => { const img = r.kind === "site" ? (r.site.photo || (acc && acc.logo)) : (acc && acc.logo); return (<div style={{ display: "flex", alignItems: "center", gap: 7 }}>{img ? <img src={img} alt="" style={{ width: 22, height: 22, borderRadius: 6, objectFit: "contain", background: "#fff", border: "1px solid var(--line)", flexShrink: 0 }} /> : <Store size={15} color="var(--blue)" style={{ flexShrink: 0 }} />}<span style={{ fontWeight: 800, fontSize: 13.5, lineHeight: 1.2 }}>{storeName(r)}</span><WarnTip msgs={r.kind === "site" ? anoms["s:" + r.site.id] : (acc ? anoms["a:" + acc.id] : null)} /></div>); })()}
+          {(() => { const img = r.kind === "site" ? (r.site.photo || (acc && acc.logo)) : (acc && acc.logo); return (<div style={{ display: "flex", alignItems: "center", gap: 7 }}>{img ? <img src={img} alt="" style={{ width: 22, height: 22, borderRadius: 6, objectFit: "contain", background: "#fff", border: "1px solid var(--line)", flexShrink: 0 }} /> : <Store size={15} color="var(--blue)" style={{ flexShrink: 0 }} />}<span style={{ fontWeight: 800, fontSize: 13.5, lineHeight: 1.2 }}>{storeName(r)}</span><PastilleHoraire txt={r.kind === "site" ? r.site.horaires : ""} /><WarnTip msgs={r.kind === "site" ? anoms["s:" + r.site.id] : (acc ? anoms["a:" + acc.id] : null)} /></div>); })()}
           {ens && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{ens}</div>}
           {adr && <div style={{ fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{adr}</div>}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 5, marginTop: 2 }}>{surf && <Badge color="#3F60AA">{surf}</Badge>}{r.kind === "acc" && <Badge color="#9aa6bd">point de vente unique</Badge>}{st && <StageTag stage={st} />}</div>
@@ -8115,6 +8157,9 @@ async function nominatimArea(q) {
 // Traduction basique des horaires OpenStreetMap (« Mo-Sa 10:00-19:00 ») vers le format français.
 function osmHoursToFr(h) {
   let t = String(h || "").trim(); if (!t) return "";
+  // « 24/7 » est la notation OpenStreetMap pour une ouverture permanente : traduite, elle devient
+  // lisible par l'analyseur ; laissée telle quelle, elle passait pour un horaire indéchiffrable.
+  if (/^24\s*\/\s*7$/.test(t)) return "Lun-Dim 0h-24h";
   t = t.replace(/\bPH\s+off\b/gi, "").replace(/\bPH\b/gi, "jours fériés");
   const days = { Mo: "Lun", Tu: "Mar", We: "Mer", Th: "Jeu", Fr: "Ven", Sa: "Sam", Su: "Dim" };
   Object.entries(days).forEach(([en, fr]) => { t = t.replace(new RegExp("\\b" + en + "\\b", "g"), fr); });
@@ -9640,7 +9685,7 @@ function Prospection({ data, persist, go }) {
   const card = (p) => { const tm = PROSPECT_TYPES[p.type] || PROSPECT_TYPES.autre; const sm = PROSPECT_STATUT[p.statut] || PROSPECT_STATUT.a_qualifier; const pm = POTENTIEL_META[p.potentiel]; const picked = selIds.has(p.id); return (
     <div key={p.id} ref={(el) => { if (el) cardRefs.current[p.id] = el; }} className={cx("card", "tile", flashIds && flashIds.has(p.id) && "prospect-flash")} style={{ display: "flex", flexDirection: "column", gap: 8, outline: picked ? "2px solid var(--blue)" : "none", outlineOffset: -1 }} onClick={() => selMode ? toggleSel(p.id) : setEdit(p)}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-        <div style={{ minWidth: 0, display: "flex", alignItems: "flex-start", gap: 8 }}>{selMode && <input type="checkbox" checked={picked} onChange={() => toggleSel(p.id)} onClick={(e) => e.stopPropagation()} style={{ width: 16, height: 16, marginTop: 2, flexShrink: 0 }} />}<div style={{ minWidth: 0 }}><div style={{ fontWeight: 800, fontSize: 14.5, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }} className="pu-display">{p.nom}<WarnTip msgs={anoms["p:" + p.id]} /></div>{p.enseigne && p.enseigne !== p.nom && <div style={{ fontSize: 12, color: "var(--muted)" }}>{p.enseigne}</div>}</div></div>
+        <div style={{ minWidth: 0, display: "flex", alignItems: "flex-start", gap: 8 }}>{selMode && <input type="checkbox" checked={picked} onChange={() => toggleSel(p.id)} onClick={(e) => e.stopPropagation()} style={{ width: 16, height: 16, marginTop: 2, flexShrink: 0 }} />}<div style={{ minWidth: 0 }}><div style={{ fontWeight: 800, fontSize: 14.5, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }} className="pu-display">{p.nom}<PastilleHoraire txt={p.horaires} /><WarnTip msgs={anoms["p:" + p.id]} /></div>{p.enseigne && p.enseigne !== p.nom && <div style={{ fontSize: 12, color: "var(--muted)" }}>{p.enseigne}</div>}</div></div>
         {pm && <Badge color={pm.color}>{pm.label}</Badge>}
       </div>
       <div style={{ fontSize: 12.5, color: "var(--muted)", display: "flex", alignItems: "flex-start", gap: 6 }}><MapPin size={14} style={{ flexShrink: 0, marginTop: 1 }} /><span>{[p.adresse, ((p.cp || "") + " " + (p.ville || "")).trim()].filter(Boolean).join(", ")}</span></div>
@@ -9790,6 +9835,9 @@ function Prospection({ data, persist, go }) {
       <div className="row2"><div className="fld"><label>Département</label><input value={edit.departement} onChange={(e) => upE("departement", e.target.value)} placeholder="82 Tarn-et-Garonne" /></div><div className="fld"><label>Région</label><input value={edit.region} onChange={(e) => upE("region", e.target.value)} placeholder="Occitanie" /></div></div>
       <div className="row2"><div className="fld"><label>Téléphone</label><input value={edit.telephone} onChange={(e) => upE("telephone", e.target.value)} /></div><div className="fld"><SearchLabel value={edit.email} kind="mail">E-mail du magasin</SearchLabel><input type="email" value={edit.email || ""} onChange={(e) => upE("email", e.target.value)} placeholder="contact@magasin.fr" /><span style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>Adresse générique du point de vente — utilisée en priorité pour le mailing de prospection.</span></div></div>
       <div className="fld"><label>Site web</label><input value={edit.site} onChange={(e) => upE("site", e.target.value)} placeholder="https://…" />{edit.site && edit.site.trim() && <a className="lnk" href={ensureHttp(edit.site)} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, marginTop: 4, display: "inline-flex", alignItems: "center", gap: 4 }}><ExternalLink size={12} /> Ouvrir {cleanDomain(edit.site) || "le site"}</a>}</div>
+      {/* Sans ce champ, la pastille d'ouverture resterait orange sans recours : seuls les prospects
+          issus d'OpenStreetMap arrivent avec des horaires. */}
+      <div className="fld"><label>Horaires d'ouverture</label><input value={edit.horaires || ""} onChange={(e) => upE("horaires", e.target.value)} placeholder="Lun-Sam 10h-19h, Dim fermé" /><span style={{ fontSize: 11, color: "var(--muted)" }}>Alimente la pastille verte / rouge du listing. Format libre : « Lun-Ven 9h30-12h30, 14h-19h ; Sam 10h-19h ; Dim fermé ».</span></div>
       <div className="row2"><div className="fld"><label>Statut de prospection</label><select value={edit.statut} onChange={(e) => upE("statut", e.target.value)}>{Object.entries(PROSPECT_STATUT).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div><div className="fld"><label>Potentiel</label><select value={edit.potentiel} onChange={(e) => upE("potentiel", e.target.value)}><option value="">— à évaluer —</option>{Object.entries(POTENTIEL_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div></div>
       <div className="fld"><label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>Notes <MicDictate title="Dicter une note au micro" onText={(t) => upE("notes", ((edit.notes || "").trim() + (edit.notes && edit.notes.trim() ? " " : "") + t))} /></label><textarea rows={3} value={edit.notes} onChange={(e) => upE("notes", e.target.value)} /></div>
       <div className="fld"><label>Étiquettes <span style={{ color: "var(--muted)", fontWeight: 400 }}>(catégorisation libre — ex. « Salon 2026 », « Prioritaire Q3 »)</span></label>
