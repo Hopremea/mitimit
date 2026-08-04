@@ -12569,6 +12569,9 @@ function Agenda({ data, persist, go }) {
   const [edit, setEdit] = useState(null);
   const [view, setView] = useState(null);
   const [icsOpen, setIcsOpen] = useState(false);
+  // Vue « journée » : la cellule du mois n'affiche que 4 événements ; un clic sur le jour ou sur le
+  // « +N » ouvre la liste COMPLÈTE du jour, chaque ligne menant à la même cible que dans la grille.
+  const [dayOpen, setDayOpen] = useState(null);
   const monthName = new Date(cursor.y, cursor.m, 1).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
   const first = new Date(cursor.y, cursor.m, 1);
   const offset = (first.getDay() + 6) % 7; // lundi = 0
@@ -12616,14 +12619,14 @@ function Agenda({ data, persist, go }) {
       <div className="cal-grid">
         {["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map((d) => <div key={d} className="cal-head">{d}</div>)}
         {cells.map((c, i) => { const ds = fmtDate(c.y, c.m, c.day); const evs = eventsByDate[ds] || []; const isToday = ds === todayStr; return (
-          <div key={i} className={cx("cal-cell", c.out && "cal-out", isToday && "cal-today")} onDoubleClick={() => setEdit(newEvent(ds))} style={{ cursor: "pointer" }} title="Double-clic pour ajouter un événement à cette date">
+          <div key={i} className={cx("cal-cell", c.out && "cal-out", isToday && "cal-today")} onClick={() => { if (evs.length) setDayOpen(ds); }} onDoubleClick={() => setEdit(newEvent(ds))} style={{ cursor: "pointer" }} title={evs.length ? "Clic : voir les " + evs.length + " événement(s) du jour · double-clic : ajouter" : "Double-clic pour ajouter un événement à cette date"}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><div className="cal-num">{c.day}</div><button className="iconbtn" style={{ width: 18, height: 18, opacity: .5 }} onClick={(e) => { e.stopPropagation(); setEdit(newEvent(ds)); }} title="Ajouter un événement ce jour"><Plus size={11} /></button></div>
             {evs.slice(0, 4).map((e, j) => { const evDone = e.kind === "custom" && e.ev && e.ev.done; return (<div key={j} className="cal-ev" style={{ borderLeftColor: e.color, ...(evDone ? { opacity: .5, textDecoration: "line-through" } : {}) }} title={e.label + (e.sub ? " — " + e.sub : "")} onClick={(ee) => { ee.stopPropagation(); if (e.kind === "custom") setView(e.ev); else if (e.target) go(e.target.tab, e.target.id); }}>{evDone ? "✓ " : ""}{e.label}{e.sub && <span className="cal-ev-sub"> · {e.sub}</span>}</div>); })}
-            {evs.length > 4 && <div style={{ fontSize: 10, color: "var(--muted)", textAlign: "center" }}>+{evs.length - 4}</div>}
+            {evs.length > 4 && <button onClick={(e) => { e.stopPropagation(); setDayOpen(ds); }} title={"Voir les " + evs.length + " événements de ce jour"} style={{ fontSize: 10.5, fontWeight: 800, color: "var(--blue)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "center", padding: "2px 0", fontFamily: "inherit" }}>+{evs.length - 4} · tout voir</button>}
           </div>
         ); })}
       </div>
-      <div style={{ marginTop: 10, fontSize: 11, color: "var(--muted)", textAlign: "center" }}>Astuce : double-cliquez sur un jour pour ajouter un événement, cliquez sur un événement perso pour le modifier.</div>
+      <div style={{ marginTop: 10, fontSize: 11, color: "var(--muted)", textAlign: "center" }}>Astuce : cliquez sur un jour pour voir tous ses événements, double-cliquez pour en ajouter un, cliquez sur un événement perso pour le modifier.</div>
     </div>
     <div className="card" style={{ marginTop: 14 }}>
       <h3 className="pu-display" style={{ margin: "0 0 10px", fontSize: 16 }}>À venir, 14 prochains jours</h3>
@@ -12640,6 +12643,16 @@ function Agenda({ data, persist, go }) {
     {edit && <Modal title={(data.events || []).some((e) => e.id === edit.id) ? "Modifier l'événement" : "Nouvel événement"} onClose={() => setEdit(null)}><EventForm event={edit} accounts={data.accounts} onSave={(ev) => { saveEvent(ev); setEdit(null); }} onDelete={() => { delEvent(edit.id); setEdit(null); }} isExisting={(data.events || []).some((e) => e.id === edit.id)} /></Modal>}
     {view && <Modal title="Événement" onClose={() => setView(null)}><EventView event={view} data={data} go={go} onSave={saveEvent} onClose={() => setView(null)} onEdit={() => { const ev = view; setView(null); setEdit(ev); }} onDelete={() => { delEvent(view.id); setView(null); }} /></Modal>}
     {icsOpen && <CalendarExportModal data={data} persist={persist} onClose={() => setIcsOpen(false)} />}
+    {dayOpen && (() => { const evs = eventsByDate[dayOpen] || []; return (<Modal title={new Date(dayOpen + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })} onClose={() => setDayOpen(null)}>
+      {evs.length === 0 ? <div className="empty">Aucun événement ce jour.</div> : <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 440, overflowY: "auto" }}>{evs.map((e, i) => { const evDone = e.kind === "custom" && e.ev && e.ev.done; return (<div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div onClick={() => { setDayOpen(null); if (e.kind === "custom") setView(e.ev); else if (e.target) go(e.target.tab, e.target.id); }} style={{ cursor: "pointer", flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 9, padding: "8px 10px", border: "1px solid var(--line)", borderLeft: "3px solid " + e.color, borderRadius: 10, background: "#fff", textDecoration: evDone ? "line-through" : "none", opacity: evDone ? .6 : 1 }}>
+          <span style={{ fontWeight: 700, fontSize: 13, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{evDone ? "✓ " : ""}{e.label}</span>
+          {e.sub && <span style={{ color: "var(--muted)", fontSize: 12, flexShrink: 0 }}>· {e.sub}</span>}
+        </div>
+        {e.kind === "custom" && e.ev && <EventQuickActions ev={e.ev} onSave={saveEvent} />}
+      </div>); })}</div>}
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}><button className="btn btn-p btn-s" onClick={() => { const d = dayOpen; setDayOpen(null); setEdit(newEvent(d)); }}><Plus size={14} /> Ajouter un événement ce jour</button></div>
+    </Modal>); })()}
   </div>);
 }
 function EventForm({ event, accounts, onSave, onDelete, isExisting }) {
