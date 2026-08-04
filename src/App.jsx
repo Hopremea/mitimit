@@ -1104,6 +1104,33 @@ function normalize(d) {
   d.attachments = d.attachments || {};
   d.claudeUsage = d.claudeUsage || { calls: 0, inputTokens: 0, outputTokens: 0 };
   d.events = d.events || [];
+  // RÈGLE D'UNIFORMITÉ : tout établissement (point de vente) a un compte, quelle que soit la façon
+  // dont la fiche a été créée (« Nouvel établissement » sans rattachement, import, ancienne donnée).
+  // Sans cela, deux fiches d'apparence identique se comportaient différemment (boutons absents,
+  // archivage, code client). Un site pdv sans compte, ou pointant vers un compte disparu, reçoit ici
+  // son compte indépendant, même mécanique que le détachement d'un groupe. Idempotent : l'identifiant
+  // du compte est DÉRIVÉ de celui du site, donc deux passages (ou deux appareils qui synchronisent)
+  // créent le même compte, jamais un doublon.
+  {
+    const accIds = new Set(d.accounts.map((a) => a.id));
+    const orphelins = (d.sites || []).filter((s) => s.type === "pdv" && (!s.accountId || !accIds.has(s.accountId)));
+    if (orphelins.length) {
+      const relink = {};
+      orphelins.forEach((s) => {
+        const newId = "acc_site_" + s.id;
+        relink[s.id] = newId;
+        if (!accIds.has(newId)) {
+          d.accounts.push({ id: newId, enseigne: s.label || "Établissement", kind: "établissement", stage: "prospect", magasins: 1, nature: "MI", code: buildClientCode(d.accounts, "MI"), siren: "", formeJuridique: "", raisonSociale: "", typeSurface: s.typeSurface || "", ville: parseLocality(s.adresse || "").ville || "", lat: s.lat ?? null, lng: s.lng ?? null, pipeline: 0, prochaineAction: "", dateAction: "", notes: "", adressePostale: s.adresse || "", adresseLivraison: s.adresseLivraison || "", livraisonIdentique: s.livraisonIdentique !== false, site: "", facebook: "", instagram: "", archived: false, archiveReason: "", archiveDate: "", archiveNote: "", tags: [], stageLog: [{ stage: "prospect", date: TODAY() }] });
+          accIds.add(newId);
+        }
+      });
+      d.sites = d.sites.map((s) => relink[s.id] ? { ...s, accountId: relink[s.id] } : s);
+      // Les enregistrements liés au site sans compte (contacts, devis, échanges, événements)
+      // rejoignent le compte créé, pour que la fiche montre bien tout ce qui la concerne.
+      const rl = (arr) => (arr || []).map((x) => (x.siteId && relink[x.siteId] && !x.accountId) ? { ...x, accountId: relink[x.siteId] } : x);
+      d.contacts = rl(d.contacts); d.deals = rl(d.deals); d.interactions = rl(d.interactions); d.events = rl(d.events);
+    }
+  }
   d.settings = { ...SETTINGS, ...(d.settings || {}) };
   // De facto : quand on n'a pas l'e-mail direct du contact, on met celui de l'établissement ; idem pour
   // le fixe (ligne fixe du magasin). Backfill unique sur tous les contacts existants (jamais d'écrasement).
