@@ -5745,7 +5745,6 @@ Le champ "consigne" est fourni avec un mode.
 Mode "consigne" : c'est un brief, une intention à traduire en message. Tu rédiges entièrement.
 Mode "brouillon" : le texte est déjà mon message. Tu le réécris en conservant strictement mes idées, mes faits et mes engagements. Tu corriges la langue, la structure et le registre. Tu n'ajoutes aucun argument, aucune offre et aucune donnée que je n'ai pas écrite. Si mon brouillon contient une erreur factuelle par rapport au contexte, tu ne la corriges pas en silence : tu la signales dans "alertes".
 Mode "retouche" : un message précédent et une instruction de modification te sont fournis. Applique uniquement la modification demandée, sans réécrire le reste.
-Mode "reformulation" : le texte est mon message définitif. Tu corriges UNIQUEMENT l'orthographe, la grammaire, la syntaxe et la ponctuation, et tu peux aérer la mise en forme (paragraphes, sauts de ligne). Tu ne reformules pas au-delà du strict nécessaire : mêmes mots, même ton, même structure, même longueur. Tu n'ajoutes ni ne retires aucune idée, aucun argument, aucune donnée. Les contraintes de longueur du canal ne s'appliquent pas : conserve la longueur d'origine. Pour un e-mail, si le texte fournit un objet, reprends-le corrigé ; sinon propose un objet sobre qui reflète le contenu. La "variante_courte" reste une version condensée du texte corrigé.
 </traitement_de_la_consigne>
 
 <format_sortie>
@@ -5759,10 +5758,49 @@ Réponds UNIQUEMENT par un objet JSON valide, sans texte avant ni après, sans b
   "alertes": ["risques, incohérences, mentions écartées, tableau vide si rien"]
 }
 </format_sortie>`;
+// Prompt du mode « Reformulation » : un pur correcteur, volontairement coupé de tout contexte CRM.
+// Le prompt de rédaction complet (règles commerciales, créneaux, historique) poussait le modèle à
+// enrichir le texte ; ici il ne connaît QUE le message à corriger, il ne peut donc rien y importer.
+const SYS_REFORMULATION = `<identite>
+Tu es un correcteur orthographique et grammatical. On te confie dans <message_a_corriger> un message professionnel déjà rédigé par son auteur.
+</identite>
+
+<mission>
+Corriger UNIQUEMENT l'orthographe, la grammaire, la conjugaison, la syntaxe et la ponctuation, et au besoin aérer la mise en forme (paragraphes, sauts de ligne). Rien d'autre.
+</mission>
+
+<interdits>
+- Ne reformule pas au-delà du strict nécessaire : conserve les mots, le ton, le registre, la structure et la longueur de l'auteur.
+- N'ajoute RIEN : aucun argument, aucune offre, aucune disponibilité, aucun créneau, aucune date, aucun chiffre, aucune formule commerciale, aucune information qui ne figure pas déjà dans le texte.
+- Ne retire aucune idée ni aucune information du texte d'origine.
+- Tu ne disposes d'AUCUN contexte extérieur : si une information n'est pas dans <message_a_corriger>, elle n'existe pas.
+</interdits>
+
+<objet>
+Canal e-mail uniquement : si le texte contient une ligne d'objet, renvoie-la corrigée dans "objet" (sans la répéter dans le corps) ; sinon renvoie dans "objet" une reprise sobre et factuelle du sujet du texte, sans rien inventer. Autres canaux : "objet" vide.
+</objet>
+
+<format_sortie>
+Réponds UNIQUEMENT par un objet JSON valide, sans texte avant ni après, sans balises de code.
+{
+  "objet": "chaîne, vide si le canal n'en utilise pas",
+  "corps": "le texte corrigé, sauts de ligne réels",
+  "variante_courte": "chaîne, version condensée d'environ 40 pour cent du texte corrigé",
+  "creneaux_utilises": [],
+  "contexte_utilise": [],
+  "alertes": ["passages ambigus laissés tels quels, tableau vide si rien"]
+}
+</format_sortie>`;
 // Appel au relais IA + robustesse : extraction des blocs texte, retrait des délimiteurs de code,
 // parsage JSON avec seconde tentative de reformatage, et vérification des créneaux côté code.
 async function generateMessage({ contexte, consigne, mode, canal, sousCanal, type, ton, precedent, onUsage }) {
-  const parts = [
+  const reformulation = mode === "reformulation";
+  const parts = reformulation ? [
+    // Reformulation : SEUL le texte de l'utilisateur part au modèle. Le contexte CRM est
+    // délibérément absent, pour qu'aucun argument ni créneau ne puisse s'inviter dans le message.
+    "<message_a_corriger>\n" + (consigne || "") + "\n</message_a_corriger>",
+    "<canal>" + canal + (sousCanal ? (" (sousCanal=" + sousCanal + ")") : "") + "</canal>",
+  ] : [
     "<contexte>\n" + JSON.stringify(contexte, null, 2) + "\n</contexte>",
     "<consigne mode=\"" + (mode || "consigne") + "\">\n" + (consigne || "") + "\n</consigne>",
     "<canal>" + canal + (sousCanal ? (" (sousCanal=" + sousCanal + ")") : "") + "</canal>",
@@ -5776,7 +5814,7 @@ async function generateMessage({ contexte, consigne, mode, canal, sousCanal, typ
   const call = async (suffix) => {
     const jid = aiJobs.anon("Message IA");
     try {
-      const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1500, temperature: 0.6, system: SYS_REDACTION, messages: [{ role: "user", content: baseUser + (suffix || "") }] }) });
+      const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1500, temperature: reformulation ? 0.2 : 0.6, system: reformulation ? SYS_REFORMULATION : SYS_REDACTION, messages: [{ role: "user", content: baseUser + (suffix || "") }] }) });
       if (!res.ok) throw new Error(await claudeErrorText(res));
       const dt = await res.json();
       if (dt && dt.usage && onUsage) onUsage(dt.usage);
@@ -5885,10 +5923,12 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
     // Tiret long retiré ici aussi : la règle vaut pour tout ce qui part au nom de la marque.
     // Objet normalisé comme pour les mails de prospection : préfixe unique « PEN'UP 3D : », jamais
     // doublé. Seul le canal e-mail porte un objet ; LinkedIn et SMS n'en ont pas.
-    setSubject(canal === "email" ? objetNormalise(r.objet || "", { nom: estabName }) : sansTiretLong(r.objet || ""));
+    // En mode Reformulation, le texte de l'utilisateur est roi : ni préfixe d'objet, ni nettoyages
+    // (salutation, temporalité, en-tête) qui réécriraient ce qu'il a volontairement écrit.
+    setSubject(mode === "reformulation" ? (r.objet || "") : canal === "email" ? objetNormalise(r.objet || "", { nom: estabName }) : sansTiretLong(r.objet || ""));
     // Nettoyages déterministes, dans l'ordre : signature (Gmail la rajoute), tirets longs, en-tête
     // administratif, temporalité inventée, puis salutation par le prénom seul.
-    const nettoie = (txt) => salutationCorrigee(sansTemporaliteInventee(sansEnTeteAdministratif(sansTiretLong(canal === "email" ? stripSignature(txt || "") : (txt || "")))), (effCtx && effCtx.destinataire) || null);
+    const nettoie = (txt) => mode === "reformulation" ? (txt || "") : salutationCorrigee(sansTemporaliteInventee(sansEnTeteAdministratif(sansTiretLong(canal === "email" ? stripSignature(txt || "") : (txt || "")))), (effCtx && effCtx.destinataire) || null);
     setOut(nettoie(r.corps));
     setShortOut(nettoie(r.variante_courte));
     setUsedCtx(Array.isArray(r.contexte_utilise) ? r.contexte_utilise : []);
@@ -6010,7 +6050,7 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
     <div style={{ border: "1px solid var(--line)", borderRadius: 12, marginBottom: 12, background: "var(--card)" }}>
       <button type="button" onClick={() => setCtxOpen((v) => !v)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 12px", background: "transparent", border: 0, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, color: "var(--ink)" }}>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>{ctxOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />} Contexte transmis</span>
-        <span style={{ fontSize: 11.5, fontWeight: 600, color: charCount > 12000 ? "var(--red)" : "var(--muted)" }}>{charCount.toLocaleString("fr-FR")} caractères{fullCtx._tronque ? " · historique tronqué" : ""}</span>
+        <span style={{ fontSize: 11.5, fontWeight: 600, color: mode === "reformulation" ? "var(--muted)" : charCount > 12000 ? "var(--red)" : "var(--muted)" }}>{mode === "reformulation" ? "non transmis en mode Reformulation" : charCount.toLocaleString("fr-FR") + " caractères" + (fullCtx._tronque ? " · historique tronqué" : "")}</span>
       </button>
       {ctxOpen && <div style={{ borderTop: "1px solid var(--line)", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8, maxHeight: 320, overflowY: "auto" }}>
         {CTX_BLOCKS.map((b) => { const val = fullCtx[b.k]; if (typeof val === "undefined") return null; const empty = val == null || (Array.isArray(val) && !val.length); const off = excluded.has(b.k); return (<div key={b.k} style={{ opacity: off ? .45 : 1 }}>
