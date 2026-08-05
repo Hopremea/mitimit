@@ -12446,46 +12446,55 @@ function Pointage({ data, persist }) {
   const remove = (ds) => persist((p) => { const np = { ...(p.pointages || {}) }; delete np[ds]; return { ...p, pointages: np }; });
   const targetOf = (ds) => isWeekendDs(ds) ? 0 : PRESENCE_TARGET;
 
-  // ---- Statistiques globales (tous mois confondus) pour la gamification ----
+  // ---- Statistiques du MOIS AFFICHÉ pour la gamification ----
+  // Les compteurs (jours pointés, série, heures sup.), le niveau, l'XP et les badges suivent le mois
+  // sélectionné dans le calendrier : passer à un autre mois remet les compteurs de ce mois-là.
   const allEntries = useMemo(() => Object.entries(pointages).map(([ds, rec]) => ({ ds, rec, st: presenceDay(rec) })).filter((x) => x.st && !x.st.invalid), [pointages]);
-  const daysLogged = allEntries.length;
-  const supAllTime = allEntries.reduce((s, x) => s + Math.max(0, x.st.worked - targetOf(x.ds)), 0);
-  const xp = daysLogged * 12 + Math.round(supAllTime / 60) * 8;
+  const gamePrefix = `${cursor.y}-${String(cursor.m + 1).padStart(2, "0")}`;
+  const gameEntries = useMemo(() => allEntries.filter((x) => x.ds.startsWith(gamePrefix)), [allEntries, gamePrefix]);
+  const daysLogged = gameEntries.length;
+  // Heures sup. du mois : même règle que la paie (détermination hebdomadaire, seuil 35 h).
+  const mSalaire = useMemo(() => semaineSalaireBreakdown(pointages, gamePrefix), [pointages, gamePrefix]);
+  const supMois = mSalaire.m25 + mSalaire.m50;
+  const xp = daysLogged * 12 + Math.round(supMois / 60) * 8;
   const level = Math.min(PRESENCE_LEVELS.length, Math.floor(xp / 100) + 1);
   const levelName = PRESENCE_LEVELS[level - 1];
   const xpInLevel = level >= PRESENCE_LEVELS.length ? 100 : xp % 100;
 
+  // Série du mois affiché : la plus longue suite de jours OUVRÉS pointés consécutifs dans le mois
+  // (le week-end ne casse pas la série). Une série ancrée sur « aujourd'hui » n'aurait aucun sens
+  // en consultant un autre mois.
   const streak = useMemo(() => {
     const ok = (ds) => { const s = presenceDay(pointages[ds]); return s && !s.invalid && s.worked > 0; };
-    let n = 0; const d = new Date(); d.setHours(0, 0, 0, 0);
-    if (!ok(isoLocal(d))) d.setDate(d.getDate() - 1); // tolérance : aujourd'hui pas encore saisi
-    for (let i = 0; i < 366; i++) {
-      const wd = d.getDay();
-      if (wd === 0 || wd === 6) { d.setDate(d.getDate() - 1); continue; } // le week-end ne casse pas la série
-      if (ok(isoLocal(d))) { n++; d.setDate(d.getDate() - 1); } else break;
+    const last = new Date(cursor.y, cursor.m + 1, 0).getDate();
+    let best = 0, cur = 0;
+    for (let day = 1; day <= last; day++) {
+      const d = new Date(cursor.y, cursor.m, day);
+      const wd = d.getDay(); if (wd === 0 || wd === 6) continue;
+      if (ok(isoLocal(d))) { cur++; if (cur > best) best = cur; } else cur = 0;
     }
-    return n;
-  }, [pointages]);
+    return best;
+  }, [pointages, cursor.y, cursor.m]);
 
   const badges = useMemo(() => {
     // On ne considère que les journées avec un vrai horaire d'arrivée : pMin renvoie null pour les motifs
     // au forfait (congés, férié…) et « null <= 510 » vaut true en JS — sinon le badge était attribué à tort.
-    const anyEarly = allEntries.some((x) => { const m = pMin(x.st.arrivee); return m != null && m <= 8 * 60 + 30; });
-    const anyLate = allEntries.some((x) => { const m = pMin(x.st.depart); return m != null && m >= 20 * 60; });
-    const anyMarathon = allEntries.some((x) => x.st.worked >= 9 * 60);
+    const anyEarly = gameEntries.some((x) => { const m = pMin(x.st.arrivee); return m != null && m <= 8 * 60 + 30; });
+    const anyLate = gameEntries.some((x) => { const m = pMin(x.st.depart); return m != null && m >= 20 * 60; });
+    const anyMarathon = gameEntries.some((x) => x.st.worked >= 9 * 60);
     const byWeek = {};
-    allEntries.forEach((x) => { if (isWeekendDs(x.ds)) return; const d = new Date(x.ds + "T00:00:00"); const mon = new Date(d); mon.setDate(d.getDate() - ((d.getDay() + 6) % 7)); const key = isoLocal(mon); (byWeek[key] = byWeek[key] || new Set()).add(x.ds); });
+    gameEntries.forEach((x) => { if (isWeekendDs(x.ds)) return; const d = new Date(x.ds + "T00:00:00"); const mon = new Date(d); mon.setDate(d.getDate() - ((d.getDay() + 6) % 7)); const key = isoLocal(mon); (byWeek[key] = byWeek[key] || new Set()).add(x.ds); });
     const perfectWeek = Object.values(byWeek).some((set) => set.size >= 5);
     return [
-      { id: "first", label: "Premier pointage", icon: CheckCircle2, color: "#3F60AA", got: daysLogged >= 1, desc: "Enregistrer une première journée." },
-      { id: "streak5", label: "Assiduité", icon: Flame, color: "#FF5A45", got: streak >= 5, desc: "5 jours ouvrés d'affilée." },
-      { id: "perfect", label: "Semaine parfaite", icon: Award, color: "#7c5cf0", got: perfectWeek, desc: "Une semaine complète (lun-ven) pointée." },
-      { id: "early", label: "Lève-tôt", icon: Sun, color: "#F8B133", got: anyEarly, desc: "Arriver à 8 h 30 ou avant." },
-      { id: "late", label: "Couche-tard", icon: Moon, color: "#5b54c9", got: anyLate, desc: "Partir à 20 h ou après." },
-      { id: "marathon", label: "Marathonien", icon: Zap, color: "#2bb673", got: anyMarathon, desc: "Une journée de 9 h ou plus." },
-      { id: "sup10", label: "+10 h sup.", icon: Trophy, color: "#F8B133", got: supAllTime >= 600, desc: "Cumuler 10 h supplémentaires." },
+      { id: "first", label: "Premier pointage", icon: CheckCircle2, color: "#3F60AA", got: daysLogged >= 1, desc: "Enregistrer une première journée ce mois." },
+      { id: "streak5", label: "Assiduité", icon: Flame, color: "#FF5A45", got: streak >= 5, desc: "5 jours ouvrés d'affilée ce mois." },
+      { id: "perfect", label: "Semaine parfaite", icon: Award, color: "#7c5cf0", got: perfectWeek, desc: "Une semaine complète (lun-ven) pointée ce mois." },
+      { id: "early", label: "Lève-tôt", icon: Sun, color: "#F8B133", got: anyEarly, desc: "Arriver à 8 h 30 ou avant ce mois." },
+      { id: "late", label: "Couche-tard", icon: Moon, color: "#5b54c9", got: anyLate, desc: "Partir à 20 h ou après ce mois." },
+      { id: "marathon", label: "Marathonien", icon: Zap, color: "#2bb673", got: anyMarathon, desc: "Une journée de 9 h ou plus ce mois." },
+      { id: "sup10", label: "+10 h sup.", icon: Trophy, color: "#F8B133", got: supMois >= 600, desc: "Cumuler 10 h supplémentaires ce mois." },
     ];
-  }, [allEntries, streak, daysLogged, supAllTime]);
+  }, [gameEntries, streak, daysLogged, supMois]);
   const gotBadges = badges.filter((b) => b.got).length;
 
   // ---- Calendrier du mois affiché ----
@@ -12501,15 +12510,13 @@ function Pointage({ data, persist }) {
   const fmtDate = (y, m, d) => `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 
   // ---- Décompte du mois affiché ----
-  const monthPrefix = `${cursor.y}-${String(cursor.m + 1).padStart(2, "0")}`;
-  const monthEntries = allEntries.filter((x) => x.ds.startsWith(monthPrefix));
+  const monthPrefix = gamePrefix;
+  const monthEntries = gameEntries;
   const mWorked = monthEntries.reduce((s, x) => s + x.st.worked, 0);
   const mTarget = monthEntries.reduce((s, x) => s + targetOf(x.ds), 0);
-  // Heures sup. du mois selon la règle de paie (détermination hebdomadaire, seuil 35 h) — et non plus
-  // la somme des dépassements quotidiens, qui divergeait du bulletin dès qu'un congé ou un férié
-  // tombait dans la semaine.
-  const mSalaire = semaineSalaireBreakdown(data.pointages, monthPrefix);
-  const mSup = mSalaire.m25 + mSalaire.m50;
+  // Heures sup. du mois selon la règle de paie (détermination hebdomadaire, seuil 35 h), déjà
+  // calculées pour le bandeau gamifié (mSalaire / supMois).
+  const mSup = supMois;
   const mDef = monthEntries.reduce((s, x) => s + Math.max(0, targetOf(x.ds) - x.st.worked), 0);
   const mBalance = mWorked - mTarget;
   const mDays = monthEntries.length;
@@ -12567,9 +12574,9 @@ function Pointage({ data, persist }) {
           </div>
         </div>
         <div style={{ display: "flex", gap: 22, flexWrap: "wrap" }}>
-          <div style={{ textAlign: "center" }}><div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "center", color: streak > 0 ? "#FF5A45" : "var(--muted)" }}><Flame size={20} /><span className="pu-display tnum" style={{ fontSize: 24 }}>{streak}</span></div><div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>jours d'affilée</div></div>
-          <div style={{ textAlign: "center" }}><div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "center", color: "#2bb673" }}><Trophy size={19} /><span className="pu-display tnum" style={{ fontSize: 24 }}>{fmtDur(supAllTime)}</span></div><div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>heures sup. cumulées</div></div>
-          <div style={{ textAlign: "center" }}><div className="pu-display tnum" style={{ fontSize: 24 }}>{daysLogged}</div><div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>jours pointés</div></div>
+          <div style={{ textAlign: "center" }}><div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "center", color: streak > 0 ? "#FF5A45" : "var(--muted)" }}><Flame size={20} /><span className="pu-display tnum" style={{ fontSize: 24 }}>{streak}</span></div><div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>jours d'affilée (mois)</div></div>
+          <div style={{ textAlign: "center" }}><div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "center", color: "#2bb673" }}><Trophy size={19} /><span className="pu-display tnum" style={{ fontSize: 24 }}>{fmtDur(supMois)}</span></div><div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>heures sup. du mois</div></div>
+          <div style={{ textAlign: "center" }}><div className="pu-display tnum" style={{ fontSize: 24 }}>{daysLogged}</div><div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>jours pointés ce mois</div></div>
         </div>
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line)", alignItems: "center" }}>
