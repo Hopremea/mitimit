@@ -11788,6 +11788,36 @@ const isWeekendDs = (ds) => { const wd = new Date(ds + "T00:00:00").getDay(); re
 // n'a pas d'objectif, tout ce qui y est travaillé est donc de l'heure supplémentaire ; un forfait
 // (congés, cours, férié) vaut 7 h et ne produit rien, sauf si des heures ont été saisies au-dessus.
 const otMinutes = (ds, st) => (!st || st.invalid) ? 0 : Math.max(0, st.worked - (isWeekendDs(ds) ? 0 : PRESENCE_TARGET));
+// ===== Détermination des heures supplémentaires par SEMAINE (règle RH, bulletin de juillet 2026) =====
+// Le décompte ne se fait plus jour par jour (> 7 h) mais par semaine civile sur un seuil de 35 h :
+// - comptent pour ATTEINDRE le seuil : les heures réellement travaillées (présence, rendez-vous,
+//   samedi compris), les journées assimilées (cours, télétravail) et les CONGÉS (CP / RTT) — la RH
+//   intègre désormais les heures non effectuées en congé dans la détermination des HS ;
+// - les jours CHÔMÉS payés (férié, maladie) ne créent JAMAIS de majoration : les heures au-delà de
+//   35 h qu'ils recouvrent sont dues en HEURES NORMALES (taux de base, en plus des 151,67 h) ;
+// - au-delà de 35 h comptées (hors chômé) : 8 premières heures à +25 %, puis +50 %.
+// Exemple vérifié (semaine du 13/07/2026) : CP 7 h + 27,5 h réelles = 34,5 h → aucune HS ; férié
+// 7 h en plus → 41,5 h, soit 6,5 h payées en heures normales. C'est le bulletin de juillet 2026.
+const MOTIFS_CHOMES = new Set(["ferie", "maladie"]);
+const SAL_SEUIL_HEBDO = 35 * 60; // 35 h/semaine, en minutes
+function semaineSalaireBreakdown(pointages, monthPrefix) {
+  const byWeek = {};
+  Object.entries(pointages || {}).filter(([ds]) => !monthPrefix || ds.startsWith(monthPrefix)).forEach(([ds, rec]) => {
+    const st = presenceDay(rec); if (!st || st.invalid) return;
+    const d = new Date(ds + "T00:00:00"); const mo = new Date(d); mo.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    const k = isoLocal(mo);
+    const w = byWeek[k] = byWeek[k] || { compte: 0, chome: 0 };
+    if (MOTIFS_CHOMES.has(st.motif)) w.chome += st.worked; else w.compte += st.worked;
+  });
+  let m25 = 0, m50 = 0, mNorm = 0;
+  Object.values(byWeek).forEach((w) => {
+    const hs = Math.max(0, w.compte - SAL_SEUIL_HEBDO);
+    m25 += Math.min(hs, SAL_SEUIL_50_MIN); m50 += Math.max(0, hs - SAL_SEUIL_50_MIN);
+    mNorm += Math.max(0, w.compte + w.chome - SAL_SEUIL_HEBDO) - hs;
+  });
+  const rh = (m) => Math.round((m / 60) * 100) / 100;
+  return { h25: rh(m25), h50: rh(m50), hNorm: rh(mNorm), m25, m50, mNorm };
+}
 // Décompte d'une journée à partir d'un enregistrement { arrivee, depart, pause, pauseMin }.
 function presenceDay(rec) {
   if (!rec) return null;
@@ -11845,13 +11875,16 @@ const SAL_MAJ_25 = 1.25, SAL_MAJ_50 = 1.5, SAL_SEUIL_50_MIN = 480; // 8 h/semain
 // Constante partagée : l'écran retombait dessus, l'export retombait sur zéro, et l'export affichait
 // donc une paie nulle tant que le bouton « Mémoriser mon taux horaire » n'avait jamais été utilisé.
 const SAL_TAUX_DEFAUT = 9.6018;
-function estimateSalaire({ tauxBase, h25, h50, prime, commission = 0, part = SAL_PART, mutuelle = SAL_MUTUELLE }) {
+function estimateSalaire({ tauxBase, h25, h50, hNorm = 0, prime, commission = 0, part = SAL_PART, mutuelle = SAL_MUTUELLE }) {
   const tb = Number(tauxBase) || 0;
   const base = tb * SAL_BASE_HOURS;
   const t25 = tb * SAL_MAJ_25, t50 = tb * SAL_MAJ_50;
   const hs25 = (Number(h25) || 0) * t25;
   const hs50 = (Number(h50) || 0) * t50;
-  const hs = hs25 + hs50;
+  // Heures NORMALES au-delà des 151,67 h (semaine dépassant 35 h à cause d'un férié / arrêt chômé) :
+  // payées au taux de base, sans majoration — cf. règle RH du bulletin de juillet 2026.
+  const hsn = (Number(hNorm) || 0) * tb;
+  const hs = hs25 + hs50 + hsn;
   const pr = Number(prime) || 0;
   // La commission commerciale n'entre PAS dans l'estimation : elle n'est ni acquise ni versée avec le
   // salaire du mois (elle dépend du règlement des factures). Elle reste renvoyée, pour être affichée
@@ -11863,7 +11896,7 @@ function estimateSalaire({ tauxBase, h25, h50, prime, commission = 0, part = SAL
   const cotisVar = SAL_COTIS_EXCESS * excess;
   const mut = Number(mutuelle) || 0;
   const cotis = mut + cotisVar;
-  return { base, t25, t50, hs25, hs50, hs, prime: pr, commission: comm, brut, seuil, excess, mutuelle: mut, cotisVar, cotis, net: brut - cotis };
+  return { base, t25, t50, hs25, hs50, hsn, hs, prime: pr, commission: comm, brut, seuil, excess, mutuelle: mut, cotisVar, cotis, net: brut - cotis };
 }
 // Commission commerciale par facture (partagée entre l'onglet Commissions et le salaire estimé) :
 // 1re facture d'un établissement = référencement (taux1), suivantes = réassort (tauxN). Un indépendant
@@ -11893,20 +11926,10 @@ function SalaireRH({ data, persist }) {
   const mutuelle = s.salaireMutuelle != null ? s.salaireMutuelle : SAL_MUTUELLE;
   const monthPrefix = new Date().toISOString().slice(0, 7);
   const monthName = new Date().toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
-  // Heures supplémentaires pointées ce mois, réparties par SEMAINE : 8 premières h/semaine à +25 %,
-  // au-delà à +50 % (règle légale). On regroupe l'excédent quotidien (> 7 h/jour ouvré) par semaine.
-  const autoOT = useMemo(() => {
-    const byWeek = {};
-    Object.entries(data.pointages || {}).filter(([ds]) => ds.startsWith(monthPrefix)).forEach(([ds, rec]) => {
-      const st = presenceDay(rec); if (!st || st.invalid) return;
-      const ot = otMinutes(ds, st); if (ot <= 0) return;
-      const d = new Date(ds + "T00:00:00"); const mo = new Date(d); mo.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-      const k = isoLocal(mo); byWeek[k] = (byWeek[k] || 0) + ot;
-    });
-    let m25 = 0, m50 = 0;
-    Object.values(byWeek).forEach((min) => { m25 += Math.min(min, SAL_SEUIL_50_MIN); m50 += Math.max(0, min - SAL_SEUIL_50_MIN); });
-    return { h25: Math.round((m25 / 60) * 100) / 100, h50: Math.round((m50 / 60) * 100) / 100 };
-  }, [data.pointages, monthPrefix]);
+  // Heures pointées ce mois, décomptées par SEMAINE CIVILE (seuil 35 h, congés comptés, jours chômés
+  // en heures normales — voir semaineSalaireBreakdown) : HS +25 % / +50 % et heures normales au-delà
+  // des 151,67 h.
+  const autoOT = useMemo(() => semaineSalaireBreakdown(data.pointages, monthPrefix), [data.pointages, monthPrefix]);
   // Frais kilométriques du mois (coût réel domicile-travail). La PRIME versée en paie correspond à
   // 50 % de ces frais (PRIME_KM_RATE).
   const coutJour = (Number(s.fraisEssence != null ? s.fraisEssence : 8) + Number(s.fraisPeage != null ? s.fraisPeage : 3.2)) * (s.fraisAR !== false ? 2 : 1);
@@ -11918,12 +11941,13 @@ function SalaireRH({ data, persist }) {
   const autoKm = Math.round((domicilePrime + deplTotalMois) * 100) / 100;
   const [h25, setH25] = useState(autoOT.h25);
   const [h50, setH50] = useState(autoOT.h50);
+  const [hNorm, setHNorm] = useState(autoOT.hNorm);
   const [prime, setPrime] = useState(autoKm);
   // Automatisation : tant que l'utilisateur n'a pas saisi de valeur manuelle, les heures sup. (réparties
-  // 25/50 % par semaine) et la prime km suivent en direct le pointage du mois.
+  // 25/50 % par semaine), les heures normales au-delà de 151,67 h et la prime km suivent le pointage.
   const [otTouched, setOtTouched] = useState(false);
   const [kmTouched, setKmTouched] = useState(false);
-  useEffect(() => { if (!otTouched) { setH25(autoOT.h25); setH50(autoOT.h50); } }, [autoOT.h25, autoOT.h50, otTouched]);
+  useEffect(() => { if (!otTouched) { setH25(autoOT.h25); setH50(autoOT.h50); setHNorm(autoOT.hNorm); } }, [autoOT.h25, autoOT.h50, autoOT.hNorm, otTouched]);
   useEffect(() => { if (!kmTouched) setPrime(autoKm); }, [autoKm, kmTouched]);
   // Commission commerciale du mois : factures facturées ce mois (1re facture d'un établissement à 4 %,
   // réassort à 2 %). Elle s'ajoute au brut et suit les mêmes taux paramétrés dans l'onglet Commissions.
@@ -11932,7 +11956,7 @@ function SalaireRH({ data, persist }) {
   const [comm, setComm] = useState(autoComm);
   const [commTouched, setCommTouched] = useState(false);
   useEffect(() => { if (!commTouched) setComm(autoComm); }, [autoComm, commTouched]);
-  const r = estimateSalaire({ tauxBase, h25, h50, prime, commission: comm, part, mutuelle });
+  const r = estimateSalaire({ tauxBase, h25, h50, hNorm, prime, commission: comm, part, mutuelle });
   const memoriser = () => persist((p) => ({ ...p, settings: { ...p.settings, salaireTauxBase: Number(tauxBase) || 0 } }));
   const Line = ({ l, v, strong, color, sub }) => (<div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: strong ? 13.5 : 12.5, fontWeight: strong ? 800 : 500, color: color || "inherit", padding: "3px 0" }}><span>{l}{sub && <span style={{ color: "var(--muted)", fontWeight: 500 }}> {sub}</span>}</span><span className="tnum">{v}</span></div>);
   const totHS = (Number(h25) || 0) + (Number(h50) || 0);
@@ -11940,7 +11964,7 @@ function SalaireRH({ data, persist }) {
     <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--blue)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
       <div>
         <div style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3 }}>Estimation du net à payer · <span style={{ textTransform: "capitalize" }}>{monthName}</span></div>
-        <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3, lineHeight: 1.5 }}>Base {SAL_BASE_HOURS} h + {totHS} h sup. ({h25} h à +25 % · {h50} h à +50 %) + prime (indemnités km) {eur2(prime)}, cotisations apprenti déduites.{(Number(comm) || 0) > 0 ? " Commission commerciale de " + eur2(comm) + " affichée à part, non comprise dans ce montant." : ""}</div>
+        <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3, lineHeight: 1.5 }}>Base {SAL_BASE_HOURS} h + {totHS} h sup. ({h25} h à +25 % · {h50} h à +50 %){(Number(hNorm) || 0) > 0 ? " + " + hNorm + " h normales (férié/chômé)" : ""} + prime (indemnités km) {eur2(prime)}, cotisations apprenti déduites.{(Number(comm) || 0) > 0 ? " Commission commerciale de " + eur2(comm) + " affichée à part, non comprise dans ce montant." : ""}</div>
       </div>
       <div className="pu-display tnum" style={{ fontSize: 34, color: "var(--blue)", fontWeight: 900 }}>{eur2(r.net)}</div>
     </div>
@@ -11952,17 +11976,19 @@ function SalaireRH({ data, persist }) {
           <div className="fld"><label>H. sup. à +25 % (h)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.25" min="0" value={h25} onChange={(e) => { setOtTouched(true); setH25(e.target.value); }} /></div></div>
           <div className="fld"><label>H. sup. à +50 % (h)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.25" min="0" value={h50} onChange={(e) => { setOtTouched(true); setH50(e.target.value); }} /></div></div>
         </div>
-        <div style={{ marginBottom: 8, fontSize: 11.5, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><span style={{ color: otTouched ? "var(--muted)" : "var(--green)", fontWeight: 700 }}>{otTouched ? "Valeurs saisies manuellement" : "↻ Réparti automatiquement depuis le pointage (" + autoOT.h25 + " h + " + autoOT.h50 + " h)"}</span>{otTouched && <button className="btn btn-g btn-s" onClick={() => setOtTouched(false)} title="Reprendre la répartition automatique du pointage">↻ Auto</button>}</div>
+        <div className="fld" style={{ marginBottom: 8 }}><label>H. normales au-delà de 151,67 h (h)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.25" min="0" value={hNorm} onChange={(e) => { setOtTouched(true); setHNorm(e.target.value); }} /></div><span style={{ fontSize: 11, color: "var(--muted)" }}>Heures d'une semaine dépassant 35 h uniquement grâce à un jour férié / arrêt chômé : payées au taux de base, sans majoration.</span></div>
+        <div style={{ marginBottom: 8, fontSize: 11.5, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><span style={{ color: otTouched ? "var(--muted)" : "var(--green)", fontWeight: 700 }}>{otTouched ? "Valeurs saisies manuellement" : "↻ Décompte hebdomadaire automatique du pointage (" + autoOT.h25 + " h à +25 % · " + autoOT.h50 + " h à +50 % · " + autoOT.hNorm + " h normales)"}</span>{otTouched && <button className="btn btn-g btn-s" onClick={() => setOtTouched(false)} title="Reprendre le décompte automatique du pointage">↻ Auto</button>}</div>
         <div className="fld"><label style={{ textTransform: "capitalize" }}>Prime — indemnités kilométriques · {monthName} (€)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.01" min="0" value={prime} onChange={(e) => { setKmTouched(true); setPrime(e.target.value); }} />{kmTouched && <button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setKmTouched(false)} title="Reprendre la prime (50 % des frais kilométriques du mois)">↻ {eur2(autoKm)}</button>}</div><span style={{ fontSize: 11, color: "var(--muted)" }}>Domicile-travail : 50 % de {eur2(fraisKmMois)} = {eur2(domicilePrime)}{deplTotalMois > 0 ? " · Déplacements ponctuels remboursés à 100 % = " + eur2(deplTotalMois) : ""}. Total prime : {eur2(autoKm)}.</span></div>
         <div className="fld" style={{ marginTop: 8 }}><label style={{ textTransform: "capitalize" }}>Commission commerciale · {monthName} (€)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.01" min="0" value={comm} onChange={(e) => { setCommTouched(true); setComm(e.target.value); }} />{commTouched && <button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setCommTouched(false)} title="Reprendre la commission calculée sur les factures du mois">↻ {eur2(autoComm)}</button>}</div><span style={{ fontSize: 11, color: "var(--muted)" }}>Calculée sur les factures du mois : 4 % sur la 1re facture d'un établissement (référencement), 2 % en réassort. {num(commRows.length)} facture{commRows.length > 1 ? "s" : ""} ce mois. <strong>Affichée pour information : elle n'entre pas dans le salaire estimé.</strong></span></div>
         <div style={{ marginTop: 10 }}><button className="btn btn-g btn-s" onClick={memoriser}><Save size={13} /> Mémoriser mon taux horaire</button></div>
-        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 10, lineHeight: 1.5 }}>Statut apprenti : rémunération à {part} % du SMIC, exonération de cotisations salariales jusqu'à 79 % du SMIC, mutuelle {eur2(mutuelle)}. Les heures sup. sont reprises du pointage et réparties par semaine (8 h à +25 %, au-delà à +50 %). Estimation calibrée sur vos bulletins (~1 € près).</div>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 10, lineHeight: 1.5 }}>Statut apprenti : rémunération à {part} % du SMIC, exonération de cotisations salariales jusqu'à 79 % du SMIC, mutuelle {eur2(mutuelle)}. Heures sup. déterminées par SEMAINE CIVILE (seuil 35 h, congés comptés pour l'atteindre ; férié / arrêt chômé payé en heures normales au-delà de 35 h) puis réparties 8 h à +25 % et au-delà à +50 %. Estimation calibrée sur vos bulletins (~1 € près).</div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <div className="card" style={{ borderTop: "3px solid var(--blue)" }}><div className="sec-h"><h3 className="pu-display">Détail du bulletin estimé</h3></div>
           <Line l="Salaire de base" sub={"(" + SAL_BASE_HOURS + " h × " + eur2(Number(tauxBase) || 0) + ")"} v={eur2(r.base)} />
           <Line l="Heures sup. +25 %" sub={"(" + h25 + " h × " + eur2(r.t25) + ")"} v={eur2(r.hs25)} color="var(--green)" />
           <Line l="Heures sup. +50 %" sub={"(" + h50 + " h × " + eur2(r.t50) + ")"} v={eur2(r.hs50)} color="var(--green)" />
+          {(Number(hNorm) || 0) > 0 && <Line l="Heures normales > 151,67 h" sub={"(" + hNorm + " h × " + eur2(Number(tauxBase) || 0) + ", férié/chômé)"} v={eur2(r.hsn)} color="var(--green)" />}
           {(!kmTouched && deplTotalMois > 0) ? <Line l="Prime domicile-travail (50 %)" v={eur2(domicilePrime)} color="var(--green)" /> : <Line l="Prime (indemnités km)" v={eur2(r.prime)} color="var(--green)" />}
           {(Number(comm) || 0) > 0 && <Line l="Commission commerciale" sub="(4 % référencement / 2 % réassort · hors estimation)" v={eur2(r.commission)} color="var(--muted)" />}
           <div style={{ borderTop: "1px solid var(--line)", margin: "6px 0" }} />
@@ -12089,33 +12115,43 @@ function buildRHNotion(data, monthPrefix) {
   // Tableau 1 — Heures pointées
   L.push("### Heures pointées" + (monthPrefix ? (" — " + new Date(monthPrefix + "-01T00:00:00").toLocaleDateString("fr-FR", { month: "long", year: "numeric" })) : " — tout l'historique"));
   L.push("");
-  // Valorisation jour après jour. La majoration des heures supplémentaires se compte par SEMAINE
-  // (les 8 premières à +25 %, au-delà à +50 %) : on suit donc un cumul hebdomadaire pour répartir
-  // l'excédent de CHAQUE jour dans la bonne tranche. Sans ce cumul, une journée isolée de 10 h
-  // serait majorée comme la première de la semaine, ce qui sous-évalue la fin de semaine.
+  // Valorisation jour après jour, avec la détermination HEBDOMADAIRE des heures supplémentaires
+  // (règle RH du bulletin de juillet 2026, cf. semaineSalaireBreakdown) : seuil de 35 h par semaine
+  // civile, congés comptés pour l'atteindre, jours chômés (férié, maladie) payés en heures normales
+  // au-delà de 35 h. L'attribution au fil des jours est chronologique : un jour porte les heures sup.
+  // qu'il fait franchir au cumul de la semaine, réparties 8 h à +25 % puis +50 %. Le salaire du jour
+  // rémunère tout le reste au taux de base — y compris les heures normales au-delà de 35 h.
   const taux = Number((data.settings || {}).salaireTauxBase) || SAL_TAUX_DEFAUT;
   const lundiDe = (ds) => { const d = new Date(ds + "T00:00:00"); const mo = new Date(d); mo.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return isoLocal(mo); };
-  const cumulSemaine = {};
+  const semaines = {};
   L.push("| Date | Jour | Type | Arrivée | Départ | Pause | Heures | Salaire jour | Heures sup. | Heures sup. (€) |");
   L.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
-  let totH = 0, totOT = 0, totFixe = 0, totSup = 0;
+  let totH = 0, totOT = 0, totFixe = 0, totSup = 0, totNorm = 0;
   pgs.forEach(([ds, rec]) => {
     const st = presenceDay(rec); if (!st || st.invalid) return;
     const mot = st.motif && st.motif !== "presence" ? PRESENCE_MOTIFS[st.motif] : null;
-    const ot = otMinutes(ds, st);
-    // Le fixe du jour rémunère les heures NORMALES : tout ce qui n'est pas supplémentaire.
-    const fixe = ((st.worked - ot) / 60) * taux;
-    const k = lundiDe(ds); const dejaSemaine = cumulSemaine[k] || 0;
-    const min25 = Math.max(0, Math.min(ot, SAL_SEUIL_50_MIN - dejaSemaine));
-    const min50 = ot - min25;
-    cumulSemaine[k] = dejaSemaine + ot;
+    const k = lundiDe(ds); const w = semaines[k] = semaines[k] || { cpt: 0, tot: 0, hs: 0 };
+    // Heures sup. du jour = ce que ce jour fait franchir au cumul HEBDOMADAIRE compté (hors chômé).
+    const chome = MOTIFS_CHOMES.has(st.motif);
+    let ot = 0;
+    if (!chome) { const avant = Math.max(0, w.cpt - SAL_SEUIL_HEBDO); w.cpt += st.worked; ot = Math.max(0, w.cpt - SAL_SEUIL_HEBDO) - avant; }
+    // Heures normales au-delà de 35 h couvertes par un jour chômé : payées au taux de base.
+    const normAvant = Math.max(0, w.tot - SAL_SEUIL_HEBDO) - Math.max(0, (w.cpt - (chome ? 0 : st.worked)) - SAL_SEUIL_HEBDO);
+    w.tot += st.worked;
+    const normApres = Math.max(0, w.tot - SAL_SEUIL_HEBDO) - Math.max(0, w.cpt - SAL_SEUIL_HEBDO);
+    const norm = Math.max(0, normApres - normAvant);
+    totNorm += norm;
+    const min25 = Math.max(0, Math.min(ot, SAL_SEUIL_50_MIN - w.hs));
+    const min50 = ot - min25; w.hs += ot;
     const sup = ((min25 / 60) * taux * SAL_MAJ_25) + ((min50 / 60) * taux * SAL_MAJ_50);
+    // Le fixe du jour rémunère les heures NORMALES : tout ce qui n'est pas majoré.
+    const fixe = ((st.worked - ot) / 60) * taux;
     totH += st.worked; totOT += ot; totFixe += fixe; totSup += sup;
     L.push("| " + [dateFr(ds), jour(ds), cell(mot ? mot.label : "Présence"), mot ? "" : (st.arrivee || ""), mot ? "" : (st.depart || ""), mot ? "" : ((st.pause || 0) + " min"), hd(st.worked), eur2(fixe), hd(ot), eur2(sup)].join(" | ") + " |");
   });
   L.push("| **Total** |  |  |  |  |  | **" + hd(totH) + "** | **" + eur2(totFixe) + "** | **" + hd(totOT) + "** | **" + eur2(totSup) + "** |");
   L.push("");
-  L.push("_Valorisation au taux horaire de base de " + eur2(taux) + ((data.settings || {}).salaireTauxBase != null ? " (réglage mémorisé dans l'onglet Salaire estimé)." : " (valeur par défaut : mémorisez votre taux dans l'onglet Salaire estimé pour l'ajuster).") + " Le salaire du jour rémunère les heures normales ; les heures supplémentaires sont majorées à +25 % pour les huit premières de la semaine, puis à +50 %. Montants bruts, avant cotisations._");
+  L.push("_Valorisation au taux horaire de base de " + eur2(taux) + ((data.settings || {}).salaireTauxBase != null ? " (réglage mémorisé dans l'onglet Salaire estimé)." : " (valeur par défaut : mémorisez votre taux dans l'onglet Salaire estimé pour l'ajuster).") + " Heures supplémentaires déterminées par SEMAINE CIVILE : seuil de 35 h, congés comptés pour l'atteindre ; les heures au-delà de 35 h couvertes par un jour férié ou un arrêt chômé" + (totNorm > 0 ? " (" + hd(totNorm) + " h ce mois)" : "") + " sont payées en heures normales, sans majoration, en plus des 151,67 h mensuelles ; au-delà, +25 % pour les 8 premières heures de la semaine puis +50 %. Montants bruts, avant cotisations._");
   L.push("");
   // Tableau 2 — Trajet domicile-travail (un jour de présence pointé = un aller-retour)
   const s = data.settings || {};
@@ -12419,7 +12455,11 @@ function Pointage({ data, persist }) {
   const monthEntries = allEntries.filter((x) => x.ds.startsWith(monthPrefix));
   const mWorked = monthEntries.reduce((s, x) => s + x.st.worked, 0);
   const mTarget = monthEntries.reduce((s, x) => s + targetOf(x.ds), 0);
-  const mSup = monthEntries.reduce((s, x) => s + Math.max(0, x.st.worked - targetOf(x.ds)), 0);
+  // Heures sup. du mois selon la règle de paie (détermination hebdomadaire, seuil 35 h) — et non plus
+  // la somme des dépassements quotidiens, qui divergeait du bulletin dès qu'un congé ou un férié
+  // tombait dans la semaine.
+  const mSalaire = semaineSalaireBreakdown(data.pointages, monthPrefix);
+  const mSup = mSalaire.m25 + mSalaire.m50;
   const mDef = monthEntries.reduce((s, x) => s + Math.max(0, targetOf(x.ds) - x.st.worked), 0);
   const mBalance = mWorked - mTarget;
   const mDays = monthEntries.length;
@@ -12539,7 +12579,7 @@ function Pointage({ data, persist }) {
         <div className="calc-out"><span className="l">Jours pointés</span><span className="b pu-display tnum">{mDays}</span></div>
         <div className="calc-out"><span className="l">Total travaillé</span><span className="b pu-display tnum">{fmtDur(mWorked)}</span></div>
         <div className="calc-out"><span className="l">Objectif (7 h × {mDays})</span><span className="b pu-display tnum">{fmtDur(mTarget)}</span></div>
-        <div className="calc-out" style={{ background: (mSup > 0 ? "#2bb673" : "#9aa6bd") + "18" }}><span className="l">Heures supplémentaires</span><span className="b pu-display tnum" style={{ color: "var(--green)" }}>{fmtDur(mSup)}</span></div>
+        <div className="calc-out" style={{ background: (mSup > 0 ? "#2bb673" : "#9aa6bd") + "18" }}><span className="l">Heures supplémentaires (semaine &gt; 35 h){mSalaire.mNorm > 0 ? " · + " + fmtDur(mSalaire.mNorm) + " normales (férié/chômé)" : ""}</span><span className="b pu-display tnum" style={{ color: "var(--green)" }}>{fmtDur(mSup)}</span></div>
         <div className="calc-out" style={{ background: (mBalance >= 0 ? "#2bb673" : "#FF5A45") + "18" }}><span className="l">Solde du mois</span><span className="b pu-display tnum" style={{ color: mBalance >= 0 ? "var(--green)" : "var(--red)" }}>{fmtDur(mBalance, { plus: true })}</span></div>
       </div>
       {mDef > 0 && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 8 }}>Dont {fmtDur(mDef)} en deçà de l'objectif sur certains jours (déduits du solde).</div>}
