@@ -12792,7 +12792,7 @@ function Agenda({ data, persist, go }) {
         if (!items.length) return <div className="empty">Pas d'événement programmé.</div>;
         return items.map(([d, evs]) => (<div key={d} style={{ display: "flex", gap: 14, padding: "9px 0", borderBottom: "1px solid var(--line)" }}>
           <div style={{ width: 110, fontSize: 12, color: "var(--muted)", fontWeight: 700 }}>{new Date(d + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "short" })}</div>
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>{evs.map((e, i) => { const evDone = e.kind === "custom" && e.ev && e.ev.done; return (<div key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, flexWrap: "wrap" }}><div onClick={() => { if (e.kind === "custom") setView(e.ev); else if (e.target) go(e.target.tab, e.target.id); }} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0, textDecoration: evDone ? "line-through" : "none", opacity: evDone ? .6 : 1 }}><i className="dot" style={{ background: e.color }} />{e.label}{e.sub && <span style={{ color: "var(--muted)", fontSize: 12 }}>· {e.sub}</span>}</div>{e.kind === "custom" && e.ev && <EventQuickActions ev={e.ev} onSave={saveEvent} />}</div>); })}</div>
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>{evs.map((e, i) => { const evDone = e.kind === "custom" && e.ev && e.ev.done; return (<div key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, flexWrap: "wrap" }}><div onClick={() => { if (e.kind === "custom") setView(e.ev); else if (e.target) go(e.target.tab, e.target.id); }} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0, textDecoration: evDone ? "line-through" : "none", opacity: evDone ? .6 : 1 }}><i className="dot" style={{ background: e.color }} />{e.label}{e.sub && <span style={{ color: "var(--muted)", fontSize: 12 }}>· {e.sub}</span>}</div>{e.kind === "custom" && e.ev && <EventQuickActions ev={e.ev} onSave={saveEvent} onDelete={() => delEvent(e.ev.id)} />}</div>); })}</div>
         </div>));
       })()}
     </div>
@@ -12805,7 +12805,7 @@ function Agenda({ data, persist, go }) {
           <span style={{ fontWeight: 700, fontSize: 13, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{evDone ? "✓ " : ""}{e.label}</span>
           {e.sub && <span style={{ color: "var(--muted)", fontSize: 12, flexShrink: 0 }}>· {e.sub}</span>}
         </div>
-        {e.kind === "custom" && e.ev && <EventQuickActions ev={e.ev} onSave={saveEvent} />}
+        {e.kind === "custom" && e.ev && <EventQuickActions ev={e.ev} onSave={saveEvent} onDelete={() => delEvent(e.ev.id)} />}
       </div>); })}</div>}
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}><button className="btn btn-p btn-s" onClick={() => { const d = dayOpen; setDayOpen(null); setEdit(newEvent(d)); }}><Plus size={14} /> Ajouter un événement ce jour</button></div>
     </Modal>); })()}
@@ -12839,7 +12839,7 @@ function eventRelated(event, data) {
   return { site, account, contact, ints };
 }
 // Coche « fait / atteint » d'un événement, sinon report rapide (1, 3, 5, 10, 15, 30 j, ou date personnalisée).
-function EventQuickActions({ ev, onSave, onAfter }) {
+function EventQuickActions({ ev, onSave, onAfter, onDelete }) {
   const [openR, setOpenR] = useState(false);
   const [custom, setCustom] = useState("");
   const todayStr = TODAY();
@@ -12860,6 +12860,7 @@ function EventQuickActions({ ev, onSave, onAfter }) {
   return (<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
     <button className="btn btn-g btn-s" title="Valider : événement atteint / fait" onClick={(e) => { e.stopPropagation(); done({ ...ev, done: true, doneDate: todayStr }); }}><Check size={13} /> Valider</button>
     <button className="btn btn-g btn-s" title="Reporter l'événement" onClick={(e) => { e.stopPropagation(); setOpenR(true); }}><Clock size={13} /> Reporter</button>
+    {onDelete && <button className="iconbtn" title="Supprimer l'événement" style={{ width: 26, height: 26, color: "var(--red)" }} onClick={(e) => { e.stopPropagation(); appConfirm("Supprimer définitivement « " + (ev.titre || "cet événement") + " » ? L'événement disparaîtra aussi du calendrier.", { title: "Supprimer l'événement", confirmLabel: "Supprimer", skipKey: "delEvent" }).then((ok) => { if (ok) { onDelete(); if (onAfter) onAfter(); } }); }}><Trash2 size={13} /></button>}
   </span>);
 }
 // Vue « Voir » d'un événement : détail + liens cliquables vers l'établissement, la personne et les échanges.
