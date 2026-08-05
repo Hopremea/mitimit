@@ -1761,28 +1761,32 @@ function eventTitleSimilarity(a, b) {
 function computeEventDuplicates(events, opts = {}) {
   const seuil = opts.seuil != null ? opts.seuil : 0.62;
   const pend = (events || []).filter((e) => e && !e.done && (e.titre || "").trim());
-  // Cloisonnement strict par interlocuteur (compte + contact + établissement) : deux relances visant
-  // des personnes différentes ne sont jamais rapprochées, même au sein d'un même compte — deux
-  // intitulés ne différant que par le nom du contact dépassent le seuil de similarité. Ce choix est
-  // volontairement prudent : il peut laisser passer un doublon (contact renseigné d'un côté seulement),
-  // ce qui se règle d'un clic sur la croix de la ligne, alors qu'un faux positif supprimerait une
-  // relance légitime.
-  const buckets = {};
-  pend.forEach((e) => { const k = (e.accountId || "") + "|" + (e.contactId || "") + "|" + (e.siteId || ""); (buckets[k] = buckets[k] || []).push(e); });
+  // Interlocuteur COMPATIBLE plutôt qu'identique : la même relance est tantôt liée au compte, tantôt
+  // au contact, tantôt à l'établissement selon l'écran qui l'a créée — un cloisonnement strict sur le
+  // triplet exact laissait passer trois « Relancer Sylvie SOURZAC (King Jouet)… » aux rattachements
+  // différents. Règle : un champ VIDE vaut joker, un champ renseigné des DEUX côtés doit coïncider,
+  // et il faut au moins un ancrage RÉEL partagé (compte, contact ou établissement) — ou aucun ancrage
+  // nulle part. Deux relances visant des personnes différentes ne sont donc jamais rapprochées, et le
+  // seuil de similarité écarte les intitulés ne partageant que le nom de l'enseigne.
+  const sansAncrage = (e) => !e.accountId && !e.contactId && !e.siteId;
+  const compat = (a, b) => {
+    const eq = (x, y) => !x || !y || x === y;
+    if (!eq(a.accountId, b.accountId) || !eq(a.contactId, b.contactId) || !eq(a.siteId, b.siteId)) return false;
+    return (a.accountId && a.accountId === b.accountId) || (a.contactId && a.contactId === b.contactId) || (a.siteId && a.siteId === b.siteId) || (sansAncrage(a) && sansAncrage(b));
+  };
   const groups = [];
-  Object.values(buckets).forEach((list) => {
-    if (list.length < 2) return;
-    const used = new Set();
-    list.forEach((e, i) => {
-      if (used.has(e.id)) return;
-      const g = [e]; used.add(e.id);
-      for (let j = i + 1; j < list.length; j++) {
-        const o = list[j]; if (used.has(o.id)) continue;
-        if (e.type === o.type && eventTitleSimilarity(e.titre, o.titre) >= seuil) { g.push(o); used.add(o.id); }
-      }
-      // La fiche conservée est la PLUS RÉCENTE : c'est la relance encore d'actualité.
-      if (g.length > 1) groups.push(g.sort((x, y) => (y.date || "").localeCompare(x.date || "")));
-    });
+  const used = new Set();
+  pend.forEach((e, i) => {
+    if (used.has(e.id)) return;
+    const g = [e]; used.add(e.id);
+    for (let j = i + 1; j < pend.length; j++) {
+      const o = pend[j]; if (used.has(o.id)) continue;
+      // Compatibilité exigée avec TOUT le groupe (pas seulement la première fiche) : sans cela, deux
+      // relances de contacts différents pourraient se retrouver reliées via une troisième sans contact.
+      if (e.type === o.type && g.every((m) => compat(m, o)) && eventTitleSimilarity(e.titre, o.titre) >= seuil) { g.push(o); used.add(o.id); }
+    }
+    // La fiche conservée est la PLUS RÉCENTE : c'est la relance encore d'actualité.
+    if (g.length > 1) groups.push(g.sort((x, y) => (y.date || "").localeCompare(x.date || "")));
   });
   return groups.sort((a, b) => b.length - a.length);
 }
