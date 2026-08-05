@@ -3038,6 +3038,7 @@ ${ACCENT_CSS}
    s'y perdait. L'outline se peint hors de la bordure, aucune autre règle ne le revendique, et
    overflow:hidden ne le rogne pas. */
 .card.prospect-flash{animation:prospectFlash 1.25s ease-in-out 0s infinite;border-color:var(--orange) !important;position:relative;z-index:2;}
+.flash-target{animation:prospectFlash 1.25s ease-in-out 0s 3;position:relative;z-index:2;border-radius:12px;}
 @keyframes prospectFlash{0%,100%{outline:3px solid rgba(248,177,51,0);outline-offset:2px;}50%{outline:3px solid rgba(248,177,51,.95);outline-offset:5px;}}
 /* Mouvement réduit : l'animation est neutralisée plus bas par la règle générale. Un repère « voici ce
    qui vient d'être trouvé » ne doit pas dépendre du mouvement — l'anneau reste alors fixe. */
@@ -5234,7 +5235,7 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
   const diffLiv = s.adresseLivraison && s.livraisonIdentique === false;
   return (<div className="fade">
     <button className="back" onClick={onBack}><ChevronLeft size={16} /> Retour aux groupes & établissements</button>
-    <div className="card" style={{ marginBottom: 16, borderLeft: `4px solid ${col}` }}>
+    <div id={"site-head-" + s.id} className="card" style={{ marginBottom: 16, borderLeft: `4px solid ${col}` }}>
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
         <EntityPhoto value={s.photo || ""} onChange={(url) => saveSite({ ...s, photo: url })} initials={(s.label || "É").slice(0, 1).toUpperCase()} bg={col} size={64} enseigne={[s.label, acc && acc.enseigne, s.adresse].filter(Boolean).join(" ")} groupLogo={acc && acc.logo} fallback={acc && acc.logo} persistUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} />
         <div style={{ flex: 1, minWidth: 220 }}>
@@ -6615,7 +6616,7 @@ function Repertoire({ data, persist, go, focus }) {
   const delContact = (id) => persist((p) => ({ ...p, contacts: p.contacts.filter((c) => c.id !== id), interactions: p.interactions.filter((i) => i.contactId !== id), sites: (p.sites || []).map((s) => s.contactId === id ? { ...s, contactId: "" } : s) }));
   if (openId) {
     const c = contacts.find((x) => x.id === openId); if (!c) { setOpenId(null); return null; }
-    return <Fiche c={c} account={accounts.find((a) => a.id === c.accountId)} data={data} myEmail={settings.myEmail} settings={settings} deals={deals.filter((d) => d.accountId === c.accountId)} interactions={interactions.filter((i) => i.contactId === c.id).sort((a, b) => (b.date || "").localeCompare(a.date || ""))} onBack={() => setOpenId(null)} onEdit={() => setEditC(c)} onDelete={() => { delContact(c.id); setOpenId(null); }} onTogglePrincipal={() => saveContact({ ...c, principal: !c.principal })} onSaveContact={saveContact} go={go} onGoEnseigne={() => go("accounts", c.accountId)} onGoSite={(sid) => go("accounts", c.accountId, sid)} persist={persist} editModal={editC && <Modal title="Modifier le contact" onClose={() => setEditC(null)} wide><ContactForm contact={editC} accounts={accounts} contacts={contacts} sites={data.sites} known={collectKnownAddresses(data)} onSave={(x) => { saveContact(x); setEditC(null); }} /></Modal>} />;
+    return <Fiche c={c} account={accounts.find((a) => a.id === c.accountId)} data={data} myEmail={settings.myEmail} settings={settings} deals={deals.filter((d) => d.accountId === c.accountId)} interactions={interactions.filter((i) => i.contactId === c.id).sort((a, b) => (b.date || "").localeCompare(a.date || ""))} onBack={() => setOpenId(null)} onEdit={() => setEditC(c)} onDelete={() => { delContact(c.id); setOpenId(null); }} onTogglePrincipal={() => saveContact({ ...c, principal: !c.principal })} onSaveContact={saveContact} go={go} onGoEnseigne={() => go("accounts", c.accountId)} onGoSite={(sid) => go("accounts", c.accountId, sid, "site-head-" + sid)} persist={persist} editModal={editC && <Modal title="Modifier le contact" onClose={() => setEditC(null)} wide><ContactForm contact={editC} accounts={accounts} contacts={contacts} sites={data.sites} known={collectKnownAddresses(data)} onSave={(x) => { saveContact(x); setEditC(null); }} /></Modal>} />;
   }
   const list = contacts.filter((c) => !c.archived && (filt === "tous" || c.accountId === filt) && (q === "" || fullName(c).toLowerCase().includes(q.toLowerCase()) || (c.fonction || "").toLowerCase().includes(q.toLowerCase()) || (c.email || "").toLowerCase().includes(q.toLowerCase())));
   const activeCount = contacts.length - archivedContacts.length;
@@ -6718,14 +6719,14 @@ function ContactForm({ contact, accounts, contacts, onSave, known = [], sites = 
 // événements fusionnés dans un seul fil chronologique.
 function UnifiedTimeline({ c, data, go }) {
   const items = [];
-  (data.interactions || []).filter((i) => i.contactId === c.id || (c.accountId && i.accountId === c.accountId && !i.contactId)).forEach((i) => { const m = INT_META[i.type] || INT_META.note; items.push({ date: i.date, heure: i.heure || "", label: m.label, title: i.sujet || m.label, sub: i.resume || "", color: m.color }); });
+  (data.interactions || []).filter((i) => i.contactId === c.id || (c.accountId && i.accountId === c.accountId && !i.contactId)).forEach((i) => { const m = INT_META[i.type] || INT_META.note; items.push({ date: i.date, heure: i.heure || "", label: m.label, title: i.sujet || m.label, sub: i.resume || "", color: m.color, domId: "int-" + i.id }); });
   (data.deals || []).filter((d) => c.accountId && d.accountId === c.accountId).forEach((d) => items.push({ date: d.date, heure: "", label: d.type, title: d.ref || d.type, sub: eur(d.montant || 0) + " · " + ((DEAL_STATUS[d.statut] || {}).label || d.statut), color: "#2bb673", onClick: () => go("deals", d.id) }));
   (data.events || []).filter((e) => e.contactId === c.id).forEach((e) => { const m = EVENT_TYPES[e.type] || EVENT_TYPES.rdv; items.push({ date: e.date, heure: e.heure || "", label: m.label, title: (e.done ? "✓ " : "") + (e.titre || m.label), sub: e.notes || "", color: e.color || m.color }); });
   const sorted = items.filter((x) => x.date).sort((a, b) => (b.date + (b.heure || "")).localeCompare(a.date + (a.heure || "")));
   if (!sorted.length) return null;
   return (<div className="card" style={{ marginBottom: 16 }}><div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: 0 }}><Clock size={15} /> Fil d'activité</h3><span style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 700 }}>{sorted.length}</span></div>
     <div style={{ display: "flex", flexDirection: "column", gap: 7, maxHeight: 400, overflowY: "auto" }}>{sorted.slice(0, 40).map((x, i) => (
-      <div key={i} onClick={x.onClick} style={{ display: "flex", gap: 10, padding: "8px 10px", border: "1px solid var(--line)", borderLeft: "3px solid " + x.color, borderRadius: 10, cursor: x.onClick ? "pointer" : "default" }}>
+      <div key={i} id={x.domId} onClick={x.onClick} style={{ display: "flex", gap: 10, padding: "8px 10px", border: "1px solid var(--line)", borderLeft: "3px solid " + x.color, borderRadius: 10, cursor: x.onClick ? "pointer" : "default" }}>
         <div style={{ flexShrink: 0, width: 76, fontSize: 11, color: "var(--muted)", fontWeight: 700 }} className="tnum">{x.date}</div>
         <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 700, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}><span style={{ color: x.color }}>{x.label}</span> · {x.title}</div>{x.sub && <div style={{ fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{x.sub}</div>}</div>
       </div>))}</div>
@@ -11479,7 +11480,10 @@ function CommandCenter({ data, persist, go }) {
     if (!ok) return;
     persist((p) => ({ ...p, events: (p.events || []).filter((x) => x.id !== e.id) }));
   };
-  const evGo = (e) => e.contactId ? go("repertoire", e.contactId) : e.siteId ? go("accounts", null, e.siteId) : e.accountId ? go("accounts", e.accountId) : go("agenda");
+  // Clic sur une tuile : on transporte l'utilisateur sur la fiche ET, quand l'événement est né d'un
+  // échange (fromInteraction), directement sur CET échange, bords clignotants — pas en haut d'une
+  // page générique.
+  const evGo = (e) => { const hl = e.fromInteraction ? "int-" + e.fromInteraction : null; if (e.contactId) go("repertoire", e.contactId, null, hl); else if (e.siteId) go("accounts", null, e.siteId, hl); else if (e.accountId) go("accounts", e.accountId, null, hl); else go("agenda"); };
   const evMeta = (e) => EVENT_TYPES[e.type] || EVENT_TYPES.rdv;
   const evLabel = (e) => e.titre || evMeta(e).label;
   // L'ÉTABLISSEMENT prime sur le groupe : un événement lié à un point de vente précis (siteId)
@@ -12936,7 +12940,7 @@ function InteractionThread({ interactions, data, onView, onEdit, onDelete, showC
     // Appel rejeté : un seul symbole rouge barré (combiné) + libellé en rouge ; pas d'indicateur « rejeté »
     // séparé (redondant). Sinon : icône du type + flèche de sens (entrant vert / sortant bleu).
     const Ic = rejected ? PhoneOff : m.icon; const typeColor = rejected ? "var(--red)" : m.color;
-    return (<div key={it.id} className={cx("msg", inbound ? "msg-in" : "msg-out")}>
+    return (<div key={it.id} id={"int-" + it.id} className={cx("msg", inbound ? "msg-in" : "msg-out")}>
       <div className="msg-bubble">
         <div className="msg-head">
           <span title={rejected ? "Appel sortant rejeté / sans réponse" : undefined} style={{ fontWeight: 700, color: typeColor, display: "inline-flex", alignItems: "center", gap: 4 }}><Ic size={12} />{m.label}</span>
@@ -13895,7 +13899,10 @@ export default function App() {
     if (h.stack.length > 80) h.stack.shift();
     h.pos = h.stack.length - 1; syncNavBtns();
   }, [syncNavBtns]);
-  const go = useCallback((t, id, site) => { const f = { tab: t, id, n: Date.now(), site: site || null }; navPush(t, f); setFocus(f); setTab(t); }, [navPush]);
+  // go(tab, id, site, hl) : hl = identifiant DOM d'un élément à mettre en évidence à l'arrivée
+  // (échange, tuile…). L'application défile jusqu'à lui et fait clignoter ses bords, comme la
+  // prospection — plutôt que de déposer l'utilisateur en haut d'une fiche générique.
+  const go = useCallback((t, id, site, hl) => { const f = { tab: t, id, n: Date.now(), site: site || null, hl: hl || null }; navPush(t, f); setFocus(f); setTab(t); }, [navPush]);
   const navTo = useCallback((t) => { navPush(t, null); setTab(t); setFocus(null); setNavKey((k) => k + 1); }, [navPush]);
   const navApply = useCallback((loc) => { setTab(loc.tab); setFocus(loc.focus ? { ...loc.focus, n: Date.now() } : null); setNavKey((k) => k + 1); }, []);
   const navBack = useCallback(() => {
@@ -13905,6 +13912,22 @@ export default function App() {
   const navFwd = useCallback(() => { const h = navHist.current; if (h.pos >= h.stack.length - 1) return; h.pos += 1; navApply(h.stack[h.pos]); syncNavBtns(); }, [navApply, syncNavBtns]);
   const navHome = useCallback(() => { navPush("today", null); setTab("today"); setFocus(null); setNavKey((k) => k + 1); }, [navPush]);
   const fc = (t) => (focus && focus.tab === t) ? focus : null;
+  // Mise en évidence à l'arrivée : la fiche cible peut mettre quelques rendus à monter (chargement,
+  // redirection compte → établissement), d'où les tentatives espacées avant d'abandonner.
+  useEffect(() => {
+    if (!focus || !focus.hl) return;
+    let tries = 0; let cancelled = false;
+    const tick = () => {
+      if (cancelled) return;
+      const el = document.getElementById(focus.hl);
+      if (!el) { if (++tries < 15) setTimeout(tick, 180); return; }
+      try { el.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (e) {}
+      el.classList.add("flash-target");
+      setTimeout(() => { try { el.classList.remove("flash-target"); } catch (e) {} }, 4200);
+    };
+    const t = setTimeout(tick, 250);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [focus && focus.n]);
   const theme = data.settings.theme || "light";
   const bgColor = data.settings.bgColor || "cream";
   const bgPattern = data.settings.bgPattern || "dash";
