@@ -11479,10 +11479,12 @@ function CommandCenter({ data, persist, go }) {
     if (!ok) return;
     persist((p) => ({ ...p, events: (p.events || []).filter((x) => x.id !== e.id) }));
   };
-  const evGo = (e) => e.contactId ? go("repertoire", e.contactId) : e.accountId ? go("accounts", e.accountId) : go("agenda");
+  const evGo = (e) => e.contactId ? go("repertoire", e.contactId) : e.siteId ? go("accounts", null, e.siteId) : e.accountId ? go("accounts", e.accountId) : go("agenda");
   const evMeta = (e) => EVENT_TYPES[e.type] || EVENT_TYPES.rdv;
   const evLabel = (e) => e.titre || evMeta(e).label;
-  const evSub = (e) => { const who = accName(e.accountId); const m = evMeta(e).label; return [m, who, e.heure].filter(Boolean).join(" · "); };
+  // L'ÉTABLISSEMENT prime sur le groupe : un événement lié à un point de vente précis (siteId)
+  // affiche son nom — « JouéClub Cahors », pas « JouéClub / La Grande Récré » (le compte).
+  const evSub = (e) => { const site = e.siteId ? (data.sites || []).find((s) => s.id === e.siteId) : null; const who = (site && (site.label || site.adresse)) || accName(e.accountId); const m = evMeta(e).label; return [m, who, e.heure].filter(Boolean).join(" · "); };
   const Row = ({ onClick, icon, iconColor, title, sub, right, actions }) => (
     <div className="hrow" style={{ display: "flex", alignItems: "center", gap: 11, padding: "8px 11px", border: "1px solid var(--line)", borderRadius: 11, background: "var(--card)" }}>
       <span style={{ fontSize: 16, flexShrink: 0, color: iconColor }}>{icon}</span>
@@ -12719,7 +12721,7 @@ function Agenda({ data, persist, go }) {
     data.accounts.filter((a) => a.dateAction).forEach((a) => { (map[a.dateAction] = map[a.dateAction] || []).push({ kind: "action", color: "#3F60AA", label: a.prochaineAction || "Action", sub: a.enseigne, target: { tab: "accounts", id: a.id } }); });
     data.deals.filter((d) => d.date).forEach((d) => { const acc = data.accounts.find((a) => a.id === d.accountId); (map[d.date] = map[d.date] || []).push({ kind: "deal", color: "#F8B133", label: d.ref || d.type, sub: acc ? acc.enseigne : "", target: { tab: "deals", id: d.id } }); });
     data.interactions.filter((i) => i.date).forEach((i) => { const acc = data.accounts.find((a) => a.id === i.accountId); (map[i.date] = map[i.date] || []).push({ kind: "int", color: "#7c5cf0", label: i.sujet || i.type, sub: acc ? acc.enseigne : "", target: { tab: "repertoire", id: i.contactId } }); });
-    (data.events || []).forEach((e) => { const acc = e.accountId ? data.accounts.find((a) => a.id === e.accountId) : null; (map[e.date] = map[e.date] || []).push({ kind: "custom", color: e.color || "#2bb673", label: (e.heure ? e.heure + " " : "") + e.titre, sub: acc ? acc.enseigne : (e.notes ? e.notes.slice(0, 30) : ""), ev: e }); });
+    (data.events || []).forEach((e) => { const site = e.siteId ? (data.sites || []).find((s) => s.id === e.siteId) : null; const acc = e.accountId ? data.accounts.find((a) => a.id === e.accountId) : null; (map[e.date] = map[e.date] || []).push({ kind: "custom", color: e.color || "#2bb673", label: (e.heure ? e.heure + " " : "") + e.titre, sub: (site && (site.label || site.adresse)) || (acc ? acc.enseigne : (e.notes ? e.notes.slice(0, 30) : "")), ev: e }); });
     const yNow = new Date().getFullYear();
     (data.contacts || []).filter((c) => c.naissance && /^\d{4}-\d{2}-\d{2}$/.test(c.naissance)).forEach((c) => { const md = c.naissance.slice(5); const acc = data.accounts.find((a) => a.id === c.accountId); [yNow, yNow + 1].forEach((yy) => { const ds = yy + "-" + md; (map[ds] = map[ds] || []).push({ kind: "anniv", color: "#e0567b", label: "🎂 " + fullName(c), sub: acc ? acc.enseigne : "anniversaire", target: { tab: "repertoire", id: c.id } }); }); });
     return map;
