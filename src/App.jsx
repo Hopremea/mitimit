@@ -8156,7 +8156,7 @@ function cibleAccepte(kind, type) {
   return !t || t === "autre" || l.includes(t);
 }
 async function aiSearchStores(zone, kind) {
-  const sys = "Tu es un agent de prospection B2B retail pour PEN'UP 3D, marque française de stylos 3D et loisirs créatifs pour enfants. Tu recherches des établissements physiques de jouets, jeux et loisirs créatifs en France (chaînes, coopératives, franchises, indépendants, concept stores) ET tu enrichis chaque fiche avec l'identité légale de la société exploitante en t'appuyant sur les registres et sources officielles. Tu ne fournis QUE des données factuelles et vérifiables ; en cas de doute tu laisses le champ vide plutôt que d'inventer. Tu ne fabriques jamais un courriel, un téléphone, un nom de dirigeant ou un SIREN.";
+  const sys = "Tu es un agent de prospection B2B retail pour PEN'UP 3D, marque française de stylos 3D et loisirs créatifs pour enfants. Tu recherches des établissements physiques de jouets, jeux et loisirs créatifs en France, en Suisse et en Belgique (chaînes, coopératives, franchises, indépendants, concept stores) ET tu enrichis chaque fiche avec l'identité légale de la société exploitante en t'appuyant sur les registres et sources officielles. Tu ne fournis QUE des données factuelles et vérifiables ; en cas de doute tu laisses le champ vide plutôt que d'inventer. Tu ne fabriques jamais un courriel, un téléphone, un nom de dirigeant ou un SIREN.";
   const kindTxt = kind === "chaine" ? "Privilégie les groupes nationaux, coopératives et franchises." : kind === "independant" ? "Privilégie les établissements indépendants et concept stores." : "Tous comptes confondus.";
   const user = `Requête : "${zone}". ${kindTxt}
 
@@ -8173,6 +8173,8 @@ Règles de cohérence STRICTES sur l'identité légale : (a) le SIRET commence t
 Coordonnées du contact : cherche d'abord un courriel et un téléphone de l'interlocuteur dans les registres. Si absents (c'est fréquent), cherche ailleurs : site officiel de l'établissement, page contact, réseaux sociaux professionnels. En tout dernier recours, utilise les coordonnées publiques de la fiche Google Business de l'établissement (téléphone, et courriel s'il y figure). Indique toujours dans "contact.source" d'où vient l'information (ex. "RNE/INSEE", "site officiel", "Fiche Google"). N'invente jamais : si rien n'est trouvé, laisse vide.
 
 Distinction de type importante : "chaine" = point de vente d'un réseau qui commande via sa centrale d'achat ; "franchise" = franchisé qui passe ses commandes en propre, séparément de la centrale ; "cooperative" = adhérent d'une coopérative ; "independant" = établissement sans réseau ; "specialiste" = concept store ; "gss" = grande surface spécialisée ; "autre".
+
+Établissement situé en SUISSE ou en BELGIQUE : les identifiants français n'existent pas — mets dans "siren" le numéro du registre local (IDE/UID « CHE-… » via zefix.ch pour la Suisse ; numéro d'entreprise BCE à 10 chiffres via kbo.economie.fgov.be pour la Belgique), laisse "siret" vide, laisse "departement" et "region" vides, et indique le pays dans "notes".
 
 Renvoie UNIQUEMENT un tableau JSON valide (aucun texte ni balise autour). Chaque objet a EXACTEMENT ces clés :
 - nom, enseigne, type, adresse, ville, cp, departement, region, telephone, email, site, notes (chaînes ; vide si inconnu ; email = adresse GÉNÉRIQUE du magasin publiée sur le site officiel, la fiche magasin de l'enseigne ou la fiche Google, jamais celle d'une personne)
@@ -8408,10 +8410,19 @@ async function wikidataBrand(name) {
 // Géocodage d'une zone (ville, département, région) vers une « area » OpenStreetMap, avec cache en
 // mémoire (respect de la politique Nominatim ~1 req/s : les villes se répètent lors des lots).
 const _nominatimCache = new Map();
-async function nominatimArea(q) {
-  const key = String(q || "").trim().toLowerCase(); if (!key) return null;
+// Résolution d'une ZONE de prospection : la prospection couvre la France, la SUISSE et la BELGIQUE.
+// Si la zone nomme déjà l'un de ces pays, elle est géocodée telle quelle ; sinon on tente d'abord
+// « , France » (l'immense majorité des saisies), puis la zone brute restreinte aux trois pays —
+// ainsi « Genève », « Bruxelles » ou « Canton de Vaud » se résolvent sans devoir écrire le pays.
+async function nominatimZone(zone) {
+  const z = String(zone || "").trim(); if (!z) return null;
+  if (/\b(france|suisse|switzerland|schweiz|svizzera|belgique|belgium|belgi[eë]|wallonie|flandre|vlaanderen)\b/i.test(z)) return nominatimArea(z);
+  return (await nominatimArea(z + ", France")) || (await nominatimArea(z, "fr,be,ch"));
+}
+async function nominatimArea(q, countries) {
+  const key = String(q || "").trim().toLowerCase() + "|" + (countries || ""); if (!String(q || "").trim()) return null;
   if (_nominatimCache.has(key)) return _nominatimCache.get(key);
-  const res = await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&accept-language=fr&q=" + encodeURIComponent(q));
+  const res = await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&accept-language=fr" + (countries ? "&countrycodes=" + countries : "") + "&q=" + encodeURIComponent(q));
   const r = res.ok ? ((await res.json())[0] || null) : null;
   const out = r ? { areaId: r.osm_type === "relation" ? 3600000000 + Number(r.osm_id) : (r.osm_type === "way" ? 2400000000 + Number(r.osm_id) : null), lat: +r.lat, lng: +r.lon, bbox: r.boundingbox } : null;
   _nominatimCache.set(key, out);
@@ -8483,7 +8494,7 @@ async function overpassQuery(q) {
 // Tous les magasins jouets / jeux / loisirs créatifs d'une zone, depuis OpenStreetMap — GRATUIT :
 // c'est le premier étage de la recherche de prospects par zone (l'IA ne sert plus qu'en complément).
 async function osmSearchStores(zone) {
-  const a = await nominatimArea(/france/i.test(zone) ? zone : zone + ", France"); if (!a) return [];
+  const a = await nominatimZone(zone); if (!a) return [];
   let sel;
   if (a.areaId) sel = `area(${a.areaId})->.z;nwr["shop"~"${OSM_SHOP_TAGS}"]["name"](area.z);`;
   else if (a.bbox && a.bbox.length === 4) sel = `nwr["shop"~"${OSM_SHOP_TAGS}"]["name"](${a.bbox[0]},${a.bbox[2]},${a.bbox[1]},${a.bbox[3]});`;
@@ -8747,7 +8758,7 @@ async function nafSearch(zone, naf, opts = {}) {
 // Médiathèques et bibliothèques via OpenStreetMap (amenity=library) : elles animent souvent des
 // ateliers créatifs et achètent du matériel.
 async function osmSearchLieux(zone, filtre, type) {
-  const a = await nominatimArea(/france/i.test(zone) ? zone : zone + ", France"); if (!a) return [];
+  const a = await nominatimZone(zone); if (!a) return [];
   let sel;
   if (a.areaId) sel = `area(${a.areaId})->.z;nwr${filtre}["name"](area.z);`;
   else if (a.bbox && a.bbox.length === 4) sel = `nwr${filtre}["name"](${a.bbox[0]},${a.bbox[2]},${a.bbox[1]},${a.bbox[3]});`;
@@ -8758,7 +8769,7 @@ async function osmSearchLieux(zone, filtre, type) {
 // UN établissement précis (nom + ville) sur OpenStreetMap : téléphone, site, horaires… — GRATUIT.
 async function osmFindPlace(name, ville) {
   const n = String(name || "").trim(); const v = String(ville || "").trim(); if (!n || !v) return null;
-  const a = await nominatimArea(v + ", France"); if (!a || !a.areaId) return null;
+  const a = await nominatimZone(v); if (!a || !a.areaId) return null;
   const rx = n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/["']/g, ".");
   const els = await overpassQuery(`[out:json][timeout:15];area(${a.areaId})->.z;nwr["name"~"${rx}",i](area.z);out tags center 5;`);
   const m = els.map(osmTagsToStore).find((x) => x.nom);
@@ -10064,15 +10075,15 @@ function Prospection({ data, persist, go }) {
     <div className="card" style={{ marginBottom: 14 }}>
       <div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><Sparkles size={17} style={{ color: "var(--orange)" }} /> Recherche de prospects</h3></div>
       <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-        <div className="fld" style={{ flex: 1, minWidth: 200, marginBottom: 0 }}><label>Zone ou établissement précis</label><input value={zone} onChange={(e) => setZone(e.target.value)} placeholder={source === "magasins" ? "Ex. Occitanie, Bordeaux… ou « L'Atelier chez soi »" : "Ville, département (31) ou nom de département"} onKeyDown={(e) => { if (e.key === "Enter" && !busy) runAI(); }} /></div>
+        <div className="fld" style={{ flex: 1, minWidth: 200, marginBottom: 0 }}><label>Zone ou établissement précis</label><input value={zone} onChange={(e) => setZone(e.target.value)} placeholder={source === "magasins" ? "Ex. Occitanie, Bordeaux, Genève, Bruxelles… ou « L'Atelier chez soi »" : "Ville, département (31) ou nom de département"} onKeyDown={(e) => { if (e.key === "Enter" && !busy) runAI(); }} /></div>
         {/* Chaque source interroge un registre officiel différent : le choix change complètement
             la nature des fiches créées (et, pour toutes sauf « magasins », le coût est nul). */}
         <div className="fld" style={{ minWidth: 210, marginBottom: 0 }}><label>Chercher quoi ?</label><select value={source} onChange={(e) => setSource(e.target.value)}>
-          <option value="magasins">Magasins de jouets / loisirs</option>
-          <option value="naf">Commerces par code d'activité (NAF)</option>
-          <option value="ecoles">Scolaire (écoles, collèges, lycées)</option>
-          <option value="ime">IME & instituts médico-éducatifs</option>
-          <option value="associations">Associations & ludothèques</option>
+          <option value="magasins">Magasins de jouets / loisirs (France, Suisse, Belgique)</option>
+          <option value="naf">Commerces par code d'activité (NAF · France)</option>
+          <option value="ecoles">Scolaire (écoles, collèges, lycées · France)</option>
+          <option value="ime">IME & instituts médico-éducatifs (France)</option>
+          <option value="associations">Associations & ludothèques (France)</option>
           <option value="mediatheques">Médiathèques & bibliothèques</option>
         </select></div>
         {(source === "magasins" || source === "naf") && <div className="fld" style={{ minWidth: 170, marginBottom: 0 }}><label>Cible</label><select value={kind} onChange={(e) => setKind(e.target.value)} title={source === "naf" ? "Déterminé par le nombre d'établissements ouverts de la société (" + SEUIL_RESEAU + " ou plus = réseau), donnée du registre." : "Déterminé par l'enseigne de réseau déclarée sur le point de vente."}><option value="toutes">Tous</option><option value="chaine">Chaînes & franchises</option><option value="independant">Indépendants & concept stores</option></select></div>}
@@ -11590,7 +11601,7 @@ const TABS = [
   { id: "performance", group: "Pilotage", label: "Performance", icon: TrendingUp, title: "Performance du modèle", sub: "Indicateurs clés du modèle rasoir / lame (logique de récurrence)" },
   { id: "stats", group: "Pilotage", label: "Statistiques", icon: BarChart3, title: "Statistiques", sub: "Vue d'ensemble descriptive de l'activité" },
   // Commercial
-  { id: "prospection", group: "Commercial", label: "Prospection", icon: Search, title: "Prospection établissements de jouets", sub: "Recherche, tri et segmentation de points de vente en France" },
+  { id: "prospection", group: "Commercial", label: "Prospection", icon: Search, title: "Prospection établissements de jouets", sub: "Recherche, tri et segmentation de points de vente en France, Suisse et Belgique" },
   { id: "accounts", group: "Commercial", label: "Groupes & établissements", icon: Building2, title: "Groupes & établissements", sub: "Entonnoir de référencement, groupes et établissements" },
   { id: "repertoire", group: "Commercial", label: "Répertoire", icon: Users, title: "Répertoire de contacts", sub: "Interlocuteurs, échanges et coordonnées" },
   { id: "deals", group: "Commercial", label: "Devis & commandes", icon: FileText, title: "Devis, commandes & factures", sub: "Documents commerciaux" },
