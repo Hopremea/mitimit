@@ -12115,18 +12115,20 @@ function buildRHNotion(data, monthPrefix) {
   // Tableau 1 — Heures pointées
   L.push("### Heures pointées" + (monthPrefix ? (" — " + new Date(monthPrefix + "-01T00:00:00").toLocaleDateString("fr-FR", { month: "long", year: "numeric" })) : " — tout l'historique"));
   L.push("");
-  // Valorisation jour après jour, avec la détermination HEBDOMADAIRE des heures supplémentaires
-  // (règle RH du bulletin de juillet 2026, cf. semaineSalaireBreakdown) : seuil de 35 h par semaine
-  // civile, congés comptés pour l'atteindre, jours chômés (férié, maladie) payés en heures normales
-  // au-delà de 35 h. L'attribution au fil des jours est chronologique : un jour porte les heures sup.
-  // qu'il fait franchir au cumul de la semaine, réparties 8 h à +25 % puis +50 %. Le salaire du jour
-  // rémunère tout le reste au taux de base — y compris les heures normales au-delà de 35 h.
+  // Détermination HEBDOMADAIRE des heures supplémentaires (règle RH du bulletin de juillet 2026,
+  // cf. semaineSalaireBreakdown) : seuil de 35 h par semaine civile, congés comptés pour l'atteindre,
+  // jours chômés (férié, maladie) payés en heures normales au-delà de 35 h. L'attribution au fil des
+  // jours est chronologique : un jour porte les heures sup. qu'il fait franchir au cumul de la
+  // semaine, réparties 8 h à +25 % puis +50 %.
+  // AUCUN « salaire du jour » : le salaire normal est MENSUALISÉ (151,67 h × taux quel que soit le
+  // nombre de jours ouvrés du mois). Additionner 7 h × taux par journée gonflait le salaire des mois
+  // longs (161 h en juillet) : la valorisation se fait dans le récapitulatif mensualisé ci-dessous.
   const taux = Number((data.settings || {}).salaireTauxBase) || SAL_TAUX_DEFAUT;
   const lundiDe = (ds) => { const d = new Date(ds + "T00:00:00"); const mo = new Date(d); mo.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return isoLocal(mo); };
   const semaines = {};
-  L.push("| Date | Jour | Type | Arrivée | Départ | Pause | Heures | Salaire jour | Heures sup. | Heures sup. (€) |");
-  L.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
-  let totH = 0, totOT = 0, totFixe = 0, totSup = 0, totNorm = 0;
+  L.push("| Date | Jour | Type | Arrivée | Départ | Pause | Heures | Heures sup. | Heures sup. (€) |");
+  L.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+  let totH = 0, totOT = 0, totSup = 0, totNorm = 0, tot25 = 0, tot50 = 0;
   pgs.forEach(([ds, rec]) => {
     const st = presenceDay(rec); if (!st || st.invalid) return;
     const mot = st.motif && st.motif !== "presence" ? PRESENCE_MOTIFS[st.motif] : null;
@@ -12143,15 +12145,29 @@ function buildRHNotion(data, monthPrefix) {
     totNorm += norm;
     const min25 = Math.max(0, Math.min(ot, SAL_SEUIL_50_MIN - w.hs));
     const min50 = ot - min25; w.hs += ot;
+    tot25 += min25; tot50 += min50;
     const sup = ((min25 / 60) * taux * SAL_MAJ_25) + ((min50 / 60) * taux * SAL_MAJ_50);
-    // Le fixe du jour rémunère les heures NORMALES : tout ce qui n'est pas majoré.
-    const fixe = ((st.worked - ot) / 60) * taux;
-    totH += st.worked; totOT += ot; totFixe += fixe; totSup += sup;
-    L.push("| " + [dateFr(ds), jour(ds), cell(mot ? mot.label : "Présence"), mot ? "" : (st.arrivee || ""), mot ? "" : (st.depart || ""), mot ? "" : ((st.pause || 0) + " min"), hd(st.worked), eur2(fixe), hd(ot), eur2(sup)].join(" | ") + " |");
+    totH += st.worked; totOT += ot; totSup += sup;
+    L.push("| " + [dateFr(ds), jour(ds), cell(mot ? mot.label : "Présence"), mot ? "" : (st.arrivee || ""), mot ? "" : (st.depart || ""), mot ? "" : ((st.pause || 0) + " min"), hd(st.worked), hd(ot), eur2(sup)].join(" | ") + " |");
   });
-  L.push("| **Total** |  |  |  |  |  | **" + hd(totH) + "** | **" + eur2(totFixe) + "** | **" + hd(totOT) + "** | **" + eur2(totSup) + "** |");
+  L.push("| **Total** |  |  |  |  |  | **" + hd(totH) + "** | **" + hd(totOT) + "** | **" + eur2(totSup) + "** |");
   L.push("");
-  L.push("_Valorisation au taux horaire de base de " + eur2(taux) + ((data.settings || {}).salaireTauxBase != null ? " (réglage mémorisé dans l'onglet Salaire estimé)." : " (valeur par défaut : mémorisez votre taux dans l'onglet Salaire estimé pour l'ajuster).") + " Heures supplémentaires déterminées par SEMAINE CIVILE : seuil de 35 h, congés comptés pour l'atteindre ; les heures au-delà de 35 h couvertes par un jour férié ou un arrêt chômé" + (totNorm > 0 ? " (" + hd(totNorm) + " h ce mois)" : "") + " sont payées en heures normales, sans majoration, en plus des 151,67 h mensuelles ; au-delà, +25 % pour les 8 premières heures de la semaine puis +50 %. Montants bruts, avant cotisations._");
+  // Récapitulatif MENSUALISÉ, aligné sur la structure du bulletin : base 151,67 h quel que soit le
+  // mois, heures normales au-delà (férié/chômé), puis heures supplémentaires majorées.
+  const brutBase = SAL_BASE_HOURS * taux;
+  const brutNorm = (totNorm / 60) * taux;
+  const brutEstime = brutBase + brutNorm + totSup;
+  L.push("#### Valorisation mensualisée (structure du bulletin)");
+  L.push("");
+  L.push("| Élément | Heures | Montant brut |");
+  L.push("| --- | --- | --- |");
+  L.push("| Salaire de base mensualisé (lissé, indépendant du nombre de jours ouvrés) | " + String(SAL_BASE_HOURS).replace(".", ",") + " | " + eur2(brutBase) + " |");
+  if (totNorm > 0) L.push("| Heures normales au-delà de 151,67 h (semaine > 35 h par férié / arrêt chômé, taux de base) | " + hd(totNorm) + " | " + eur2(brutNorm) + " |");
+  L.push("| Heures supplémentaires à +25 % | " + hd(tot25) + " | " + eur2((tot25 / 60) * taux * SAL_MAJ_25) + " |");
+  L.push("| Heures supplémentaires à +50 % | " + hd(tot50) + " | " + eur2((tot50 / 60) * taux * SAL_MAJ_50) + " |");
+  L.push("| **Total (hors primes, transport et régularisation de congés)** | **" + hd(SAL_BASE_HOURS * 60 + totNorm + totOT) + "** | **" + eur2(brutEstime) + "** |");
+  L.push("");
+  L.push("_Valorisation au taux horaire de base de " + eur2(taux) + ((data.settings || {}).salaireTauxBase != null ? " (réglage mémorisé dans l'onglet Salaire estimé)." : " (valeur par défaut : mémorisez votre taux dans l'onglet Salaire estimé pour l'ajuster).") + " Heures supplémentaires déterminées par SEMAINE CIVILE : seuil de 35 h, congés comptés pour l'atteindre ; les heures au-delà de 35 h couvertes par un jour férié ou un arrêt chômé sont payées en heures normales, sans majoration, en plus des 151,67 h mensuelles ; au-delà, +25 % pour les 8 premières heures de la semaine puis +50 %. Le bulletin peut en plus porter une retenue et une indemnité de congés payés légèrement différentes l'une de l'autre (règle du dixième), non modélisées ici. Montants bruts, avant cotisations._");
   L.push("");
   // Tableau 2 — Trajet domicile-travail (un jour de présence pointé = un aller-retour)
   const s = data.settings || {};
@@ -12479,6 +12495,9 @@ function Pointage({ data, persist }) {
     L.push("| Date | Jour | Type | Arrivée | Départ | Pause | Heures | Heures sup. | Trajet A/R | Frais |");
     L.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
     let totMin = 0, totSup = 0, totFrais = 0, totAR = 0;
+    // Même règle hebdomadaire que la paie (cf. semaineSalaireBreakdown) : un jour porte les heures
+    // sup. qu'il fait franchir au cumul de la semaine (seuil 35 h, congés comptés, chômé exclu).
+    const semX = {};
     rows.forEach((ds) => {
       const st = presenceDay(pointages[ds]); if (!st || st.invalid) return;
       const d = new Date(ds + "T00:00:00");
@@ -12487,7 +12506,10 @@ function Pointage({ data, persist }) {
       const mot = st.motif && st.motif !== "presence" ? PRESENCE_MOTIFS[st.motif] : null;
       const ar = !mot;
       const frais = ar ? coutJour : 0;
-      const sup = Math.max(0, st.worked - targetOf(ds));
+      const mo = new Date(d); mo.setDate(d.getDate() - ((d.getDay() + 6) % 7)); const k = isoLocal(mo);
+      const w = semX[k] = semX[k] || { cpt: 0 };
+      let sup = 0;
+      if (!MOTIFS_CHOMES.has(st.motif)) { const avant = Math.max(0, w.cpt - SAL_SEUIL_HEBDO); w.cpt += st.worked; sup = Math.max(0, w.cpt - SAL_SEUIL_HEBDO) - avant; }
       totMin += st.worked; totSup += sup; if (ar) { totFrais += frais; totAR++; }
       L.push("| " + [dateFr, jour, mot ? mot.label : "Présence", mot ? "" : st.arrivee, mot ? "" : st.depart, mot ? "" : ((st.pause || 0) + " min"), hd(st.worked), hd(sup), ar ? "A/R" : "—", ar ? eur2(frais) : "—"].join(" | ") + " |");
     });
