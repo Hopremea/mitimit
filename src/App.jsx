@@ -222,9 +222,12 @@ const SIEGE = { lat: 44.0177, lng: 1.3550, ville: "Montauban" };
 // → commandes récurrentes. L'utilisateur peut figer une étape à la main (stageAuto=false).
 const STAGES = [
   { id: "prospect", label: "Prospect", color: "#9aa6bd" }, { id: "contact", label: "Contacté", color: "#5b8def" },
-  { id: "rdv", label: "RDV découverte", color: "#7c5cf0" }, { id: "referencement", label: "Client", color: "#FFD212" }, { id: "actif", label: "Client fidèle", color: "#2bb673" },
+  { id: "rdv", label: "RDV découverte", color: "#7c5cf0" }, { id: "referencement", label: "Client", color: "#2bb673" },
 ];
-const STAGE_ORDER = ["prospect", "contact", "rdv", "referencement", "actif"];
+// L'étape « Client fidèle » (actif) a été SUPPRIMÉE : sans recul suffisant, la distinction n'avait
+// pas de sens. « Client » est l'étape terminale ; les anciens comptes « actif » y sont migrés au
+// chargement (voir normalize) et l'historique stageLog conserve la trace telle quelle.
+const STAGE_ORDER = ["prospect", "contact", "rdv", "referencement"];
 const DEAL_STATUS = { brouillon: { label: "Brouillon", color: "#9aa6bd" }, envoye: { label: "Envoyé", color: "#5b8def" }, accepte: { label: "Accepté / Signé", color: "#2bb673" }, expediee: { label: "En cours de livraison", color: "#F8B133" }, refuse: { label: "Refusé", color: "#FF5A45" }, livre: { label: "Livré", color: "#3F60AA" }, paye: { label: "Livré et payé", color: "#128C6E" } };
 // « Livré » et « Livré et payé » sont deux fins de course : la marchandise est partie dans les deux
 // cas, seul l'encaissement les sépare. Tout ce qui distingue « en cours » de « terminé » doit donc
@@ -1024,8 +1027,7 @@ function emptyData() { return { products: [], accounts: [], contacts: [], intera
 //   prospect       : enregistré, jamais contacté
 //   contact        : démarché (au moins un échange autre qu'une note interne)
 //   rdv            : rendez-vous de découverte (RDV ou visio) programmé/tenu
-//   referencement  : au moins un bon de commande (ou un document signé) → « Client »
-//   actif          : plusieurs commandes → « Client fidèle »
+//   referencement  : au moins un bon de commande (ou un document signé) → « Client » (étape terminale)
 function deriveStage(account, d) {
   const accId = account.id;
   const siteIds = new Set((d.sites || []).filter((s) => s.accountId === accId).map((s) => s.id));
@@ -1034,10 +1036,8 @@ function deriveStage(account, d) {
   // Bon de commande réel = un ACHAT : une Commande ACCEPTÉE (signée, en cours de livraison, livrée
   // ou payée) OU un document signé non déjà converti en commande (évite de compter deux fois un
   // devis signé puis transformé). Une commande seulement « envoyée » n'est PAS un achat : elle
-  // suffisait auparavant à classer un compte « Client », voire « Client fidèle » avec deux envois,
-  // sans le moindre achat réel.
+  // suffisait auparavant à classer un compte « Client » sans le moindre achat réel.
   const orders = (d.deals || []).filter((x) => x.accountId === accId && ((x.type === "Commande" && ["accepte", "expediee", "livre", "paye"].includes(x.statut)) || (x.type !== "Commande" && isCaSigne(x) && !x.converti)));
-  if (orders.length >= 2) return "actif";
   if (orders.length >= 1) return "referencement";
   const ints = (d.interactions || []).filter(rel);
   const hasRdv = (d.events || []).some((e) => rel(e) && (e.type === "rdv" || e.type === "visio")) || ints.some((i) => i.type === "rdv" || i.type === "visio");
@@ -1072,6 +1072,9 @@ function normalize(d) {
   d.emailTemplates = Array.isArray(d.emailTemplates) ? d.emailTemplates : seedEmailTemplates();
   d.accounts = d.accounts.map((a) => (!a.adressePostale && a.adresseLivraison) ? { ...a, adressePostale: a.adresseLivraison, livraisonIdentique: true } : a);
   d.accounts = d.accounts.map((a) => ({ ...a, nature: a.nature || guessNature(a) }));
+  // Étape « Client fidèle » supprimée : les comptes encore classés « actif » redeviennent « Client »
+  // (étape terminale). Idempotent ; l'historique stageLog est conservé tel quel.
+  d.accounts = d.accounts.map((a) => a.stage === "actif" ? { ...a, stage: "referencement" } : a);
   // Auto-réparation idempotente du champ « kind » (groupe / établissement) : couvre les comptes
   // issus de la conversion de prospects et l'ancienne valeur « magasin », sans dépendre d'un drapeau ponctuel.
   d.accounts = d.accounts.map((a) => { const k = (a.kind === "groupe" || a.kind === "établissement") ? a.kind : (a.kind === "magasin" ? "établissement" : (isCentraleOuChaine(a) ? "groupe" : "établissement")); return k === a.kind ? a : { ...a, kind: k }; });
@@ -2726,11 +2729,12 @@ function computeKPIs(data) {
   const daysArr = fc.map((m) => m.daysLeft).filter((x) => x != null && x >= 0); const joursStockMoy = daysArr.length ? Math.round(daysArr.reduce((s, x) => s + x, 0) / daysArr.length) : null;
   // 5. Pipeline : entonnoir par étape
   const stageCounts = {}; STAGES.forEach((s) => stageCounts[s.id] = 0); (data.accounts || []).forEach((a) => { if (stageCounts[a.stage] != null) stageCounts[a.stage]++; });
-  const totalAcc = (data.accounts || []).length; const actifs = stageCounts["actif"] || 0;
-  const clients = (stageCounts["referencement"] || 0) + actifs; // comptes ayant passé au moins une commande
+  const totalAcc = (data.accounts || []).length;
+  const clients = stageCounts["referencement"] || 0; // comptes ayant passé au moins une commande
   const tauxRefer = totalAcc > 0 ? clients / totalAcc * 100 : null;
-  // 5b. Durée moyenne de cycle (prospect -> actif) : nécessite l'historique des étapes (stageLog)
-  const cycles = []; (data.accounts || []).forEach((a) => { const log = a.stageLog || []; const first = log[0]; const toActif = log.find((e) => e.stage === "actif"); if (first && toActif) { const dd = (new Date(toActif.date) - new Date(first.date)) / (1000 * 60 * 60 * 24); if (dd > 0) cycles.push(dd); } });
+  // 5b. Durée moyenne de cycle (prospect -> client) : nécessite l'historique des étapes (stageLog).
+  // Les anciens historiques peuvent porter une entrée « actif » (étape supprimée) : elle vaut client.
+  const cycles = []; (data.accounts || []).forEach((a) => { const log = a.stageLog || []; const first = log[0]; const toActif = log.find((e) => e.stage === "referencement" || e.stage === "actif"); if (first && toActif) { const dd = (new Date(toActif.date) - new Date(first.date)) / (1000 * 60 * 60 * 24); if (dd > 0) cycles.push(dd); } });
   const cycleMoy = cycles.length ? Math.round(cycles.reduce((s, x) => s + x, 0) / cycles.length) : null;
   // 6. Trésorerie : DSO (délai de paiement) à partir des factures ayant une date de paiement
   const fact = (data.deals || []).filter((d) => d.type === "Facture" && d.date && d.datePaiement);
@@ -4208,7 +4212,7 @@ function FunnelTile({ accounts, go }) {
       </div>
     )}
     <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 12 }}>
-      <span style={{ color: "var(--muted)" }}>{total} établissement(s), de prospect à client fidèle.</span>
+      <span style={{ color: "var(--muted)" }}>{total} établissement(s), de prospect à client.</span>
       <button className="lnk" style={{ fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }} onClick={() => go("accounts")}>Voir les établissements <ChevronRight size={14} /></button>
     </div>
     {pop.node}
@@ -4650,7 +4654,7 @@ function Performance({ data, go }) {
           {STAGES.map((s) => { const n = K.funnel.counts[s.id] || 0; return (<div key={s.id} style={{ marginBottom: 8 }}><div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 3 }}><span>{s.label}</span><span className="tnum" style={{ fontWeight: 700 }}>{n}</span></div><div style={{ height: 9, background: "var(--line)", borderRadius: 6, overflow: "hidden" }}><div style={{ width: `${n / totFunnel * 100}%`, height: "100%", background: s.color }} /></div></div>); })}
         </div>
         <div className="grid" style={{ gridTemplateColumns: "1fr", gap: 12 }}>
-          <KpiTile label="Taux de clients" value={fp(K.funnel.tauxRefer)} color="#2bb673" state={K.funnel.state} note={K.funnel.state === "ok" ? `${K.funnel.clients || 0} client(s) dont ${K.funnel.counts.actif || 0} fidèle(s) sur ${K.funnel.total}.` : "Aucun compte."} />
+          <KpiTile label="Taux de clients" value={fp(K.funnel.tauxRefer)} color="#2bb673" state={K.funnel.state} note={K.funnel.state === "ok" ? `${K.funnel.clients || 0} client(s) sur ${K.funnel.total}.` : "Aucun compte."} />
           <KpiTile label="Durée moyenne de cycle" value={fd(K.cycle.v)} color="#7c5cf0" state={K.cycle.state} note={K.cycle.state === "ok" ? `De prospect à référencé, sur ${K.cycle.n} compte(s) au parcours complet.` : "À activer : l'historique des étapes est désormais enregistré à chaque changement. La durée se calculera dès qu'un compte aura parcouru prospect → actif."} />
         </div>
       </div>
@@ -7787,11 +7791,10 @@ function Carte({ data, persist, go, focus }) {
   // Catégorie de rattachement : « groupe » si le compte parent est un groupe (sièges + magasins rattachés), sinon « indépendant ».
   const siteCat = (st) => isGroupe(accOf(st.accountId)) ? "groupe" : "independant";
   const stageOf = (st) => { const a = accOf(st.accountId); return a && a.stage ? a.stage : "prospect"; };
-  // Un « client » (référencé) / « client fidèle » sur la carte = une FACTURE générée. Pour un
-  // ÉTABLISSEMENT DE GROUPE, le statut se juge PAR POINT DE VENTE : une facture livrée à JouéClub
-  // Albi fait d'Albi un client, même si le groupe JouéClub est classé à une autre étape de
-  // l'entonnoir (et inversement, un magasin du groupe jamais livré n'est pas « client »). Pour un
-  // indépendant, l'étape du compte + une facture, comme avant.
+  // Un « client » sur la carte = une FACTURE générée. Pour un ÉTABLISSEMENT DE GROUPE, le statut se
+  // juge PAR POINT DE VENTE : une facture livrée à JouéClub Albi fait d'Albi un client, même si le
+  // groupe JouéClub est classé à une autre étape de l'entonnoir (et inversement, un magasin du
+  // groupe jamais livré n'est pas « client »). Pour un indépendant, l'étape du compte + une facture.
   const hasFacture = (accId) => !!accId && (data.deals || []).some((d) => d.accountId === accId && d.type === "Facture");
   const hasFactureSite = (st) => (data.deals || []).some((d) => d.type === "Facture" && (d.livraisonSiteId === st.id || d.siteId === st.id));
   const stageMatch = (st) => {
@@ -7799,10 +7802,7 @@ function Carte({ data, persist, go, focus }) {
     const stg = stageOf(st);
     const grp = isGroupe(accOf(st.accountId));
     return filtStage.some((fs) => {
-      // « Client » ENGLOBE les clients fidèles : un fidèle est d'abord un client — l'inverse est
-      // faux, le filtre « Client fidèle » reste strict.
-      if (fs === "referencement") return grp ? hasFactureSite(st) : ((stg === "referencement" || stg === "actif") && hasFacture(st.accountId));
-      if (fs === "actif") return grp ? (hasFactureSite(st) && stg === "actif") : (stg === "actif" && hasFacture(st.accountId));
+      if (fs === "referencement") return grp ? hasFactureSite(st) : (stg === "referencement" && hasFacture(st.accountId));
       // Étapes amont (prospect, contacté, RDV…) : un magasin de groupe déjà facturé n'y figure plus,
       // il est passé côté client même si son groupe garde une étape amont.
       return fs === stg && !(grp && hasFactureSite(st));
@@ -11044,7 +11044,7 @@ function Statistiques({ data }) {
       (data.sites || []).filter((s) => s.type === "pdv" || s.type === "decision").forEach((s) => {
         const m = String(s.adresse || "").match(/\b(\d{2})\d{3}\b/); if (!m) return;
         const dep = m[1]; const acc = A.find((a) => a.id === s.accountId);
-        const actif = acc && (acc.stage === "actif" || acc.stage === "referencement");
+        const actif = acc && acc.stage === "referencement";
         const e = byDept[dep] = byDept[dep] || { dep, pdv: 0, actifs: 0 };
         e.pdv++; if (actif) e.actifs++;
       });
