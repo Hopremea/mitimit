@@ -11871,11 +11871,18 @@ const SAL_PART = 78;                // rémunération apprenti = 78 % du SMIC (b
 // (36ᵉ→43ᵉ h) sont payées +25 %, au-delà (44ᵉ h et plus) +50 %. Le taux HS 25 % = taux de base × 1,25
 // (vérifié : 9,6018 × 1,25 = 12,0023, exactement le taux du bulletin de juin).
 const SAL_MAJ_25 = 1.25, SAL_MAJ_50 = 1.5, SAL_SEUIL_50_MIN = 480; // 8 h/semaine = 480 min à +25 % avant +50 %
+// Régularisation des congés payés, calquée sur le bulletin de juillet 2026 : un jour de CP pris
+// donne lieu à une RETENUE d'un 26e de la base mensuelle (bulletin : 1 456,31 / 26 = 56,0119 €/j,
+// donc dérivable du taux horaire) et au versement d'une INDEMNITÉ de congés payés par jour, issue
+// de la règle du dixième. Cette indemnité dépend de l'historique de rémunération : on retient la
+// dernière valeur relevée sur le bulletin (176,28 € / 3 j = 58,76 €/j), réglable et mémorisable.
+const SAL_CP_DIVISEUR = 26;        // jours ouvrables retenus par mois pour la retenue CP
+const SAL_INDEM_CP_JOUR = 58.76;   // indemnité CP par jour (dixième), relevée sur le bulletin de juillet 2026
 // Taux horaire de base retenu tant qu'aucun n'a été mémorisé dans l'onglet « Salaire estimé ».
 // Constante partagée : l'écran retombait dessus, l'export retombait sur zéro, et l'export affichait
 // donc une paie nulle tant que le bouton « Mémoriser mon taux horaire » n'avait jamais été utilisé.
 const SAL_TAUX_DEFAUT = 9.6018;
-function estimateSalaire({ tauxBase, h25, h50, hNorm = 0, prime, commission = 0, part = SAL_PART, mutuelle = SAL_MUTUELLE }) {
+function estimateSalaire({ tauxBase, h25, h50, hNorm = 0, prime, commission = 0, part = SAL_PART, mutuelle = SAL_MUTUELLE, joursCp = 0, indemCpJour = SAL_INDEM_CP_JOUR }) {
   const tb = Number(tauxBase) || 0;
   const base = tb * SAL_BASE_HOURS;
   const t25 = tb * SAL_MAJ_25, t50 = tb * SAL_MAJ_50;
@@ -11890,13 +11897,19 @@ function estimateSalaire({ tauxBase, h25, h50, hNorm = 0, prime, commission = 0,
   // salaire du mois (elle dépend du règlement des factures). Elle reste renvoyée, pour être affichée
   // à titre indicatif, mais ne pèse ni sur le brut, ni sur les cotisations, ni sur le net.
   const comm = Number(commission) || 0;
-  const brut = base + hs + pr;
+  // Régularisation CP du mois : retenue d'un 26e de la base par jour pris, indemnité au dixième
+  // (dernière valeur du bulletin) versée en face. L'écart entre les deux est en général minime.
+  const jcp = Number(joursCp) || 0;
+  const retenueCpJour = base / SAL_CP_DIVISEUR;
+  const retenueCp = jcp * retenueCpJour;
+  const indemCp = jcp * (Number(indemCpJour) || 0);
+  const brut = base + hs + pr - retenueCp + indemCp;
   const seuil = part > 0 ? base * (79 / part) : base; // 79 % du SMIC (la base vaut « part » % du SMIC)
   const excess = Math.max(0, brut - seuil);
   const cotisVar = SAL_COTIS_EXCESS * excess;
   const mut = Number(mutuelle) || 0;
   const cotis = mut + cotisVar;
-  return { base, t25, t50, hs25, hs50, hsn, hs, prime: pr, commission: comm, brut, seuil, excess, mutuelle: mut, cotisVar, cotis, net: brut - cotis };
+  return { base, t25, t50, hs25, hs50, hsn, hs, prime: pr, commission: comm, joursCp: jcp, retenueCpJour, retenueCp, indemCp, brut, seuil, excess, mutuelle: mut, cotisVar, cotis, net: brut - cotis };
 }
 // Commission commerciale par facture (partagée entre l'onglet Commissions et le salaire estimé) :
 // 1re facture d'un établissement = référencement (taux1), suivantes = réassort (tauxN). Un indépendant
@@ -11930,6 +11943,9 @@ function SalaireRH({ data, persist }) {
   // en heures normales — voir semaineSalaireBreakdown) : HS +25 % / +50 % et heures normales au-delà
   // des 151,67 h.
   const autoOT = useMemo(() => semaineSalaireBreakdown(data.pointages, monthPrefix), [data.pointages, monthPrefix]);
+  // Jours de congés payés pris ce mois (pointage) : déclenchent la retenue (base/26 par jour) et
+  // l'indemnité CP au dixième (dernière valeur du bulletin, réglable ci-dessous).
+  const autoCp = useMemo(() => Object.entries(data.pointages || {}).filter(([ds, r]) => ds.startsWith(monthPrefix) && r && r.motif === "conges").length, [data.pointages, monthPrefix]);
   // Frais kilométriques du mois (coût réel domicile-travail). La PRIME versée en paie correspond à
   // 50 % de ces frais (PRIME_KM_RATE).
   const coutJour = (Number(s.fraisEssence != null ? s.fraisEssence : 8) + Number(s.fraisPeage != null ? s.fraisPeage : 3.2)) * (s.fraisAR !== false ? 2 : 1);
@@ -11942,12 +11958,16 @@ function SalaireRH({ data, persist }) {
   const [h25, setH25] = useState(autoOT.h25);
   const [h50, setH50] = useState(autoOT.h50);
   const [hNorm, setHNorm] = useState(autoOT.hNorm);
+  const [joursCp, setJoursCp] = useState(autoCp);
+  const [cpTouched, setCpTouched] = useState(false);
+  const [indemCpJour, setIndemCpJour] = useState(s.salaireIndemCpJour != null ? s.salaireIndemCpJour : SAL_INDEM_CP_JOUR);
   const [prime, setPrime] = useState(autoKm);
   // Automatisation : tant que l'utilisateur n'a pas saisi de valeur manuelle, les heures sup. (réparties
   // 25/50 % par semaine), les heures normales au-delà de 151,67 h et la prime km suivent le pointage.
   const [otTouched, setOtTouched] = useState(false);
   const [kmTouched, setKmTouched] = useState(false);
   useEffect(() => { if (!otTouched) { setH25(autoOT.h25); setH50(autoOT.h50); setHNorm(autoOT.hNorm); } }, [autoOT.h25, autoOT.h50, autoOT.hNorm, otTouched]);
+  useEffect(() => { if (!cpTouched) setJoursCp(autoCp); }, [autoCp, cpTouched]);
   useEffect(() => { if (!kmTouched) setPrime(autoKm); }, [autoKm, kmTouched]);
   // Commission commerciale du mois : factures facturées ce mois (1re facture d'un établissement à 4 %,
   // réassort à 2 %). Elle s'ajoute au brut et suit les mêmes taux paramétrés dans l'onglet Commissions.
@@ -11956,8 +11976,8 @@ function SalaireRH({ data, persist }) {
   const [comm, setComm] = useState(autoComm);
   const [commTouched, setCommTouched] = useState(false);
   useEffect(() => { if (!commTouched) setComm(autoComm); }, [autoComm, commTouched]);
-  const r = estimateSalaire({ tauxBase, h25, h50, hNorm, prime, commission: comm, part, mutuelle });
-  const memoriser = () => persist((p) => ({ ...p, settings: { ...p.settings, salaireTauxBase: Number(tauxBase) || 0 } }));
+  const r = estimateSalaire({ tauxBase, h25, h50, hNorm, prime, commission: comm, part, mutuelle, joursCp, indemCpJour });
+  const memoriser = () => persist((p) => ({ ...p, settings: { ...p.settings, salaireTauxBase: Number(tauxBase) || 0, salaireIndemCpJour: Number(indemCpJour) || SAL_INDEM_CP_JOUR } }));
   const Line = ({ l, v, strong, color, sub }) => (<div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: strong ? 13.5 : 12.5, fontWeight: strong ? 800 : 500, color: color || "inherit", padding: "3px 0" }}><span>{l}{sub && <span style={{ color: "var(--muted)", fontWeight: 500 }}> {sub}</span>}</span><span className="tnum">{v}</span></div>);
   const totHS = (Number(h25) || 0) + (Number(h50) || 0);
   return (<div>
@@ -11977,6 +11997,11 @@ function SalaireRH({ data, persist }) {
           <div className="fld"><label>H. sup. à +50 % (h)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.25" min="0" value={h50} onChange={(e) => { setOtTouched(true); setH50(e.target.value); }} /></div></div>
         </div>
         <div className="fld" style={{ marginBottom: 8 }}><label>H. normales au-delà de 151,67 h (h)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.25" min="0" value={hNorm} onChange={(e) => { setOtTouched(true); setHNorm(e.target.value); }} /></div><span style={{ fontSize: 11, color: "var(--muted)" }}>Heures d'une semaine dépassant 35 h uniquement grâce à un jour férié / arrêt chômé : payées au taux de base, sans majoration.</span></div>
+        <div className="row2" style={{ marginBottom: 8 }}>
+          <div className="fld"><label>Jours de CP pris ce mois</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="1" min="0" value={joursCp} onChange={(e) => { setCpTouched(true); setJoursCp(e.target.value); }} />{cpTouched && <button className="btn btn-g btn-s" onClick={() => setCpTouched(false)} title="Reprendre le nombre de jours de congés du pointage">↻ {autoCp}</button>}</div></div>
+          <div className="fld"><label>Indemnité CP par jour (€)</label><input type="number" step="0.01" min="0" value={indemCpJour} onChange={(e) => setIndemCpJour(e.target.value)} /></div>
+        </div>
+        {(Number(joursCp) || 0) > 0 && <div style={{ fontSize: 11, color: "var(--muted)", margin: "-2px 0 8px", lineHeight: 1.5 }}>Chaque jour de CP : retenue de {eur2(r.retenueCpJour)} (base ÷ {SAL_CP_DIVISEUR}) et indemnité de {eur2(Number(indemCpJour) || 0)} (règle du dixième, dernière valeur du bulletin — « Mémoriser » l'enregistre).</div>}
         <div style={{ marginBottom: 8, fontSize: 11.5, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><span style={{ color: otTouched ? "var(--muted)" : "var(--green)", fontWeight: 700 }}>{otTouched ? "Valeurs saisies manuellement" : "↻ Décompte hebdomadaire automatique du pointage (" + autoOT.h25 + " h à +25 % · " + autoOT.h50 + " h à +50 % · " + autoOT.hNorm + " h normales)"}</span>{otTouched && <button className="btn btn-g btn-s" onClick={() => setOtTouched(false)} title="Reprendre le décompte automatique du pointage">↻ Auto</button>}</div>
         <div className="fld"><label style={{ textTransform: "capitalize" }}>Prime — indemnités kilométriques · {monthName} (€)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.01" min="0" value={prime} onChange={(e) => { setKmTouched(true); setPrime(e.target.value); }} />{kmTouched && <button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setKmTouched(false)} title="Reprendre la prime (50 % des frais kilométriques du mois)">↻ {eur2(autoKm)}</button>}</div><span style={{ fontSize: 11, color: "var(--muted)" }}>Domicile-travail : 50 % de {eur2(fraisKmMois)} = {eur2(domicilePrime)}{deplTotalMois > 0 ? " · Déplacements ponctuels remboursés à 100 % = " + eur2(deplTotalMois) : ""}. Total prime : {eur2(autoKm)}.</span></div>
         <div className="fld" style={{ marginTop: 8 }}><label style={{ textTransform: "capitalize" }}>Commission commerciale · {monthName} (€)</label><div style={{ display: "flex", gap: 6, alignItems: "center" }}><input type="number" step="0.01" min="0" value={comm} onChange={(e) => { setCommTouched(true); setComm(e.target.value); }} />{commTouched && <button className="btn btn-g btn-s" style={{ whiteSpace: "nowrap" }} onClick={() => setCommTouched(false)} title="Reprendre la commission calculée sur les factures du mois">↻ {eur2(autoComm)}</button>}</div><span style={{ fontSize: 11, color: "var(--muted)" }}>Calculée sur les factures du mois : 4 % sur la 1re facture d'un établissement (référencement), 2 % en réassort. {num(commRows.length)} facture{commRows.length > 1 ? "s" : ""} ce mois. <strong>Affichée pour information : elle n'entre pas dans le salaire estimé.</strong></span></div>
@@ -11989,6 +12014,8 @@ function SalaireRH({ data, persist }) {
           <Line l="Heures sup. +25 %" sub={"(" + h25 + " h × " + eur2(r.t25) + ")"} v={eur2(r.hs25)} color="var(--green)" />
           <Line l="Heures sup. +50 %" sub={"(" + h50 + " h × " + eur2(r.t50) + ")"} v={eur2(r.hs50)} color="var(--green)" />
           {(Number(hNorm) || 0) > 0 && <Line l="Heures normales > 151,67 h" sub={"(" + hNorm + " h × " + eur2(Number(tauxBase) || 0) + ", férié/chômé)"} v={eur2(r.hsn)} color="var(--green)" />}
+          {r.joursCp > 0 && <Line l="Retenue congés payés" sub={"(" + r.joursCp + " j × " + eur2(r.retenueCpJour) + ")"} v={"− " + eur2(r.retenueCp)} color="var(--muted)" />}
+          {r.joursCp > 0 && <Line l="Indemnité congés payés" sub={"(" + r.joursCp + " j × " + eur2(Number(indemCpJour) || 0) + ", dixième)"} v={eur2(r.indemCp)} color="var(--green)" />}
           {(!kmTouched && deplTotalMois > 0) ? <Line l="Prime domicile-travail (50 %)" v={eur2(domicilePrime)} color="var(--green)" /> : <Line l="Prime (indemnités km)" v={eur2(r.prime)} color="var(--green)" />}
           {(Number(comm) || 0) > 0 && <Line l="Commission commerciale" sub="(4 % référencement / 2 % réassort · hors estimation)" v={eur2(r.commission)} color="var(--muted)" />}
           <div style={{ borderTop: "1px solid var(--line)", margin: "6px 0" }} />
@@ -12153,21 +12180,28 @@ function buildRHNotion(data, monthPrefix) {
   L.push("| **Total** |  |  |  |  |  | **" + hd(totH) + "** | **" + hd(totOT) + "** | **" + eur2(totSup) + "** |");
   L.push("");
   // Récapitulatif MENSUALISÉ, aligné sur la structure du bulletin : base 151,67 h quel que soit le
-  // mois, heures normales au-delà (férié/chômé), puis heures supplémentaires majorées.
+  // mois, régularisation des congés pris (retenue base/26 + indemnité au dixième), heures normales
+  // au-delà (férié/chômé), puis heures supplémentaires majorées.
   const brutBase = SAL_BASE_HOURS * taux;
   const brutNorm = (totNorm / 60) * taux;
-  const brutEstime = brutBase + brutNorm + totSup;
+  const joursCp = pgs.filter(([, r]) => r && r.motif === "conges").length;
+  const indemCpJour = Number((data.settings || {}).salaireIndemCpJour) || SAL_INDEM_CP_JOUR;
+  const retenueCp = joursCp * (brutBase / SAL_CP_DIVISEUR);
+  const indemCp = joursCp * indemCpJour;
+  const brutEstime = brutBase + brutNorm + totSup - retenueCp + indemCp;
   L.push("#### Valorisation mensualisée (structure du bulletin)");
   L.push("");
-  L.push("| Élément | Heures | Montant brut |");
+  L.push("| Élément | Heures / jours | Montant brut |");
   L.push("| --- | --- | --- |");
-  L.push("| Salaire de base mensualisé (lissé, indépendant du nombre de jours ouvrés) | " + String(SAL_BASE_HOURS).replace(".", ",") + " | " + eur2(brutBase) + " |");
-  if (totNorm > 0) L.push("| Heures normales au-delà de 151,67 h (semaine > 35 h par férié / arrêt chômé, taux de base) | " + hd(totNorm) + " | " + eur2(brutNorm) + " |");
-  L.push("| Heures supplémentaires à +25 % | " + hd(tot25) + " | " + eur2((tot25 / 60) * taux * SAL_MAJ_25) + " |");
-  L.push("| Heures supplémentaires à +50 % | " + hd(tot50) + " | " + eur2((tot50 / 60) * taux * SAL_MAJ_50) + " |");
-  L.push("| **Total (hors primes, transport et régularisation de congés)** | **" + hd(SAL_BASE_HOURS * 60 + totNorm + totOT) + "** | **" + eur2(brutEstime) + "** |");
+  L.push("| Salaire de base mensualisé (lissé, indépendant du nombre de jours ouvrés) | " + String(SAL_BASE_HOURS).replace(".", ",") + " h | " + eur2(brutBase) + " |");
+  if (joursCp > 0) L.push("| Retenue congés payés pris (base ÷ " + SAL_CP_DIVISEUR + " par jour) | − " + joursCp + " j | − " + eur2(retenueCp) + " |");
+  if (joursCp > 0) L.push("| Indemnité congés payés (dixième, " + eur2(indemCpJour) + "/j relevé sur le dernier bulletin) | " + joursCp + " j | " + eur2(indemCp) + " |");
+  if (totNorm > 0) L.push("| Heures normales au-delà de 151,67 h (semaine > 35 h par férié / arrêt chômé, taux de base) | " + hd(totNorm) + " h | " + eur2(brutNorm) + " |");
+  L.push("| Heures supplémentaires à +25 % | " + hd(tot25) + " h | " + eur2((tot25 / 60) * taux * SAL_MAJ_25) + " |");
+  L.push("| Heures supplémentaires à +50 % | " + hd(tot50) + " h | " + eur2((tot50 / 60) * taux * SAL_MAJ_50) + " |");
+  L.push("| **Total (hors primes et transport)** | **" + hd(SAL_BASE_HOURS * 60 + totNorm + totOT) + " h** | **" + eur2(brutEstime) + "** |");
   L.push("");
-  L.push("_Valorisation au taux horaire de base de " + eur2(taux) + ((data.settings || {}).salaireTauxBase != null ? " (réglage mémorisé dans l'onglet Salaire estimé)." : " (valeur par défaut : mémorisez votre taux dans l'onglet Salaire estimé pour l'ajuster).") + " Heures supplémentaires déterminées par SEMAINE CIVILE : seuil de 35 h, congés comptés pour l'atteindre ; les heures au-delà de 35 h couvertes par un jour férié ou un arrêt chômé sont payées en heures normales, sans majoration, en plus des 151,67 h mensuelles ; au-delà, +25 % pour les 8 premières heures de la semaine puis +50 %. Le bulletin peut en plus porter une retenue et une indemnité de congés payés légèrement différentes l'une de l'autre (règle du dixième), non modélisées ici. Montants bruts, avant cotisations._");
+  L.push("_Valorisation au taux horaire de base de " + eur2(taux) + ((data.settings || {}).salaireTauxBase != null ? " (réglage mémorisé dans l'onglet Salaire estimé)." : " (valeur par défaut : mémorisez votre taux dans l'onglet Salaire estimé pour l'ajuster).") + " Heures supplémentaires déterminées par SEMAINE CIVILE : seuil de 35 h, congés comptés pour l'atteindre ; les heures au-delà de 35 h couvertes par un jour férié ou un arrêt chômé sont payées en heures normales, sans majoration, en plus des 151,67 h mensuelles ; au-delà, +25 % pour les 8 premières heures de la semaine puis +50 %. L'indemnité de congés payés (règle du dixième) est reprise du dernier bulletin — ajustez-la dans l'onglet Salaire estimé quand un nouveau bulletin en donne une plus récente. Montants bruts, avant cotisations._");
   L.push("");
   // Tableau 2 — Trajet domicile-travail (un jour de présence pointé = un aller-retour)
   const s = data.settings || {};
