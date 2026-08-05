@@ -1031,9 +1031,12 @@ function deriveStage(account, d) {
   const siteIds = new Set((d.sites || []).filter((s) => s.accountId === accId).map((s) => s.id));
   const contactIds = new Set((d.contacts || []).filter((c) => c.accountId === accId).map((c) => c.id));
   const rel = (x) => x && (x.accountId === accId || (x.siteId && siteIds.has(x.siteId)) || (x.contactId && contactIds.has(x.contactId)));
-  // Bon de commande réel : une Commande engagée (ni brouillon ni refusée) OU un document signé non
-  // déjà converti en commande (évite de compter deux fois un devis signé puis transformé en commande).
-  const orders = (d.deals || []).filter((x) => x.accountId === accId && ((x.type === "Commande" && x.statut !== "brouillon" && x.statut !== "refuse") || (x.type !== "Commande" && isCaSigne(x) && !x.converti)));
+  // Bon de commande réel = un ACHAT : une Commande ACCEPTÉE (signée, en cours de livraison, livrée
+  // ou payée) OU un document signé non déjà converti en commande (évite de compter deux fois un
+  // devis signé puis transformé). Une commande seulement « envoyée » n'est PAS un achat : elle
+  // suffisait auparavant à classer un compte « Client », voire « Client fidèle » avec deux envois,
+  // sans le moindre achat réel.
+  const orders = (d.deals || []).filter((x) => x.accountId === accId && ((x.type === "Commande" && ["accepte", "expediee", "livre", "paye"].includes(x.statut)) || (x.type !== "Commande" && isCaSigne(x) && !x.converti)));
   if (orders.length >= 2) return "actif";
   if (orders.length >= 1) return "referencement";
   const ints = (d.interactions || []).filter(rel);
@@ -7784,10 +7787,27 @@ function Carte({ data, persist, go, focus }) {
   // Catégorie de rattachement : « groupe » si le compte parent est un groupe (sièges + magasins rattachés), sinon « indépendant ».
   const siteCat = (st) => isGroupe(accOf(st.accountId)) ? "groupe" : "independant";
   const stageOf = (st) => { const a = accOf(st.accountId); return a && a.stage ? a.stage : "prospect"; };
-  // Un « client » (référencé) / « client fidèle » sur la carte = un compte pour lequel une FACTURE a été
-  // générée. Un compte classé client par l'entonnoir mais sans facture n'apparaît pas sous ces filtres.
+  // Un « client » (référencé) / « client fidèle » sur la carte = une FACTURE générée. Pour un
+  // ÉTABLISSEMENT DE GROUPE, le statut se juge PAR POINT DE VENTE : une facture livrée à JouéClub
+  // Albi fait d'Albi un client, même si le groupe JouéClub est classé à une autre étape de
+  // l'entonnoir (et inversement, un magasin du groupe jamais livré n'est pas « client »). Pour un
+  // indépendant, l'étape du compte + une facture, comme avant.
   const hasFacture = (accId) => !!accId && (data.deals || []).some((d) => d.accountId === accId && d.type === "Facture");
-  const stageMatch = (st) => { if (filtStage.length === 0) return true; const stg = stageOf(st); return filtStage.some((fs) => fs === stg && ((fs !== "referencement" && fs !== "actif") || hasFacture(st.accountId))); };
+  const hasFactureSite = (st) => (data.deals || []).some((d) => d.type === "Facture" && (d.livraisonSiteId === st.id || d.siteId === st.id));
+  const stageMatch = (st) => {
+    if (filtStage.length === 0) return true;
+    const stg = stageOf(st);
+    const grp = isGroupe(accOf(st.accountId));
+    return filtStage.some((fs) => {
+      // « Client » ENGLOBE les clients fidèles : un fidèle est d'abord un client — l'inverse est
+      // faux, le filtre « Client fidèle » reste strict.
+      if (fs === "referencement") return grp ? hasFactureSite(st) : ((stg === "referencement" || stg === "actif") && hasFacture(st.accountId));
+      if (fs === "actif") return grp ? (hasFactureSite(st) && stg === "actif") : (stg === "actif" && hasFacture(st.accountId));
+      // Étapes amont (prospect, contacté, RDV…) : un magasin de groupe déjà facturé n'y figure plus,
+      // il est passé côté client même si son groupe garde une étape amont.
+      return fs === stg && !(grp && hasFactureSite(st));
+    });
+  };
   const visible = (st) => st.type === "penup" || st.type === "entrepot" || st.type === "usine" ? true : (filtSurf.length === 0 || filtSurf.includes(st.typeSurface || "")) && (filtCat.length === 0 || filtCat.includes(siteCat(st))) && stageMatch(st);
   // Types de surface réellement présents parmi les sites placés (hors sites internes PEN'UP), dans l'ordre canonique.
   const usedSurfaces = TYPE_SURFACE.filter((t) => placed.some((st) => st.typeSurface === t && !(st.type === "penup" || st.type === "entrepot" || st.type === "usine")));
