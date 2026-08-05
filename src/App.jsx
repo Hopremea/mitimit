@@ -13786,7 +13786,12 @@ export default function App() {
         persist((p) => {
           const existingIds = new Set([...(p.events || []), ...(p.eventSuggestions || [])].map((e) => e.id));
           const existingFrom = new Set([...(p.events || []), ...(p.eventSuggestions || [])].filter((e) => e.fromInteraction).map((e) => e.fromInteraction));
-          const toAdd = collected.filter((e) => !existingIds.has(e.id) && !existingFrom.has(e.fromInteraction));
+          // Ne jamais suggérer ce qui est DÉJÀ au calendrier : si un événement non fait, au
+          // rattachement compatible, porte un intitulé très proche (même seuil que la revue de
+          // doublons), la suggestion est redondante — cas typique d'une suite déjà programmée à la
+          // main via « Planifier (IA) » sur le compte rendu de l'échange.
+          const dejaAuCalendrier = (sg) => (p.events || []).some((e) => !e.done && eventTitleSimilarity(e.titre, sg.titre) >= 0.62 && ((sg.accountId && e.accountId === sg.accountId) || (sg.contactId && e.contactId === sg.contactId) || (sg.siteId && e.siteId === sg.siteId)));
+          const toAdd = collected.filter((e) => !existingIds.has(e.id) && !existingFrom.has(e.fromInteraction) && !dejaAuCalendrier(e));
           return {
             ...p,
             eventSuggestions: [...(p.eventSuggestions || []), ...toAdd],
