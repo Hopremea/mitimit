@@ -478,6 +478,35 @@ async function whatsappResumeIA(msgs, me, onUsage) {
   }
   return out;
 }
+// Relit un résumé WhatsApp stocké (« Ses sujets : / Mes réponses : » à puces) pour l'afficher en
+// bulles. Renvoie null si le texte n'a pas cette structure (anciens imports bruts, saisie manuelle) :
+// l'appelant retombe alors sur l'affichage texte classique.
+function parseWaResume(txt) {
+  const t = String(txt || "");
+  if (!/^(Ses sujets|Mes réponses)\s*:/m.test(t)) return null;
+  const sujets = [], reponses = []; let cur = null;
+  t.split(/\r?\n/).forEach((l) => {
+    const s = l.trim(); if (!s) return;
+    if (/^Ses sujets\s*:/.test(s)) { cur = sujets; return; }
+    if (/^Mes réponses\s*:/.test(s)) { cur = reponses; return; }
+    if (cur) cur.push(s.replace(/^[•\-–]\s*/, ""));
+  });
+  return sujets.length || reponses.length ? { sujets, reponses } : null;
+}
+// Affichage « discussion WhatsApp » d'un résumé importé : les sujets de l'interlocuteur en bulles
+// claires à GAUCHE (son nom en étiquette), nos réponses en bulles vertes à DROITE — comme dans
+// l'application d'origine.
+function WaBubbles({ p, who }) {
+  const bulle = (gauche) => ({ maxWidth: "82%", padding: "6px 11px", fontSize: 12.5, lineHeight: 1.5, ...(gauche
+    ? { alignSelf: "flex-start", background: "var(--card)", border: "1px solid var(--line)", borderRadius: "3px 12px 12px 12px" }
+    : { alignSelf: "flex-end", background: "#d9fdd3", border: "1px solid #c8ecc0", color: "#173b26", borderRadius: "12px 3px 12px 12px" }) });
+  return (<div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+    {p.sujets.length > 0 && <div style={{ alignSelf: "flex-start", fontSize: 10.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".04em" }}>{who || "Interlocuteur"}</div>}
+    {p.sujets.map((s, i) => <div key={"s" + i} style={bulle(true)}>{s}</div>)}
+    {p.reponses.length > 0 && <div style={{ alignSelf: "flex-end", fontSize: 10.5, fontWeight: 800, color: "#128C46", textTransform: "uppercase", letterSpacing: ".04em", marginTop: p.sujets.length ? 4 : 0 }}>Moi</div>}
+    {p.reponses.map((s, i) => <div key={"r" + i} style={bulle(false)}>{s}</div>)}
+  </div>);
+}
 // Bloc d'import affiché dans le volet « Ajouter » un échange : choix du fichier .txt, détection des
 // interlocuteurs, désignation de « moi », puis import groupé par journée via onImport.
 function WhatsAppImportBlock({ context, onImport, onUsage }) {
@@ -13095,7 +13124,7 @@ function InteractionView({ interaction: it, data, go, onClose, onEdit }) {
     {it.email && <div style={{ fontSize: 12.5, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 5, marginTop: -6 }}><Mail size={13} /> {it.email}</div>}
     <div style={{ background: "#f5f7fb", border: "1px solid var(--line)", borderRadius: 16, borderTopLeftRadius: 5, padding: "14px 16px" }}>
       <div style={{ fontWeight: 800, fontSize: 15 }}>{(it.source === "gmail" ? decodeEntities(it.sujet) : it.sujet) || "Échange"}</div>
-      {it.resume ? <div style={{ fontSize: 13.5, lineHeight: 1.6, marginTop: 8, whiteSpace: "pre-wrap", maxHeight: 360, overflowY: "auto" }}>{it.source === "gmail" ? decodeEntities(it.resume) : it.resume}</div> : <div className="empty" style={{ padding: 14 }}>Aucun compte rendu saisi.</div>}
+      {it.resume ? (() => { const wa = it.type === "whatsapp" ? parseWaResume(it.resume) : null; return <div style={{ fontSize: 13.5, lineHeight: 1.6, marginTop: 8, whiteSpace: wa ? "normal" : "pre-wrap", maxHeight: 360, overflowY: "auto" }}>{wa ? <WaBubbles p={wa} who={ct ? fullName(ct) : (it.interlocuteur || "")} /> : (it.source === "gmail" ? decodeEntities(it.resume) : it.resume)}</div>; })() : <div className="empty" style={{ padding: 14 }}>Aucun compte rendu saisi.</div>}
     </div>
     {(ct || it.interlocuteur || site || account) && <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
       {ct ? <button className="lnk" style={lnkStyle} onClick={() => nav(() => go("repertoire", ct.id))}><User size={14} /> {fullName(ct)}</button> : (it.interlocuteur ? <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, color: "var(--muted)" }}><User size={14} /> {it.interlocuteur}</span> : null)}
@@ -13134,7 +13163,7 @@ function InteractionThread({ interactions, data, onView, onEdit, onDelete, showC
           </span>
         </div>
         <div className="msg-subj">{it.source === "gmail" ? decodeEntities(it.sujet) : it.sujet}</div>
-        {it.resume && <div className="msg-body" style={{ maxHeight: 220, overflowY: "auto" }}>{it.source === "gmail" ? decodeEntities(it.resume) : it.resume}</div>}
+        {it.resume && (() => { const wa = it.type === "whatsapp" ? parseWaResume(it.resume) : null; const waCt = wa && it.contactId ? (data.contacts || []).find((c) => c.id === it.contactId) : null; return <div className="msg-body" style={{ maxHeight: 220, overflowY: "auto", ...(wa ? { whiteSpace: "normal" } : {}) }}>{wa ? <WaBubbles p={wa} who={waCt ? fullName(waCt) : (it.interlocuteur || "")} /> : (it.source === "gmail" ? decodeEntities(it.resume) : it.resume)}</div>; })()}
       </div>
     </div>);
   })}</div>);
