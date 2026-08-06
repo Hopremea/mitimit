@@ -437,12 +437,65 @@ function whatsappInteractionsFromMsgs(msgs, me, { accountId = "", contactId = ""
     };
   });
 }
+// Résumé IA des journées WhatsApp : au lieu de coller tous les textos, chaque journée est résumée
+// en deux volets à puces — « Ses sujets » (ce que l'interlocuteur aborde/demande) et « Mes réponses »
+// (ce que nous répondons/engageons). Renvoie { date → résumé } ; toute erreur remonte à l'appelant
+// qui retombe alors sur la transcription brute.
+const SYS_WA_RESUME = `Tu résumes des conversations WhatsApp entre un commercial (lignes "MOI") et son interlocuteur (lignes "LUI"). Les journées sont séparées par "=== AAAA-MM-JJ ===".
+Pour CHAQUE journée, produis :
+- "sujets" : les sujets, demandes ou informations apportés par l'interlocuteur (LUI), en puces courtes et factuelles ;
+- "reponses" : ce que MOI répond, propose ou engage, en puces courtes et factuelles.
+Règles : français ; 1 à 4 puces par volet ; ne rien inventer ni interpréter au-delà des messages ; si un volet est vide (aucun message de ce côté ce jour-là), renvoie un tableau vide.
+Réponds UNIQUEMENT avec un tableau JSON : [{"date":"AAAA-MM-JJ","sujets":["…"],"reponses":["…"]}] — sans texte autour.`;
+async function whatsappResumeIA(msgs, me, onUsage) {
+  const byDay = {};
+  msgs.forEach((m) => (byDay[m.date] = byDay[m.date] || []).push(m));
+  const days = Object.entries(byDay).sort((a, b) => a[0].localeCompare(b[0]));
+  // Découpage en requêtes de taille raisonnable (historiques longs) sans couper une journée.
+  const chunks = []; let cur = [], size = 0;
+  days.forEach(([date, list]) => {
+    const block = "=== " + date + " ===\n" + list.map((m) => (m.sender === me ? "MOI" : "LUI") + " (" + m.heure + ") : " + m.text).join("\n");
+    if (cur.length && size + block.length > 11000) { chunks.push(cur); cur = []; size = 0; }
+    cur.push(block); size += block.length;
+  });
+  if (cur.length) chunks.push(cur);
+  const out = {};
+  for (const ch of chunks) {
+    const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 2500, temperature: 0.2, system: SYS_WA_RESUME, messages: [{ role: "user", content: ch.join("\n\n") }] }) });
+    if (!res.ok) throw new Error(await claudeErrorText(res));
+    const dt = await res.json();
+    if (dt && dt.usage && onUsage) onUsage(dt.usage);
+    const txt = (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+    const m = txt.match(/\[[\s\S]*\]/);
+    JSON.parse(m ? m[0] : txt).forEach((d) => {
+      if (!d || !d.date) return;
+      const sujets = (d.sujets || []).filter(Boolean), reps = (d.reponses || []).filter(Boolean);
+      const parts = [];
+      if (sujets.length) parts.push("Ses sujets :\n" + sujets.map((s) => "• " + s).join("\n"));
+      if (reps.length) parts.push("Mes réponses :\n" + reps.map((s) => "• " + s).join("\n"));
+      if (parts.length) out[d.date] = parts.join("\n");
+    });
+  }
+  return out;
+}
 // Bloc d'import affiché dans le volet « Ajouter » un échange : choix du fichier .txt, détection des
 // interlocuteurs, désignation de « moi », puis import groupé par journée via onImport.
-function WhatsAppImportBlock({ context, onImport }) {
+function WhatsAppImportBlock({ context, onImport, onUsage }) {
   const fileRef = useRef(null);
-  const [msgs, setMsgs] = useState(null); const [me, setMe] = useState(""); const [msg, setMsg] = useState(null);
+  const [msgs, setMsgs] = useState(null); const [me, setMe] = useState(""); const [msg, setMsg] = useState(null); const [busy, setBusy] = useState(false);
   const senders = msgs ? [...new Set(msgs.map((m) => m.sender))] : [];
+  // Import : les journées sont d'abord résumées par l'IA (« Ses sujets » / « Mes réponses ») ; si
+  // l'IA échoue (hors-ligne, crédits…), on importe la transcription brute plutôt que de bloquer.
+  const doImport = async () => {
+    setBusy(true); setMsg(null);
+    const base = whatsappInteractionsFromMsgs(msgs, me, context || {});
+    try {
+      const resumes = await whatsappResumeIA(msgs, me, onUsage);
+      onImport(base.map((it) => (resumes[it.date] ? { ...it, resume: resumes[it.date] } : it)));
+    } catch (e) {
+      onImport(base);
+    } finally { setBusy(false); }
+  };
   const load = (file) => {
     const rd = new FileReader();
     rd.onload = () => {
@@ -460,15 +513,15 @@ function WhatsAppImportBlock({ context, onImport }) {
     <input ref={fileRef} type="file" accept=".txt,text/plain" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) load(f); e.target.value = ""; }} />
     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
       <button type="button" className="btn btn-g btn-s" onClick={() => fileRef.current && fileRef.current.click()} style={{ borderColor: "#25D366", color: "#128C46" }}><MessageSquare size={14} /> Importer un export WhatsApp (.txt)</button>
-      {!msgs && <span style={{ fontSize: 11, color: "var(--muted)" }}>Dans WhatsApp : Discussion → Plus → Exporter (sans les médias). Une interaction par journée, réimport sans doublon.</span>}
+      {!msgs && <span style={{ fontSize: 11, color: "var(--muted)" }}>Dans WhatsApp : Discussion → Plus → Exporter (sans les médias). Une interaction par journée, résumée par l'IA (ses sujets / mes réponses), réimport sans doublon.</span>}
     </div>
     {msgs && <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5 }}>
       <span style={{ fontWeight: 700 }}>{msgs.length} message(s) · {jours} journée(s) · du {msgs[0].date} au {msgs[msgs.length - 1].date}</span>
       <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>Vous êtes :
         <select value={me} onChange={(e) => setMe(e.target.value)} style={{ padding: "4px 8px", border: "1px solid var(--line)", borderRadius: 8, fontFamily: "inherit", fontSize: 12.5, background: "#fff" }}>{senders.map((s) => <option key={s} value={s}>{s}</option>)}</select>
       </label>
-      <button type="button" className="btn btn-p btn-s" onClick={() => onImport(whatsappInteractionsFromMsgs(msgs, me, context || {}))}><Check size={14} /> Importer dans le fil</button>
-      <button type="button" className="btn btn-ghost btn-s" onClick={() => { setMsgs(null); setMsg(null); }}><X size={13} /></button>
+      <button type="button" className="btn btn-p btn-s" onClick={doImport} disabled={busy}>{busy ? <Sparkles size={14} className="spin" /> : <Check size={14} />} {busy ? "Résumé IA en cours…" : "Importer dans le fil"}</button>
+      <button type="button" className="btn btn-ghost btn-s" onClick={() => { setMsgs(null); setMsg(null); }} disabled={busy}><X size={13} /></button>
     </div>}
     {msg && <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--red)" }}>{msg}</div>}
   </div>);
@@ -6539,7 +6592,7 @@ function AccountInteractionForm({ contactId, accountId, contacts, onCancel, onSa
   // de l'établissement, et sur celle du groupe si l'établissement en fait partie.
   const onContact = (cid) => setF((p) => { const ct = (contacts || []).find((c) => c.id === cid); return { ...p, contactId: cid, siteId: ct && ct.siteId ? ct.siteId : (p.siteId || "") }; });
   return (<>
-    {!interaction && onBulk && <WhatsAppImportBlock context={{ accountId: f.accountId || accountId || "", contactId: f.contactId || "", siteId: f.siteId || "" }} onImport={onBulk} />}
+    {!interaction && onBulk && <WhatsAppImportBlock context={{ accountId: f.accountId || accountId || "", contactId: f.contactId || "", siteId: f.siteId || "" }} onImport={onBulk} onUsage={onUsage} />}
     <div className="row2"><div className="fld"><label>Type</label><select value={f.type} onChange={(e) => up("type", e.target.value)}>{Object.entries(INT_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div></div>
     <div className="row2"><div className="fld"><label>Heure</label><input type="time" value={f.heure || ""} onChange={(e) => up("heure", e.target.value)} /></div><div className="fld" /></div>
     <div className="row2"><div className="fld"><label>Sens</label><select value={f.direction} onChange={(e) => up("direction", e.target.value)}><option value="sortant">Sortant</option><option value="entrant">Entrant</option><option value="sortant_rejete">Sortant (rejeté)</option></select></div><div className="fld"><label>Contact</label><select value={f.interlocuteur === "Standard" ? "__std__" : f.contactId} onChange={(e) => { const v = e.target.value; if (v === "__std__") { setF((p) => ({ ...p, contactId: "", interlocuteur: "Standard" })); } else { const ct = (contacts || []).find((c) => c.id === v); setF((p) => ({ ...p, contactId: v, siteId: ct && ct.siteId ? ct.siteId : (p.siteId || ""), interlocuteur: "" })); } }}><option value="">Aucun précis</option><option value="__std__">☎ Standard (standard téléphonique)</option>{contacts.map((c) => <option key={c.id} value={c.id}>{fullName(c)}</option>)}</select></div></div>
@@ -6985,7 +7038,7 @@ function InteractionForm({ accountId, contactId, siteId, onSave, interaction, on
   const [f, setF] = useState(interaction ? { siteId: siteId || "", ...interaction } : { id: "i_" + Date.now(), accountId, contactId, siteId: siteId || "", type: "email", direction: "sortant", date: TODAY(), heure: new Date().toTimeString().slice(0, 5), sujet: "", resume: "" });
   const up = (k, v) => setF((p) => ({ ...p, [k]: v })); const showDir = f.type === "email" || f.type === "appel";
   return (<>
-    {!interaction && onBulk && <WhatsAppImportBlock context={{ accountId: f.accountId || accountId || "", contactId: f.contactId || contactId || "", siteId: f.siteId || "" }} onImport={onBulk} />}
+    {!interaction && onBulk && <WhatsAppImportBlock context={{ accountId: f.accountId || accountId || "", contactId: f.contactId || contactId || "", siteId: f.siteId || "" }} onImport={onBulk} onUsage={onUsage} />}
     <div className="row2"><div className="fld"><label>Type</label><select value={f.type} onChange={(e) => up("type", e.target.value)}>{Object.entries(INT_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div>{showDir && <div className="fld"><label>Sens</label><select value={f.direction} onChange={(e) => up("direction", e.target.value)}><option value="sortant">Sortant</option><option value="entrant">Entrant</option><option value="sortant_rejete">Sortant (rejeté)</option></select></div>}</div>
     <div className="row2"><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div><div className="fld"><label>Heure</label><input type="time" value={f.heure || ""} onChange={(e) => up("heure", e.target.value)} /></div></div>
     <div className="fld"><label>Sujet</label><Combo value={f.sujet} onChange={(v) => up("sujet", v)} options={SUJET_PRESETS} placeholder="Choisir ou saisir l'objet de l'échange" /></div>
