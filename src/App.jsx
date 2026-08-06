@@ -390,7 +390,89 @@ function assignClientCodes(accounts) {
     return { ...a, code: pfx + "-" + String(counters[pfx]).padStart(3, "0") };
   });
 }
-const INT_META = { email: { label: "Courriel", color: "#6366F1", icon: Mail }, appel: { label: "Appel", color: "#0EA5A4", icon: Phone }, visio: { label: "Visio", color: "#2563EB", icon: Video }, rdv: { label: "RDV", color: "#A855F7", icon: Calendar }, linkedin: { label: "LinkedIn", color: "#0A66C2", icon: Linkedin }, note: { label: "Note", color: "#94A3B8", icon: Pencil } };
+const INT_META = { email: { label: "Courriel", color: "#6366F1", icon: Mail }, appel: { label: "Appel", color: "#0EA5A4", icon: Phone }, visio: { label: "Visio", color: "#2563EB", icon: Video }, rdv: { label: "RDV", color: "#A855F7", icon: Calendar }, linkedin: { label: "LinkedIn", color: "#0A66C2", icon: Linkedin }, whatsapp: { label: "WhatsApp", color: "#25D366", icon: MessageSquare }, note: { label: "Note", color: "#94A3B8", icon: Pencil } };
+// ===== Import d'un export de discussion WhatsApp (.txt) =====
+// WhatsApp sait exporter une discussion en texte (Discussion → Plus → Exporter). Formats reconnus :
+// Android FR « 03/08/2026, 14:22 - Nom : message » (variantes « à 14:22 », secondes) et iPhone
+// « [03/08/2026 14:22:35] Nom : message ». Une ligne sans en-tête prolonge le message précédent
+// (multi-lignes) ; les messages système (chiffrement…), sans auteur, sont ignorés. Dates lues en
+// JJ/MM (export français).
+function parseWhatsAppExport(text) {
+  const lines = String(text || "").replace(/[‎‏‪-‮]/g, "").split(/\r?\n/);
+  const rxA = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})[,\s]*(?:à\s*)?(\d{1,2})[:h](\d{2})(?::\d{2})?\s*-\s*([^:]+?)\s*:\s*(.*)$/;
+  const rxI = /^\[(\d{1,2})\/(\d{1,2})\/(\d{2,4})[,\s]+(\d{1,2}):(\d{2})(?::\d{2})?\]\s*([^:]+?)\s*:\s*(.*)$/;
+  const msgs = [];
+  lines.forEach((raw) => {
+    const line = raw.trim(); if (!line) return;
+    const m = line.match(rxA) || line.match(rxI);
+    if (m) {
+      const [, d, mo, y, h, mi, sender, txt] = m;
+      const yy = y.length === 2 ? "20" + y : y;
+      msgs.push({ date: yy + "-" + String(mo).padStart(2, "0") + "-" + String(d).padStart(2, "0"), heure: String(h).padStart(2, "0") + ":" + mi, sender: sender.trim(), text: txt });
+    } else if (msgs.length && !/^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(line) && !line.startsWith("[")) {
+      msgs[msgs.length - 1].text += "\n" + line;
+    }
+  });
+  return msgs.filter((x) => x.text.trim() && !/^<?\s*(médias omis|media omitted|image absente|vidéo absente)/i.test(x.text.trim()));
+}
+// Regroupe les messages par JOURNÉE : une interaction WhatsApp par jour de discussion, identifiant
+// DÉTERMINISTE (ancre + date) — réimporter la même discussion plus tard MET À JOUR les journées au
+// lieu de les dupliquer, et les journées nouvelles s'ajoutent. `_eventsScanned` est posé pour que
+// l'import d'un historique ne déclenche pas le scan IA (et sa dépense) sur des dizaines d'entrées.
+function whatsappInteractionsFromMsgs(msgs, me, { accountId = "", contactId = "", siteId = "" }) {
+  const byDay = {};
+  msgs.forEach((m) => (byDay[m.date] = byDay[m.date] || []).push(m));
+  const ancre = String(contactId || siteId || accountId || "x").replace(/[^a-zA-Z0-9_-]/g, "");
+  return Object.entries(byDay).sort((a, b) => a[0].localeCompare(b[0])).map(([date, list]) => {
+    const sortant = list.some((m) => m.sender === me);
+    const lignes = list.map((m) => (m.sender === me ? "Moi" : m.sender) + " (" + m.heure + ") : " + m.text).join("\n");
+    return {
+      id: "i_wa_" + ancre + "_" + date,
+      accountId: accountId || "", contactId: contactId || "", siteId: siteId || "",
+      type: "whatsapp", direction: sortant ? "sortant" : "entrant",
+      date, heure: list[list.length - 1].heure,
+      sujet: "WhatsApp — " + list.length + " message" + (list.length > 1 ? "s" : ""),
+      resume: lignes.length > 6000 ? lignes.slice(0, 6000) + "\n…" : lignes,
+      source: "whatsapp-import", _eventsScanned: true,
+    };
+  });
+}
+// Bloc d'import affiché dans le volet « Ajouter » un échange : choix du fichier .txt, détection des
+// interlocuteurs, désignation de « moi », puis import groupé par journée via onImport.
+function WhatsAppImportBlock({ context, onImport }) {
+  const fileRef = useRef(null);
+  const [msgs, setMsgs] = useState(null); const [me, setMe] = useState(""); const [msg, setMsg] = useState(null);
+  const senders = msgs ? [...new Set(msgs.map((m) => m.sender))] : [];
+  const load = (file) => {
+    const rd = new FileReader();
+    rd.onload = () => {
+      const p = parseWhatsAppExport(rd.result);
+      if (!p.length) { setMsg("Aucun message reconnu — est-ce bien un export de discussion WhatsApp (.txt) ?"); setMsgs(null); return; }
+      setMsgs(p); setMsg(null);
+      const s = [...new Set(p.map((x) => x.sender))];
+      setMe(s.find((n) => /matthis|pen.?up/i.test(n)) || s[0] || "");
+    };
+    rd.onerror = () => setMsg("Lecture du fichier impossible.");
+    rd.readAsText(file);
+  };
+  const jours = msgs ? new Set(msgs.map((m) => m.date)).size : 0;
+  return (<div style={{ border: "1px dashed var(--line)", borderRadius: 11, padding: "9px 11px", margin: "2px 0 10px", background: "var(--bg)" }}>
+    <input ref={fileRef} type="file" accept=".txt,text/plain" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) load(f); e.target.value = ""; }} />
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      <button type="button" className="btn btn-g btn-s" onClick={() => fileRef.current && fileRef.current.click()} style={{ borderColor: "#25D366", color: "#128C46" }}><MessageSquare size={14} /> Importer un export WhatsApp (.txt)</button>
+      {!msgs && <span style={{ fontSize: 11, color: "var(--muted)" }}>Dans WhatsApp : Discussion → Plus → Exporter (sans les médias). Une interaction par journée, réimport sans doublon.</span>}
+    </div>
+    {msgs && <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5 }}>
+      <span style={{ fontWeight: 700 }}>{msgs.length} message(s) · {jours} journée(s) · du {msgs[0].date} au {msgs[msgs.length - 1].date}</span>
+      <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>Vous êtes :
+        <select value={me} onChange={(e) => setMe(e.target.value)} style={{ padding: "4px 8px", border: "1px solid var(--line)", borderRadius: 8, fontFamily: "inherit", fontSize: 12.5, background: "#fff" }}>{senders.map((s) => <option key={s} value={s}>{s}</option>)}</select>
+      </label>
+      <button type="button" className="btn btn-p btn-s" onClick={() => onImport(whatsappInteractionsFromMsgs(msgs, me, context || {}))}><Check size={14} /> Importer dans le fil</button>
+      <button type="button" className="btn btn-ghost btn-s" onClick={() => { setMsgs(null); setMsg(null); }}><X size={13} /></button>
+    </div>}
+    {msg && <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--red)" }}>{msg}</div>}
+  </div>);
+}
 // Sens d'un échange. « sortant_rejete » = tentative de notre part non aboutie (appel rejeté / sans
 // réponse) : compte comme une trace mais PAS comme un démarchage réussi pour l'entonnoir.
 const DIRECTIONS = {
@@ -5324,7 +5406,7 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
     </div>
     {preview && <DevisPreview deal={preview} account={acc} settings={data.settings} products={data.products} data={data} onClose={() => setPreview(null)} />}
     {filePreview && <FilePreview file={filePreview} onClose={() => setFilePreview(null)} />}
-    {addInt && <Modal title="Nouvel échange" onClose={() => setAddInt(false)}><AccountInteractionForm contactId={siteContacts[0]?.id || ""} accountId={s.accountId} contacts={siteContacts} onCancel={() => setAddInt(false)} onSave={(it) => { addInteraction({ ...it, siteId: s.id }); setAddInt(false); }} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onPlanEvents={(evs, f) => persist((p) => ({ ...p, events: [...(p.events || []), ...plannedEvents(evs, { baseDate: f.date, accountId: s.accountId, siteId: s.id, contactId: f.contactId || "" })] }))} /></Modal>}
+    {addInt && <Modal title="Nouvel échange" onClose={() => setAddInt(false)}><AccountInteractionForm contactId={siteContacts[0]?.id || ""} accountId={s.accountId} contacts={siteContacts} onCancel={() => setAddInt(false)} onSave={(it) => { addInteraction({ ...it, siteId: s.id }); setAddInt(false); }} onBulk={(list) => { const withSite = list.map((x) => ({ ...x, siteId: s.id })); persist((p) => { const ids = new Set(withSite.map((x) => x.id)); return { ...p, interactions: [...(p.interactions || []).filter((x) => !ids.has(x.id)), ...withSite] }; }); setAddInt(false); }} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onPlanEvents={(evs, f) => persist((p) => ({ ...p, events: [...(p.events || []), ...plannedEvents(evs, { baseDate: f.date, accountId: s.accountId, siteId: s.id, contactId: f.contactId || "" })] }))} /></Modal>}
     {chatOpen && <EstablishmentChat account={acc} site={s} contacts={siteContacts} interactions={ints} deals={deals} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onClose={() => setChatOpen(false)} />}
     {composerOpen && <MessageComposer account={acc} site={s} contacts={siteContacts} data={data} persist={persist} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onClose={() => setComposerOpen(false)} />}
     {archiveOpen && (indep ? <ArchiveModal account={acc} existing={acc} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onArchive={doArchive} onClose={() => setArchiveOpen(false)} /> : <ArchiveModal account={{ enseigne: s.label || "Établissement" }} existing={s} noun="établissement" onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onArchive={doArchiveSite} onClose={() => setArchiveOpen(false)} />)}
@@ -5483,7 +5565,7 @@ function AccountDetail({ account, data, persist, go, onBack, onEdit, onAddContac
     </div>
     {preview && <DevisPreview deal={preview} account={a} settings={data.settings} products={data.products} data={data} onClose={() => setPreview(null)} />}
     {filePreview && <FilePreview file={filePreview} onClose={() => setFilePreview(null)} />}
-    {addInt && <Modal title="Nouvel échange" onClose={() => setAddInt(false)}><AccountInteractionForm contactId={conts[0]?.id || ""} accountId={a.id} contacts={conts} onCancel={() => setAddInt(false)} onSave={(it) => { addInteraction(it); setAddInt(false); }} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onPlanEvents={(evs, f) => persist((p) => ({ ...p, events: [...(p.events || []), ...plannedEvents(evs, { baseDate: f.date, accountId: a.id, contactId: f.contactId || "" })] }))} /></Modal>}
+    {addInt && <Modal title="Nouvel échange" onClose={() => setAddInt(false)}><AccountInteractionForm contactId={conts[0]?.id || ""} accountId={a.id} contacts={conts} onCancel={() => setAddInt(false)} onSave={(it) => { addInteraction(it); setAddInt(false); }} onBulk={(list) => { persist((p) => { const ids = new Set(list.map((x) => x.id)); return { ...p, interactions: [...(p.interactions || []).filter((x) => !ids.has(x.id)), ...list] }; }); setAddInt(false); }} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onPlanEvents={(evs, f) => persist((p) => ({ ...p, events: [...(p.events || []), ...plannedEvents(evs, { baseDate: f.date, accountId: a.id, contactId: f.contactId || "" })] }))} /></Modal>}
     {chatOpen && <EstablishmentChat account={a} contacts={conts} interactions={accInteractions} deals={deals} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onClose={() => setChatOpen(false)} />}
     {composerOpen && <MessageComposer account={a} contacts={conts} data={data} persist={persist} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onClose={() => setComposerOpen(false)} />}
     {archiveOpen && <ArchiveModal account={a} existing={a} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onArchive={doArchive} onClose={() => setArchiveOpen(false)} />}
@@ -6449,7 +6531,7 @@ function PreviewCard({ x, y, data }) {
     host
   );
 }
-function AccountInteractionForm({ contactId, accountId, contacts, onCancel, onSave, interaction, onUsage, onPlanEvents }) {
+function AccountInteractionForm({ contactId, accountId, contacts, onCancel, onSave, interaction, onUsage, onPlanEvents, onBulk }) {
   const initCt = (contacts || []).find((c) => c.id === (interaction ? interaction.contactId : contactId));
   const [f, setF] = useState(interaction ? { ...interaction } : { id: "i_" + Date.now(), accountId, contactId: contactId || "", siteId: (initCt && initCt.siteId) || "", type: "appel", direction: "sortant", date: new Date().toISOString().slice(0, 10), heure: new Date().toTimeString().slice(0, 5), sujet: "", resume: "", interlocuteur: contactId ? "" : "Standard" });
   const up = (k, v) => setF((p) => ({ ...p, [k]: v }));
@@ -6457,6 +6539,7 @@ function AccountInteractionForm({ contactId, accountId, contacts, onCancel, onSa
   // de l'établissement, et sur celle du groupe si l'établissement en fait partie.
   const onContact = (cid) => setF((p) => { const ct = (contacts || []).find((c) => c.id === cid); return { ...p, contactId: cid, siteId: ct && ct.siteId ? ct.siteId : (p.siteId || "") }; });
   return (<>
+    {!interaction && onBulk && <WhatsAppImportBlock context={{ accountId: f.accountId || accountId || "", contactId: f.contactId || "", siteId: f.siteId || "" }} onImport={onBulk} />}
     <div className="row2"><div className="fld"><label>Type</label><select value={f.type} onChange={(e) => up("type", e.target.value)}>{Object.entries(INT_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div></div>
     <div className="row2"><div className="fld"><label>Heure</label><input type="time" value={f.heure || ""} onChange={(e) => up("heure", e.target.value)} /></div><div className="fld" /></div>
     <div className="row2"><div className="fld"><label>Sens</label><select value={f.direction} onChange={(e) => up("direction", e.target.value)}><option value="sortant">Sortant</option><option value="entrant">Entrant</option><option value="sortant_rejete">Sortant (rejeté)</option></select></div><div className="fld"><label>Contact</label><select value={f.interlocuteur === "Standard" ? "__std__" : f.contactId} onChange={(e) => { const v = e.target.value; if (v === "__std__") { setF((p) => ({ ...p, contactId: "", interlocuteur: "Standard" })); } else { const ct = (contacts || []).find((c) => c.id === v); setF((p) => ({ ...p, contactId: v, siteId: ct && ct.siteId ? ct.siteId : (p.siteId || ""), interlocuteur: "" })); } }}><option value="">Aucun précis</option><option value="__std__">☎ Standard (standard téléphonique)</option>{contacts.map((c) => <option key={c.id} value={c.id}>{fullName(c)}</option>)}</select></div></div>
@@ -6884,7 +6967,7 @@ function Fiche({ c, account, data, myEmail, settings, deals, interactions, onBac
         <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 10 }}>Le premier établissement rattaché devient le principal ; les suivants s'ajoutent à sa liste. Le principal détermine la ville et l'adresse affichées sur la fiche.</div>
       </Modal>);
     })()}
-    {addInt && <Modal title={addInt && addInt.type === "appel" ? "Journaliser l'appel" : "Nouvel échange"} onClose={() => setAddInt(false)}><InteractionForm accountId={c.accountId} contactId={c.id} siteId={c.siteId || ""} interaction={typeof addInt === "object" ? addInt : undefined} onSave={(it) => { addInteraction(it); setAddInt(false); }} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onPlanEvents={(evs, f) => persist((p) => ({ ...p, events: [...(p.events || []), ...plannedEvents(evs, { baseDate: f.date, accountId: c.accountId, siteId: c.siteId || "", contactId: c.id })] }))} /></Modal>}
+    {addInt && <Modal title={addInt && addInt.type === "appel" ? "Journaliser l'appel" : "Nouvel échange"} onClose={() => setAddInt(false)}><InteractionForm accountId={c.accountId} contactId={c.id} siteId={c.siteId || ""} interaction={typeof addInt === "object" ? addInt : undefined} onSave={(it) => { addInteraction(it); setAddInt(false); }} onBulk={(list) => { persist((p) => { const ids = new Set(list.map((x) => x.id)); return { ...p, interactions: [...(p.interactions || []).filter((x) => !ids.has(x.id)), ...list] }; }); setAddInt(false); }} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onPlanEvents={(evs, f) => persist((p) => ({ ...p, events: [...(p.events || []), ...plannedEvents(evs, { baseDate: f.date, accountId: c.accountId, siteId: c.siteId || "", contactId: c.id })] }))} /></Modal>}
     {intEdit && <Modal title="Modifier l'échange" onClose={() => setIntEdit(null)}><InteractionForm accountId={c.accountId} contactId={c.id} siteId={c.siteId || ""} interaction={intEdit} onSave={(it) => { saveInteraction(it); setIntEdit(null); }} onUsage={(u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }))} onPlanEvents={(evs, f) => persist((p) => ({ ...p, events: [...(p.events || []), ...plannedEvents(evs, { baseDate: f.date, accountId: c.accountId, siteId: c.siteId || "", contactId: c.id })] }))} /></Modal>}
     {eventEdit && <Modal title={(data.events || []).some((e) => e.id === eventEdit.id) ? "Modifier l'événement" : "Nouvel événement"} onClose={() => setEventEdit(null)}><EventForm event={eventEdit} accounts={data.accounts} onSave={(ev) => { saveEvent(ev); setEventEdit(null); }} onDelete={() => { delEvent(eventEdit.id); setEventEdit(null); }} isExisting={(data.events || []).some((e) => e.id === eventEdit.id)} /></Modal>}
     {eventView && <Modal title="Événement" onClose={() => setEventView(null)}><EventView event={eventView} data={data} go={go} onSave={saveEvent} onClose={() => setEventView(null)} onEdit={() => { const ev = eventView; setEventView(null); setEventEdit(ev); }} onDelete={() => { delEvent(eventView.id); setEventView(null); }} /></Modal>}
@@ -6898,10 +6981,11 @@ function Fiche({ c, account, data, myEmail, settings, deals, interactions, onBac
     {editModal}
   </div>);
 }
-function InteractionForm({ accountId, contactId, siteId, onSave, interaction, onUsage, onPlanEvents }) {
+function InteractionForm({ accountId, contactId, siteId, onSave, interaction, onUsage, onPlanEvents, onBulk }) {
   const [f, setF] = useState(interaction ? { siteId: siteId || "", ...interaction } : { id: "i_" + Date.now(), accountId, contactId, siteId: siteId || "", type: "email", direction: "sortant", date: TODAY(), heure: new Date().toTimeString().slice(0, 5), sujet: "", resume: "" });
   const up = (k, v) => setF((p) => ({ ...p, [k]: v })); const showDir = f.type === "email" || f.type === "appel";
   return (<>
+    {!interaction && onBulk && <WhatsAppImportBlock context={{ accountId: f.accountId || accountId || "", contactId: f.contactId || contactId || "", siteId: f.siteId || "" }} onImport={onBulk} />}
     <div className="row2"><div className="fld"><label>Type</label><select value={f.type} onChange={(e) => up("type", e.target.value)}>{Object.entries(INT_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div>{showDir && <div className="fld"><label>Sens</label><select value={f.direction} onChange={(e) => up("direction", e.target.value)}><option value="sortant">Sortant</option><option value="entrant">Entrant</option><option value="sortant_rejete">Sortant (rejeté)</option></select></div>}</div>
     <div className="row2"><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div><div className="fld"><label>Heure</label><input type="time" value={f.heure || ""} onChange={(e) => up("heure", e.target.value)} /></div></div>
     <div className="fld"><label>Sujet</label><Combo value={f.sujet} onChange={(v) => up("sujet", v)} options={SUJET_PRESETS} placeholder="Choisir ou saisir l'objet de l'échange" /></div>
