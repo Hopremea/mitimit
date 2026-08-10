@@ -4529,7 +4529,99 @@ function commercialGame(data) {
   const gotBadges = badges.filter((b) => b.got).length;
   return { xp, level, levelName, xpPct, streak, signed: signed.length, quests, questsDone, badges, gotBadges };
 }
-function Dashboard({ data, go }) {
+// ===== Objectifs mensuels & rapport hebdomadaire =====
+const lundiDe = (ds) => { const d = new Date(ds + "T00:00:00"); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.toISOString().slice(0, 10); };
+const addJours = (ds, n) => { const d = new Date(ds + "T00:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+// Mesures réelles d'un mois : CA facturé, nouveaux clients (comptes dont la PREMIÈRE facture tombe
+// dans le mois), rendez-vous tenus (échanges RDV/visio journalisés + événements RDV validés).
+function mesuresMois(data, ym) {
+  const deals = data.deals || [];
+  const ca = sumMontant(deals.filter((d) => isCaSigne(d) && (d.date || "").startsWith(ym)));
+  const prem = {};
+  deals.forEach((d) => { if (d.type === "Facture" && d.accountId && d.date) { if (!prem[d.accountId] || d.date < prem[d.accountId]) prem[d.accountId] = d.date; } });
+  const clients = Object.values(prem).filter((dte) => dte.startsWith(ym)).length;
+  const rdv = (data.interactions || []).filter((i) => (i.type === "rdv" || i.type === "visio") && (i.date || "").startsWith(ym)).length
+    + (data.events || []).filter((e) => e.done && (e.type === "rdv" || e.type === "visio") && (e.date || "").startsWith(ym)).length;
+  return { ca, clients, rdv };
+}
+// Bilan d'une semaine (lundi inclus → lundi suivant exclu) : volume d'échanges par type, CA facturé,
+// devis envoyés, avancées d'entonnoir (via le journal d'étapes des comptes), événements soldés.
+function statsSemaine(data, lundi) {
+  const fin = addJours(lundi, 7);
+  const dans = (dte) => dte && dte >= lundi && dte < fin;
+  const ints = (data.interactions || []).filter((i) => dans(i.date));
+  const parType = {}; ints.forEach((i) => { parType[i.type] = (parType[i.type] || 0) + 1; });
+  const ca = sumMontant((data.deals || []).filter((d) => isCaSigne(d) && dans(d.date)));
+  const devisEnvoyes = (data.deals || []).filter((d) => d.type === "Devis" && dans(d.date)).length;
+  const avancees = [];
+  (data.accounts || []).forEach((a) => (a.stageLog || []).forEach((l) => { if (l && dans(l.date) && l.stage && l.stage !== "prospect") avancees.push({ enseigne: a.enseigne, stage: l.stage }); }));
+  const evDone = (data.events || []).filter((e) => e.done && dans(e.date)).length;
+  const nouveauxProspects = (data.prospects || []).filter((p) => dans(String(p.createdAt || "").slice(0, 10))).length;
+  return { lundi, echanges: ints.length, parType, ca, devisEnvoyes, avancees, evDone, nouveauxProspects };
+}
+// Dossiers qui stagnent : comptes en cours de négociation (contacté / RDV) sans aucun échange depuis
+// N jours, classés par montant de devis en attente — ce sont les relances les plus rentables.
+function dossiersStagnants(data, jours = 14) {
+  const limite = addJours(TODAY(), -jours);
+  const dernier = {};
+  (data.interactions || []).forEach((i) => { if (i.accountId && i.date) { if (!dernier[i.accountId] || i.date > dernier[i.accountId]) dernier[i.accountId] = i.date; } });
+  return (data.accounts || [])
+    .filter((a) => !a.archived && (a.stage === "contact" || a.stage === "rdv"))
+    .map((a) => ({ a, dernier: dernier[a.id] || "", attente: sumMontant((data.deals || []).filter((d) => d.accountId === a.id && isDevisEnAttente(d))) }))
+    .filter((x) => !x.dernier || x.dernier < limite)
+    .sort((x, y) => (y.attente - x.attente) || (x.dernier || "").localeCompare(y.dernier || ""))
+    .slice(0, 5);
+}
+// Récit du rapport hebdomadaire : 4 à 6 phrases factuelles comparant la semaine à la précédente.
+const SYS_RAPPORT_HEBDO = `Tu rédiges le bilan hebdomadaire du commercial de PEN'UP 3D (stylos 3D, B2B). À partir des chiffres JSON fournis (semaine écoulée, semaine précédente, dossiers qui stagnent), écris 4 à 6 phrases courtes en français : volume et nature des échanges (en évolution vs la semaine précédente), CA facturé, devis envoyés, avancées d'entonnoir marquantes, puis une phrase sur les dossiers qui stagnent (nommer les enseignes). Uniquement des faits présents dans les données — aucun chiffre inventé, aucun conseil générique, pas de titre, pas de liste : un paragraphe.`;
+async function aiRapportHebdo(stats, prec, stagne, onUsage) {
+  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 600, temperature: 0.4, system: SYS_RAPPORT_HEBDO, messages: [{ role: "user", content: JSON.stringify({ semaine: stats, precedente: prec, stagnants: stagne }) }] }) });
+  if (!res.ok) throw new Error(await claudeErrorText(res));
+  const dt = await res.json();
+  if (dt && dt.usage && onUsage) onUsage(dt.usage);
+  return (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+}
+// Carte « Objectifs du mois » du tableau de bord : trois jauges (CA, nouveaux clients, RDV) avec
+// projection de fin de mois au rythme actuel, et édition des objectifs sur place.
+function ObjectifsMois({ OBJ, st, persist, jEcoule, jTotal }) {
+  const [edit, setEdit] = useState(false);
+  const [vals, setVals] = useState(() => Object.fromEntries(OBJ.map((o) => [o.key, Number(st[o.key]) || 0])));
+  const save = () => { persist((p) => ({ ...p, settings: { ...p.settings, ...Object.fromEntries(Object.entries(vals).map(([k, v]) => [k, Number(v) || 0])) } })); setEdit(false); };
+  const aucun = OBJ.every((o) => !(Number(st[o.key]) > 0));
+  return (<div className="card" style={{ marginBottom: 18 }}>
+    <div className="sec-h" style={{ marginBottom: aucun && !edit ? 0 : undefined }}>
+      <h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><Trophy size={16} style={{ color: "#F8B133" }} /> Objectifs du mois</h3>
+      <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+        <span style={{ fontSize: 11.5, color: "var(--muted)" }}>jour {jEcoule}/{jTotal}</span>
+        <button className="btn btn-ghost btn-s" onClick={() => { setVals(Object.fromEntries(OBJ.map((o) => [o.key, Number(st[o.key]) || 0]))); setEdit((v) => !v); }}><Pencil size={13} /> {edit ? "Fermer" : "Définir"}</button>
+      </span>
+    </div>
+    {edit && <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10, marginBottom: 12 }}>
+      {OBJ.map((o) => (<div className="fld" key={o.key}><label>{o.label} — objectif</label><input type="number" min="0" value={vals[o.key]} onChange={(e) => setVals((p) => ({ ...p, [o.key]: e.target.value }))} /></div>))}
+      <div style={{ display: "flex", alignItems: "flex-end" }}><button className="btn btn-p btn-s" onClick={save}><Check size={14} /> Enregistrer</button></div>
+    </div>}
+    {aucun && !edit ? <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 8 }}>Définissez vos objectifs mensuels (CA, nouveaux clients, RDV) : ils s'affichent ici en jauges avec une projection de fin de mois.</div>
+      : <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: 12 }}>
+        {OBJ.map((o) => {
+          const obj = Number(st[o.key]) || 0;
+          const pct = obj > 0 ? Math.min(100, Math.round(o.val / obj * 100)) : 0;
+          const proj = jEcoule > 0 ? o.val / jEcoule * jTotal : 0;
+          const projOk = obj > 0 && proj >= obj;
+          return (<div key={o.key} style={{ border: "1px solid var(--line)", borderRadius: 12, padding: "10px 12px" }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12.5, fontWeight: 700 }}>{o.label}</span>
+              <span className="tnum" style={{ fontSize: 12, color: "var(--muted)" }}>{o.fmt(o.val)}{obj > 0 ? " / " + o.fmt(obj) : ""}</span>
+            </div>
+            <div style={{ height: 9, borderRadius: 6, background: "var(--line)", overflow: "hidden", marginTop: 8 }}><div style={{ width: (obj > 0 ? pct : 0) + "%", height: "100%", background: o.color, borderRadius: 6, transition: "width .4s" }} /></div>
+            <div style={{ fontSize: 11, marginTop: 6, color: obj > 0 ? (projOk ? "var(--green)" : "#c0392b") : "var(--muted)", fontWeight: 600 }}>
+              {obj > 0 ? ("Projection fin de mois : " + o.fmt(proj) + (projOk ? " ✓ objectif en vue" : " — sous l'objectif au rythme actuel")) : "Objectif non défini"}
+            </div>
+          </div>);
+        })}
+      </div>}
+  </div>);
+}
+function Dashboard({ data, persist, go }) {
   const { accounts, deals, products, contacts } = data;
   const [allEx, setAllEx] = useState(false);
   const accName = (id) => accounts.find((a) => a.id === id)?.enseigne || "—";
@@ -4604,6 +4696,20 @@ function Dashboard({ data, go }) {
         </div>
       </div>
     ); })()}
+    {(() => {
+      // Objectifs du mois : CA facturé, nouveaux clients, RDV tenus — jauges + projection de fin de
+      // mois au rythme actuel (linéaire sur les jours écoulés). Objectifs éditables sur place.
+      const ym = TODAY().slice(0, 7);
+      const mes = mesuresMois(data, ym);
+      const st = data.settings || {};
+      const now = new Date(); const jEcoule = now.getDate(); const jTotal = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      const OBJ = [
+        { key: "objCaMois", label: "CA facturé (HT)", val: mes.ca, fmt: eur, color: "#2bb673" },
+        { key: "objClientsMois", label: "Nouveaux clients", val: mes.clients, fmt: (v) => num(Math.round(v)), color: "#3F60AA" },
+        { key: "objRdvMois", label: "RDV tenus", val: mes.rdv, fmt: (v) => num(Math.round(v)), color: "#7c5cf0" },
+      ];
+      return (<ObjectifsMois OBJ={OBJ} st={st} persist={persist} jEcoule={jEcoule} jTotal={jTotal} />);
+    })()}
     {(() => {
       // Brief de la semaine (calcul local, sans IA) : l'essentiel des 7 derniers jours + ce qui arrive.
       const d7 = isoLocal(new Date(Date.now() - 6 * 86400000)); const today = TODAY(); const in7 = isoLocal(new Date(Date.now() + 7 * 86400000));
@@ -11758,6 +11864,33 @@ function CommandCenter({ data, persist, go }) {
   const objPct = objCa > 0 ? Math.min(100, Math.round(caMois / objCa * 100)) : 0;
   // Comptes à activer : meilleur score de priorité (argent en attente, ancienneté, étape).
   const priAccounts = accounts.filter((a) => !a.archived).map((a) => ({ a, ...priorityScore(a, data) })).filter((x) => x.score >= 35).sort((x, y) => y.score - x.score).slice(0, 6);
+  // ===== Rapport hebdomadaire =====
+  // Bilan de la SEMAINE ÉCOULÉE (lundi → dimanche précédents), généré une seule fois par semaine
+  // (le premier appareil ouvert s'en charge), stocké et synchronisé. Récit IA + chiffres comparés à
+  // la semaine d'avant + dossiers qui stagnent. Semaine sans activité : pas d'appel IA.
+  const lundiCourant = lundiDe(today);
+  const lundiPrec = addJours(lundiCourant, -7);
+  const rapport = (data.weeklyReports || {})[lundiPrec];
+  const rapRef = useRef(false);
+  const [rapOpen, setRapOpen] = useState(() => (new Date().getDay() + 6) % 7 <= 1); // déplié lundi et mardi
+  useEffect(() => {
+    if (!(data.accounts || []).length || rapport || rapRef.current) return;
+    rapRef.current = true;
+    const stats = statsSemaine(data, lundiPrec);
+    const prec = statsSemaine(data, addJours(lundiPrec, -7));
+    const stagne = dossiersStagnants(data).map((x) => ({ id: x.a.id, enseigne: x.a.enseigne, stage: x.a.stage, dernierEchange: x.dernier || "aucun", devisEnAttente: x.attente }));
+    const vide = !stats.echanges && !stats.ca && !stats.devisEnvoyes && !stats.avancees.length && !stats.evDone;
+    (async () => {
+      let texte = "";
+      if (!vide) { try { texte = await aiRapportHebdo(stats, prec, stagne, (u) => persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, u) }), { snapshot: false })); } catch (e) { } }
+      persist((p) => {
+        const wr = { ...(p.weeklyReports || {}) };
+        wr[lundiPrec] = { stats, prec, stagnants: stagne, texte, at: new Date().toISOString() };
+        const cles = Object.keys(wr).sort(); while (cles.length > 8) delete wr[cles.shift()];
+        return { ...p, weeklyReports: wr };
+      }, { snapshot: false });
+    })();
+  }, [rapport ? "ok" : "manque"]);
   const markDone = (id) => persist((p) => ({ ...p, events: (p.events || []).map((e) => e.id === id ? { ...e, done: true } : e) }));
   const snooze = (id) => persist((p) => ({ ...p, events: (p.events || []).map((e) => e.id === id ? { ...e, date: isoLocal(new Date(Date.now() + 86400000)) } : e) }));
   // Doublons de relances : mêmes interlocuteur et intitulé, recréés plusieurs fois. Revue puis
@@ -11828,6 +11961,33 @@ function CommandCenter({ data, persist, go }) {
       {objCa > 0 && <div style={{ fontSize: 11.5, color: objPct >= 100 ? "var(--green)" : "var(--muted)", fontWeight: 700, marginTop: 5 }}>{objPct}% de l'objectif{objPct >= 100 ? " — atteint 🎉" : " · reste " + eur(Math.max(0, objCa - caMois))}</div>}
       {objCa === 0 && <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4 }}>Aucun objectif défini. Cliquez sur ✏️ pour fixer votre cible de CA mensuel.</div>}
     </div>
+    {rapport && (() => {
+      const s = rapport.stats || {}; const pv = rapport.prec || {};
+      const delta = (a, b) => { const d = (a || 0) - (b || 0); return d === 0 ? "=" : (d > 0 ? "+" + (typeof a === "number" && a % 1 ? num(d) : num(Math.round(d))) : num(Math.round(d))); };
+      const chip = (label, v, prev, fmt) => (<span style={{ display: "inline-flex", alignItems: "baseline", gap: 5, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 9, padding: "5px 10px", fontSize: 12 }}><strong className="tnum" style={{ fontSize: 14 }}>{fmt ? fmt(v || 0) : num(v || 0)}</strong>{label}<span className="tnum" style={{ color: (v || 0) >= (prev || 0) ? "var(--green)" : "#c0392b", fontWeight: 700 }}>{delta(v, prev)}</span></span>);
+      return (<div className="card" style={{ marginBottom: 16, borderLeft: "4px solid #7c5cf0", padding: "12px 16px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", cursor: "pointer" }} onClick={() => setRapOpen((v) => !v)}>
+          <div style={{ fontSize: 11.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: .3 }}>📊 Rapport hebdo · semaine du {lundiPrec} au {addJours(lundiPrec, 6)}</div>
+          <ChevronDown size={16} style={{ transform: rapOpen ? "rotate(180deg)" : "none", transition: "transform .2s", color: "var(--muted)" }} />
+        </div>
+        {rapOpen && <div style={{ marginTop: 10 }}>
+          {rapport.texte ? <div style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 10 }}>{rapport.texte}</div> : <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>{s.echanges || s.ca || s.devisEnvoyes ? "Récit IA indisponible cette semaine — chiffres bruts ci-dessous." : "Semaine calme : aucune activité journalisée."}</div>}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {chip("échanges", s.echanges, pv.echanges)}
+            {chip("CA facturé", s.ca, pv.ca, eur)}
+            {chip("devis envoyés", s.devisEnvoyes, pv.devisEnvoyes)}
+            {chip("avancées d'entonnoir", (s.avancees || []).length, (pv.avancees || []).length)}
+            {chip("actions soldées", s.evDone, pv.evDone)}
+          </div>
+          {(rapport.stagnants || []).length > 0 && <div style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 5 }}>Ça stagne — sans échange depuis 14 jours et +</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{rapport.stagnants.map((x) => (
+              <button key={x.id} className="btn btn-g btn-s" onClick={() => go("accounts", x.id)} title={"Dernier échange : " + (x.dernierEchange || "aucun") + (x.devisEnAttente ? " · " + eur(x.devisEnAttente) + " de devis en attente" : "")}>{x.enseigne}{x.devisEnAttente ? <span className="tnum" style={{ color: "#c0392b", fontWeight: 800 }}> {eur(x.devisEnAttente)}</span> : null}</button>
+            ))}</div>
+          </div>}
+        </div>}
+      </div>);
+    })()}
     {dupMsg && <div className="card" style={{ borderLeft: "4px solid var(--green)", marginBottom: 12, fontSize: 12.5 }}>{dupMsg}</div>}
     {dupOpen && <EventDupModal groups={evDups} accName={accName} evMeta={evMeta} onConfirm={applyEvDups} onClose={() => setDupOpen(false)} />}
     {total === 0 && <div className="card" style={{ textAlign: "center", padding: "34px 16px", color: "var(--muted)" }}><CheckCircle2 size={34} style={{ color: "var(--green)" }} /><div className="pu-display" style={{ fontSize: 16, marginTop: 8, color: "var(--ink)" }}>Tout est à jour</div><div style={{ fontSize: 12.5, marginTop: 4 }}>Aucune relance en retard, aucun RDV du jour, aucune facture échue. Planifie une action depuis le calendrier ou la prospection.</div></div>}
@@ -14672,7 +14832,7 @@ export default function App() {
       )}
       <div className="print-area" style={coldStart ? { display: "none" } : undefined}>
       {tab === "today" && <CommandCenter key={"today-" + navKey} data={data} persist={persist} go={go} />}
-      {tab === "dash" && <Dashboard key={"dash-" + navKey} data={data} go={go} />}
+      {tab === "dash" && <Dashboard key={"dash-" + navKey} data={data} persist={persist} go={go} />}
       {tab === "performance" && <Performance key={"performance-" + navKey} data={data} go={go} />}
       {tab === "stats" && <Statistiques key={"stats-" + navKey} data={data} />}
       {tab === "carte" && <Carte key={"carte-" + navKey} data={data} persist={persist} go={go} focus={fc("carte")} />}
