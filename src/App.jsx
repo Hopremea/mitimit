@@ -4762,7 +4762,7 @@ function Dashboard({ data, persist, go }) {
       const newP = (data.prospects || []).filter((p) => inWeek(p.createdAt)).length;
       const devEnv = deals.filter((x) => x.type === "Devis" && inWeek(x.date)).length;
       const caSig7 = sumMontant(deals.filter((x) => isCaSigne(x) && inWeek(x.date)));
-      const rdv = (data.events || []).filter((e) => !e.done && e.date >= today && e.date <= in7).length;
+      const rdv = (data.events || []).filter((e) => !e.done && e.date >= today && e.date <= in7 && !evAncreArchivee(e, data)).length;
       const relance = deals.filter((x) => isDevisEnAttente(x) && x.statut === "envoye").length;
       const stat = (label, val, color) => (<div className="hrow" style={{ flex: "1 1 130px", minWidth: 118, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 12, padding: "10px 12px" }}><div className="pu-display tnum" style={{ fontSize: 21, fontWeight: 800, color }}>{val}</div><div style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 600 }}>{label}</div></div>);
       return (<div className="card" style={{ marginBottom: 18, borderLeft: "4px solid #7c5cf0" }}>
@@ -11962,7 +11962,7 @@ function CommandCenter({ data, persist, go }) {
   const hour = new Date().getHours();
   const greet = hour < 12 ? "Bonjour" : hour < 18 ? "Bon après-midi" : "Bonsoir";
   const accName = (id) => accounts.find((a) => a.id === id)?.enseigne || "";
-  const events = (data.events || []).filter((e) => !e.done);
+  const events = (data.events || []).filter((e) => !e.done && !evAncreArchivee(e, data));
   // Confrontation automatique des relances en retard avec les échanges : à CHAQUE affichage de cet
   // onglet (donc matin et soir), chaque événement en retard est comparé aux échanges du même
   // interlocuteur (contact, établissement ou compte). Un échange POSTÉRIEUR à la date prévue signifie
@@ -11984,7 +11984,7 @@ function CommandCenter({ data, persist, go }) {
   const clearObsoletes = () => { const ids = new Set(obsolete.map((x) => x.e.id)); persist((p) => ({ ...p, events: (p.events || []).map((e) => ids.has(e.id) ? { ...e, done: true } : e) })); };
   // Suggestions tirées des échanges (auto-scan IA) : en attente ICI uniquement — elles n'entrent au
   // calendrier qu'une fois programmées, et disparaissent d'un clic sinon.
-  const suggestions = (data.eventSuggestions || []).slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const suggestions = (data.eventSuggestions || []).filter((e) => !evAncreArchivee(e, data)).sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   const acceptSug = (sg) => persist((p) => ({ ...p, events: [...(p.events || []), sg], eventSuggestions: (p.eventSuggestions || []).filter((x) => x.id !== sg.id) }));
   const dismissSug = (id) => persist((p) => ({ ...p, eventSuggestions: (p.eventSuggestions || []).filter((x) => x.id !== id) }));
   const todayEv = events.filter((e) => (e.date || "") === today).sort((a, b) => (a.heure || "").localeCompare(b.heure || ""));
@@ -12284,6 +12284,22 @@ function PipelineKanban({ data, persist, go, embedded }) {
 }
 
 // Types d'événements personnalisés du calendrier (couleur dérivée du type, surchargeable)
+// Un événement rattaché à une fiche ARCHIVÉE (établissement, ou compte/groupe — y compris le compte
+// parent de l'établissement) sort du calendrier, d'Aujourd'hui et des compteurs : masqué tant que la
+// fiche est archivée, il RÉAPPARAÎT tel quel si elle est réactivée (rien n'est supprimé).
+function evAncreArchivee(e, data) {
+  if (!e) return false;
+  if (e.siteId) {
+    const s = (data.sites || []).find((x) => x.id === e.siteId);
+    if (s) {
+      if (s.archived) return true;
+      const a = (data.accounts || []).find((x) => x.id === s.accountId);
+      if (a && a.archived) return true;
+    }
+  }
+  if (e.accountId) { const a = (data.accounts || []).find((x) => x.id === e.accountId); if (a && a.archived) return true; }
+  return false;
+}
 const EVENT_TYPES = {
   rdv: { label: "RDV / Rencontre", color: "#3F60AA", icon: "🤝" },
   appel: { label: "Appel téléphonique", color: "#0EA5A4", icon: "📞" },
@@ -12318,7 +12334,7 @@ function buildCalendarICS(data) {
   const acc = (id) => (data.accounts || []).find((a) => a.id === id);
   const raw = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//PEN'UP 3D//MITMIT Cockpit//FR", "CALSCALE:GREGORIAN", "METHOD:PUBLISH", "X-WR-CALNAME:MITMIT — PEN'UP 3D", "X-WR-TIMEZONE:Europe/Paris"];
   (data.events || []).forEach((e) => {
-    if (!e.date) return;
+    if (!e.date || evAncreArchivee(e, data)) return;
     const a = e.accountId ? acc(e.accountId) : null;
     const tm = EVENT_TYPES[e.type] || EVENT_TYPES.autre;
     const desc = [a ? a.enseigne : "", e.notes || ""].filter(Boolean).join(" — ");
@@ -12335,7 +12351,7 @@ function buildCalendarICS(data) {
     if (desc) raw.push("DESCRIPTION:" + icsEscape(desc));
     raw.push("END:VEVENT");
   });
-  (data.accounts || []).filter((a) => a.dateAction && a.prochaineAction).forEach((a) => {
+  (data.accounts || []).filter((a) => a.dateAction && a.prochaineAction && !a.archived).forEach((a) => {
     raw.push("BEGIN:VEVENT", "UID:action_" + a.id + "@mitmit.penup3d", "DTSTAMP:" + stamp, "DTSTART;VALUE=DATE:" + icsDay(a.dateAction), "DTEND;VALUE=DATE:" + icsNextDay(a.dateAction), "SUMMARY:" + icsEscape("🔔 " + a.prochaineAction + (a.enseigne ? " — " + a.enseigne : "")), "END:VEVENT");
   });
   (data.contacts || []).filter((c) => c.naissance && /^\d{4}-\d{2}-\d{2}$/.test(c.naissance)).forEach((c) => {
@@ -13321,10 +13337,10 @@ function Agenda({ data, persist, go }) {
   const delEvent = (id) => persist((p) => ({ ...p, events: (p.events || []).filter((x) => x.id !== id) }));
   const eventsByDate = useMemo(() => {
     const map = {};
-    data.accounts.filter((a) => a.dateAction).forEach((a) => { (map[a.dateAction] = map[a.dateAction] || []).push({ kind: "action", color: "#3F60AA", label: a.prochaineAction || "Action", sub: a.enseigne, target: { tab: "accounts", id: a.id } }); });
+    data.accounts.filter((a) => a.dateAction && !a.archived).forEach((a) => { (map[a.dateAction] = map[a.dateAction] || []).push({ kind: "action", color: "#3F60AA", label: a.prochaineAction || "Action", sub: a.enseigne, target: { tab: "accounts", id: a.id } }); });
     data.deals.filter((d) => d.date).forEach((d) => { const acc = data.accounts.find((a) => a.id === d.accountId); (map[d.date] = map[d.date] || []).push({ kind: "deal", color: "#F8B133", label: d.ref || d.type, sub: acc ? acc.enseigne : "", target: { tab: "deals", id: d.id } }); });
     data.interactions.filter((i) => i.date).forEach((i) => { const acc = data.accounts.find((a) => a.id === i.accountId); (map[i.date] = map[i.date] || []).push({ kind: "int", color: "#7c5cf0", label: i.sujet || i.type, sub: acc ? acc.enseigne : "", target: { tab: "repertoire", id: i.contactId } }); });
-    (data.events || []).forEach((e) => { const site = e.siteId ? (data.sites || []).find((s) => s.id === e.siteId) : null; const acc = e.accountId ? data.accounts.find((a) => a.id === e.accountId) : null; (map[e.date] = map[e.date] || []).push({ kind: "custom", color: e.color || "#2bb673", label: (e.heure ? e.heure + " " : "") + e.titre, sub: (site && (site.label || site.adresse)) || (acc ? acc.enseigne : (e.notes ? e.notes.slice(0, 30) : "")), ev: e }); });
+    (data.events || []).filter((e) => !evAncreArchivee(e, data)).forEach((e) => { const site = e.siteId ? (data.sites || []).find((s) => s.id === e.siteId) : null; const acc = e.accountId ? data.accounts.find((a) => a.id === e.accountId) : null; (map[e.date] = map[e.date] || []).push({ kind: "custom", color: e.color || "#2bb673", label: (e.heure ? e.heure + " " : "") + e.titre, sub: (site && (site.label || site.adresse)) || (acc ? acc.enseigne : (e.notes ? e.notes.slice(0, 30) : "")), ev: e }); });
     const yNow = new Date().getFullYear();
     (data.contacts || []).filter((c) => c.naissance && /^\d{4}-\d{2}-\d{2}$/.test(c.naissance)).forEach((c) => { const md = c.naissance.slice(5); const acc = data.accounts.find((a) => a.id === c.accountId); [yNow, yNow + 1].forEach((yy) => { const ds = yy + "-" + md; (map[ds] = map[ds] || []).push({ kind: "anniv", color: "#e0567b", label: "🎂 " + fullName(c), sub: acc ? acc.enseigne : "anniversaire", target: { tab: "repertoire", id: c.id } }); }); });
     return map;
