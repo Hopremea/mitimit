@@ -13951,7 +13951,13 @@ export default function App() {
   const pendingWrite = useRef(false); // une écriture locale est en attente : ne pas l'écraser avec une version distante.
   const latestRef = useRef(null);     // dernier état persisté EN MÉMOIRE : source fiable pour les flush, même si le localStorage a débordé (photos volumineuses).
   const baseRef = useRef(null);       // dernière version ACQUITTÉE par le serveur : base commune des fusions à trois versions.
-  const poserCurseur = (ts) => { lastSyncAt.current = ts || null; ecrireCurseurSync(ts); };
+  // Le curseur persisté certifie que le cache localStorage est au moins aussi récent que la version
+  // serveur correspondante. Si la DERNIÈRE écriture du cache a échoué (quota dépassé, photos
+  // volumineuses), cette garantie tombe : on retire alors le curseur au lieu de l'écrire, sinon un
+  // prochain chargement « certifierait » un cache obsolète et le repousserait par-dessus le serveur.
+  const cacheOk = useRef(true);
+  const ecrireCache = (state) => { try { localStorage.setItem(KEY, JSON.stringify(state)); cacheOk.current = true; } catch (e) { cacheOk.current = false; try { localStorage.removeItem(SYNC_KEY); } catch (e2) { } } };
+  const poserCurseur = (ts) => { lastSyncAt.current = ts || null; if (cacheOk.current) ecrireCurseurSync(ts); else { try { localStorage.removeItem(SYNC_KEY); } catch (e) { } } };
   // Chargement : cache localStorage, puis Supabase. Le curseur persisté départage : si le serveur n'a
   // pas bougé depuis notre dernier accusé, le cache local (qui peut contenir une fin de session jamais
   // poussée — fermeture avant le délai d'écriture) est AU MOINS aussi récent et n'est pas écrasé ;
@@ -13975,7 +13981,7 @@ export default function App() {
             } else {
               const aAssainir = donneesAAssainir(row.data);
               current = serveur; poserCurseur(row.updated_at || null); baseRef.current = serveur; latestRef.current = serveur;
-              if (!cancelled) { setData(current); try { localStorage.setItem(KEY, JSON.stringify(current)); } catch (e) { } }
+              if (!cancelled) { setData(current); ecrireCache(current); }
               // La base contient encore des valeurs que l'assainissement retire (fonction sans personne,
               // marqueur « vide », dirigeant exclu…) : on réécrit la version propre UNE fois. Au chargement
               // suivant la condition est fausse, donc aucune écriture répétée.
@@ -13993,7 +13999,7 @@ export default function App() {
       const hasRealData = current && Array.isArray(current.accounts) && current.accounts.length > 0;
       if (!cancelled && !hasRealData) {
         const restored = normalize(JSON.parse(JSON.stringify(RESTORE_DATA)));
-        if (!cancelled) { setData(restored); try { localStorage.setItem(KEY, JSON.stringify(restored)); } catch (e) { } }
+        if (!cancelled) { setData(restored); ecrireCache(restored); }
         latestRef.current = restored;
         if (supabaseEnabled && supabase) { try { const ts = new Date().toISOString(); await supabase.from("cockpit_state").upsert({ id: "shared", data: restored, updated_at: ts }, { onConflict: "id" }); poserCurseur(ts); baseRef.current = restored; } catch (e) { } }
       }
@@ -14020,7 +14026,7 @@ export default function App() {
       const ts2 = new Date().toISOString();
       await supabase.from("cockpit_state").upsert({ id: "shared", data: fusion, updated_at: ts2 }, { onConflict: "id" });
       poserCurseur(ts2); baseRef.current = fusion; latestRef.current = fusion;
-      setData(fusion); try { localStorage.setItem(KEY, JSON.stringify(fusion)); } catch (e) { }
+      setData(fusion); ecrireCache(fusion);
       return fusion;
     }
     await supabase.from("cockpit_state").upsert({ id: "shared", data: payload, updated_at: ts }, { onConflict: "id" });
@@ -14033,7 +14039,7 @@ export default function App() {
       if (snap) undoRef.current = clone(prev);
       const next = normalize(typeof updater === "function" ? updater(clone(prev)) : updater);
       latestRef.current = next;
-      try { localStorage.setItem(KEY, JSON.stringify(next)); } catch (e) { }
+      ecrireCache(next);
       if (supabaseEnabled && supabase) {
         if (saveTimer.current) clearTimeout(saveTimer.current);
         pendingWrite.current = true; setSyncState("saving");
@@ -14097,7 +14103,7 @@ export default function App() {
           if (pendingWrite.current || saveTimer.current) return;
           const fresh = normalize(row.data);
           poserCurseur(row.updated_at); baseRef.current = fresh; latestRef.current = fresh;
-          setData(fresh); try { localStorage.setItem(KEY, JSON.stringify(fresh)); } catch (e) { }
+          setData(fresh); ecrireCache(fresh);
           setSyncState("remote"); setTimeout(() => setSyncState((s) => s === "remote" ? "saved" : s), 2600);
         }
       } catch (e) { } finally { enCours = false; }
@@ -14225,7 +14231,7 @@ export default function App() {
         const merged = normalize(row.data);
         baseRef.current = merged; latestRef.current = merged;
         setData(merged);
-        try { localStorage.setItem(KEY, JSON.stringify(merged)); } catch (e) { }
+        ecrireCache(merged);
         setSyncState("remote"); setTimeout(() => setSyncState((s) => s === "remote" ? "saved" : s), 2600);
       })
       .subscribe();
