@@ -728,6 +728,50 @@ function identifiantProspect(p) {
 }
 const PROSPECT_STATUT = { a_qualifier: { label: "À qualifier", color: "#9aa6bd" }, a_contacter: { label: "À contacter", color: "#F8B133" }, brouillon_cree: { label: "Brouillon créé", color: "#0EA5A4" }, contacte: { label: "Contacté", color: "#3F60AA" }, rdv: { label: "RDV planifié", color: "#7c5cf0" }, converti: { label: "Converti en compte client", color: "#2bb673" }, ecarte: { label: "Écarté", color: "#FF5A45" } };
 const POTENTIEL_META = { fort: { label: "Fort", color: "#2bb673" }, moyen: { label: "Moyen", color: "#F8B133" }, faible: { label: "Faible", color: "#9aa6bd" } };
+// ===== Score de priorité d'un prospect (0-100) =====
+// Calcul transparent et instantané (aucun coût IA) : potentiel évalué, joignabilité, interlocuteur
+// identifié, complétude de la fiche, statut de prospection, type de structure, proximité de
+// l'entrepôt. Le détail du calcul s'affiche en infobulle sur la pastille — pas de boîte noire.
+function prospectScore(p) {
+  let s = 0; const det = [];
+  const add = (n, why) => { if (!n) return; s += n; det.push((n > 0 ? "+" : "") + n + " · " + why); };
+  const pot = { fort: 28, moyen: 16, faible: 4 }[p.potentiel];
+  add(pot != null ? pot : 10, p.potentiel ? "potentiel " + p.potentiel : "potentiel non évalué");
+  if (String(p.telephone || "").trim()) add(12, "téléphone connu");
+  if (String(p.email || "").trim()) add(12, "e-mail connu");
+  if (p.contactNom || p.contactEmail || p.contactTel) add(8, "interlocuteur identifié");
+  if (String(p.horaires || "").trim()) add(3, "horaires connus");
+  if (String(p.site || "").trim()) add(3, "site web");
+  const compl = prospectCompleteness(p); add(Math.round(compl / 12), "fiche complète à " + compl + " %");
+  const st = { a_contacter: 10, brouillon_cree: 8, contacte: 6, rdv: 14, a_qualifier: 2, ecarte: -60 }[p.statut];
+  if (st) add(st, "statut " + ((PROSPECT_STATUT[p.statut] || {}).label || p.statut).toLowerCase());
+  const ty = { gss: 8, chaine: 7, cooperative: 7, specialiste: 6, franchise: 5, independant: 5 }[p.type];
+  add(ty != null ? ty : 2, "type " + ((PROSPECT_TYPES[p.type] || {}).label || "autre").toLowerCase());
+  if (p.lat != null && p.lng != null) {
+    const dk = distanceKm(SIEGE.lat, SIEGE.lng, p.lat, p.lng);
+    if (dk != null && dk < 60) add(6, "à " + Math.round(dk) + " km de l'entrepôt");
+    else if (dk != null && dk < 150) add(3, "à " + Math.round(dk) + " km de l'entrepôt");
+  }
+  return { score: Math.max(0, Math.min(100, s)), details: det };
+}
+const SCORE_BANDES = { haute: { label: "Priorité haute", color: "#2bb673", min: 60 }, moyenne: { label: "Priorité moyenne", color: "#F8B133", min: 35 }, basse: { label: "Priorité basse", color: "#9aa6bd", min: 0 } };
+const scoreBande = (s) => s >= 60 ? "haute" : s >= 35 ? "moyenne" : "basse";
+// ===== Valeurs récentes (confort de saisie) =====
+// Mémorise sur cet appareil les dernières valeurs saisies dans les champs récurrents (sujets
+// d'échange, intitulés d'événements…) et les propose en un clic sous le champ.
+const RECENTS_KEY = "penup_recents_v1";
+const lireRecents = (champ) => { try { const o = JSON.parse(localStorage.getItem(RECENTS_KEY) || "{}"); return Array.isArray(o[champ]) ? o[champ] : []; } catch (e) { return []; } };
+const pousserRecent = (champ, valeur) => {
+  const v = String(valeur || "").trim(); if (v.length < 3 || v.length > 120) return;
+  try { const o = JSON.parse(localStorage.getItem(RECENTS_KEY) || "{}"); o[champ] = [v, ...(Array.isArray(o[champ]) ? o[champ] : []).filter((x) => String(x).toLowerCase() !== v.toLowerCase())].slice(0, 6); localStorage.setItem(RECENTS_KEY, JSON.stringify(o)); } catch (e) { }
+};
+function RecentChips({ champ, exclure, onPick }) {
+  const list = lireRecents(champ).filter((v) => !(exclure || []).some((x) => String(x).toLowerCase() === v.toLowerCase()));
+  if (!list.length) return null;
+  return (<div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 5 }}>
+    {list.map((v) => <button key={v} type="button" onClick={() => onPick(v)} title="Réutiliser cette valeur récente" style={{ fontSize: 11, fontWeight: 600, color: "var(--blue)", background: "var(--blue-l)", border: "1px solid var(--line)", borderRadius: 20, padding: "2px 9px", cursor: "pointer", fontFamily: "inherit", maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v}</button>)}
+  </div>);
+}
 function seedProspects() {
   return [
     { id: "p_jc_mtb", nom: "JouéClub Montauban", enseigne: "JouéClub", type: "cooperative", format: "Périphérie (ZI)", adresse: "700 avenue de Paris, ZI Nord (Aussonne)", ville: "Montauban", cp: "82000", departement: "82 Tarn-et-Garonne", region: "Occitanie", telephone: "", site: "https://www.joueclub.fr/établissement/joueclub-montauban.html", email: "", statut: "a_contacter", potentiel: "fort", notes: "Coopérative multimarque, établissement local prioritaire (proximité immédiate du siège PEN'UP). Exploitant probable : SIREN 329009948 (gérant M. LESTRADE), dont l'établissement historique 32900994800012 était au 2 avenue Gambetta ; l'établissement est aujourd'hui au 700 avenue de Paris (ZI Aussonne), SIRET d'établissement actuel à confirmer. ATTENTION : ne pas confondre avec L'UNIVERS DU JOUET (SIREN 918164757), qui est un établissement KING JOUET voisin (485 Route du Nord), pas ce JouéClub.", source: "joueclub.fr (officiel) + telephone.city", accountId: null, createdAt: "2026-05-29", siren: "329009948", siret: "", raisonSociale: "", formeJuridique: "", contactPrenom: "", contactNom: "LESTRADE", contactFonction: "Gérant", contactEmail: "", contactTel: "", contactSource: "joueclub.fr (officiel), SIREN à confirmer" },
@@ -6824,9 +6868,9 @@ function AccountInteractionForm({ contactId, accountId, contacts, onCancel, onSa
     <div className="row2"><div className="fld"><label>Type</label><select value={f.type} onChange={(e) => up("type", e.target.value)}>{Object.entries(INT_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div></div>
     <div className="row2"><div className="fld"><label>Heure</label><input type="time" value={f.heure || ""} onChange={(e) => up("heure", e.target.value)} /></div><div className="fld" /></div>
     <div className="row2"><div className="fld"><label>Sens</label><select value={f.direction} onChange={(e) => up("direction", e.target.value)}><option value="sortant">Sortant</option><option value="entrant">Entrant</option><option value="sortant_rejete">Sortant (rejeté)</option></select></div><div className="fld"><label>Contact</label><select value={f.interlocuteur === "Standard" ? "__std__" : f.contactId} onChange={(e) => { const v = e.target.value; if (v === "__std__") { setF((p) => ({ ...p, contactId: "", interlocuteur: "Standard" })); } else { const ct = (contacts || []).find((c) => c.id === v); setF((p) => ({ ...p, contactId: v, siteId: ct && ct.siteId ? ct.siteId : (p.siteId || ""), interlocuteur: "" })); } }}><option value="">Aucun précis</option><option value="__std__">☎ Standard (standard téléphonique)</option>{contacts.map((c) => <option key={c.id} value={c.id}>{fullName(c)}</option>)}</select></div></div>
-    <div className="fld"><label>Sujet</label><Combo value={f.sujet} onChange={(v) => up("sujet", v)} options={SUJET_PRESETS} placeholder="Choisir ou saisir l'objet de l'échange" /></div>
+    <div className="fld"><label>Sujet</label><Combo value={f.sujet} onChange={(v) => up("sujet", v)} options={SUJET_PRESETS} placeholder="Choisir ou saisir l'objet de l'échange" /><RecentChips champ="echange.sujet" exclure={SUJET_PRESETS} onPick={(v) => up("sujet", v)} /></div>
     <ResumeField value={f.resume} onChange={(v) => up("resume", v)} onUsage={onUsage} rows={3} baseDate={f.date} onPlan={onPlanEvents ? (evs) => onPlanEvents(evs, f) : undefined} />
-    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}><button className="btn btn-ghost" onClick={onCancel}>Annuler</button><button className="btn btn-p" onClick={() => onSave(f)} disabled={!f.sujet}>Enregistrer</button></div>
+    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}><button className="btn btn-ghost" onClick={onCancel}>Annuler</button><button className="btn btn-p" onClick={() => { pousserRecent("echange.sujet", f.sujet); onSave(f); }} disabled={!f.sujet}>Enregistrer</button></div>
   </>);
 }
 function AccountForm({ acc, accounts, onSave, known = [], onUsage }) {
@@ -7269,9 +7313,9 @@ function InteractionForm({ accountId, contactId, siteId, onSave, interaction, on
     {!interaction && onBulk && <WhatsAppImportBlock context={{ accountId: f.accountId || accountId || "", contactId: f.contactId || contactId || "", siteId: f.siteId || "" }} onImport={onBulk} onUsage={onUsage} />}
     <div className="row2"><div className="fld"><label>Type</label><select value={f.type} onChange={(e) => up("type", e.target.value)}>{Object.entries(INT_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div>{showDir && <div className="fld"><label>Sens</label><select value={f.direction} onChange={(e) => up("direction", e.target.value)}><option value="sortant">Sortant</option><option value="entrant">Entrant</option><option value="sortant_rejete">Sortant (rejeté)</option></select></div>}</div>
     <div className="row2"><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div><div className="fld"><label>Heure</label><input type="time" value={f.heure || ""} onChange={(e) => up("heure", e.target.value)} /></div></div>
-    <div className="fld"><label>Sujet</label><Combo value={f.sujet} onChange={(v) => up("sujet", v)} options={SUJET_PRESETS} placeholder="Choisir ou saisir l'objet de l'échange" /></div>
+    <div className="fld"><label>Sujet</label><Combo value={f.sujet} onChange={(v) => up("sujet", v)} options={SUJET_PRESETS} placeholder="Choisir ou saisir l'objet de l'échange" /><RecentChips champ="echange.sujet" exclure={SUJET_PRESETS} onPick={(v) => up("sujet", v)} /></div>
     <ResumeField value={f.resume} onChange={(v) => up("resume", v)} onUsage={onUsage} rows={4} baseDate={f.date} onPlan={onPlanEvents ? (evs) => onPlanEvents(evs, f) : undefined} />
-    <div style={{ display: "flex", justifyContent: "flex-end" }}><button className="btn btn-p" onClick={() => onSave(f)} disabled={!f.sujet}>Enregistrer</button></div>
+    <div style={{ display: "flex", justifyContent: "flex-end" }}><button className="btn btn-p" onClick={() => { pousserRecent("echange.sujet", f.sujet); onSave(f); }} disabled={!f.sujet}>Enregistrer</button></div>
   </>);
 }
 
@@ -10020,10 +10064,13 @@ function Prospection({ data, persist, go }) {
     // Ouvert / fermé À L'INSTANT, d'après les horaires de la fiche : trois groupes seulement, car
     // « horaires absents » n'est pas « fermé » — on ne peut rien affirmer sans horaires.
     ouverture: { label: "Ouvert / fermé", get: (p) => statutHoraire(p.horaires || "").etat, meta: (v) => v === "ouvert" ? { label: "Ouvert maintenant", color: "#2bb673" } : v === "ferme" ? { label: "Fermé maintenant", color: "#c0392b" } : { label: "Horaires inconnus", color: "#9aa6bd" }, order: ["ouvert", "ferme", "inconnu"] },
+    score: { label: "Priorité (score)", get: (p) => scoreBande(prospectScore(p).score), meta: (v) => SCORE_BANDES[v] || SCORE_BANDES.basse, order: ["haute", "moyenne", "basse"] },
   };
   const gd = GROUP_DEFS[sort] || GROUP_DEFS.type;
   const groupKeys = gd.order ? gd.order.slice() : Array.from(new Set(list.map(gd.get))).sort((a, b) => String(a).localeCompare(String(b), "fr"));
-  let groups = groupKeys.map((k) => ({ key: k, items: list.filter((p) => gd.get(p) === k).sort((a, b) => (a.ville || "").localeCompare(b.ville || "") || (a.nom || "").localeCompare(b.nom || "")) })).filter((g) => g.items.length);
+  // Groupé par priorité : à l'intérieur de chaque bande, les meilleurs scores en tête (et non la ville).
+  const triInterne = sort === "score" ? (a, b) => prospectScore(b).score - prospectScore(a).score : (a, b) => (a.ville || "").localeCompare(b.ville || "") || (a.nom || "").localeCompare(b.nom || "");
+  let groups = groupKeys.map((k) => ({ key: k, items: list.filter((p) => gd.get(p) === k).sort(triInterne) })).filter((g) => g.items.length);
   if (dir === "desc") groups = groups.slice().reverse().map((g) => ({ ...g, items: g.items.slice().reverse() }));
   const save = (p) => {
     // Saisie manuelle d'un dirigeant exclu : on refuse à l'écran plutôt que de laisser la fiche
@@ -10408,6 +10455,7 @@ function Prospection({ data, persist, go }) {
         {p.site && <a className="iconbtn" href={ensureHttp(p.site)} target="_blank" rel="noreferrer" title={"Site web : " + cleanDomain(p.site)}><ExternalLink size={15} /></a>}
         {p.telephone && <a className="iconbtn" href={"tel:" + p.telephone.replace(/\s/g, "")} title={p.telephone}><Phone size={15} /></a>}
         <span style={{ flex: 1 }} />
+        {(() => { const sc = prospectScore(p); const col = (SCORE_BANDES[scoreBande(sc.score)] || {}).color || "#9aa6bd"; return <span title={"Score de priorité : " + sc.score + "/100 — plus il est haut, plus la fiche mérite un contact rapide.\n" + sc.details.join("\n")} style={{ fontSize: 10.5, fontWeight: 800, color: col, background: col + "1c", border: "1px solid " + col + "55", borderRadius: 20, padding: "1px 7px", display: "inline-flex", alignItems: "center", gap: 3 }} className="tnum"><Zap size={10} />{sc.score}</span>; })()}
         {(() => { const c = prospectCompleteness(p); const col = c >= 70 ? "#2bb673" : c >= 40 ? "#F8B133" : "#FF5A45"; return <span title={"Complétude de la fiche : " + c + "% des champs clés renseignés"} style={{ fontSize: 10.5, fontWeight: 800, color: col, background: col + "1c", border: "1px solid " + col + "55", borderRadius: 20, padding: "1px 7px" }} className="tnum">{c}%</span>; })()}
         <span style={{ fontSize: 11, color: "var(--muted)" }}>{p.source}</span>
       </div>
@@ -10488,7 +10536,7 @@ function Prospection({ data, persist, go }) {
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ position: "relative" }}><Search size={15} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--muted)" }} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher (nom, ville, groupe, établissement…)" style={{ padding: "9px 12px 9px 32px", borderRadius: 10, border: "1px solid var(--line)", fontFamily: "inherit", fontSize: 13, minWidth: 240 }} /></div>
         <div style={{ display: "inline-flex", alignItems: "stretch" }}>
-          <select value={sort} onChange={(e) => setSort(e.target.value)} style={{ padding: "9px 12px", borderRadius: "10px 0 0 10px", border: "1px solid var(--line)", borderRight: "none", fontFamily: "inherit", fontSize: 13 }}><option value="type">Grouper par type</option><option value="statut">Grouper par statut</option><option value="region">Grouper par région</option><option value="enseigne">Grouper par groupe / établissement</option><option value="potentiel">Grouper par potentiel</option><option value="ville">Grouper par ville</option><option value="ouverture">Grouper par ouvert / fermé</option></select>
+          <select value={sort} onChange={(e) => setSort(e.target.value)} style={{ padding: "9px 12px", borderRadius: "10px 0 0 10px", border: "1px solid var(--line)", borderRight: "none", fontFamily: "inherit", fontSize: 13 }}><option value="type">Grouper par type</option><option value="statut">Grouper par statut</option><option value="region">Grouper par région</option><option value="enseigne">Grouper par groupe / établissement</option><option value="potentiel">Grouper par potentiel</option><option value="ville">Grouper par ville</option><option value="ouverture">Grouper par ouvert / fermé</option><option value="score">Grouper par priorité (score)</option></select>
           <button onClick={() => setDir((d) => d === "asc" ? "desc" : "asc")} title={dir === "asc" ? "Ordre croissant (cliquer pour inverser)" : "Ordre décroissant (cliquer pour inverser)"} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 11px", border: "1px solid var(--line)", borderRadius: "0 10px 10px 0", background: "#fff", cursor: "pointer", color: "var(--blue)" }}>{dir === "asc" ? <ArrowDown size={15} /> : <ArrowUp size={15} />}</button>
         </div>
         <div style={{ display: "inline-flex", alignItems: "stretch" }} title="Vues enregistrées : rappelez un jeu de filtres + tri en un clic">
@@ -13256,12 +13304,12 @@ function EventForm({ event, accounts, onSave, onDelete, isExisting }) {
   const setType = (t) => { const meta = EVENT_TYPES[t] || EVENT_TYPES.autre; setF((p) => ({ ...p, type: t, color: meta.color })); };
   return (<>
     <div className="fld"><label>Type d'événement</label><div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 6 }}>{Object.entries(EVENT_TYPES).map(([k, v]) => (<button key={k} type="button" onClick={() => setType(k)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", border: f.type === k ? `2px solid ${v.color}` : "1px solid var(--line)", borderRadius: 10, background: f.type === k ? v.color + "18" : "transparent", color: "var(--ink)", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, textAlign: "left" }}><span style={{ fontSize: 14 }}>{v.icon}</span><span style={{ flex: 1 }}>{v.label}</span><i className="dot" style={{ background: v.color }} /></button>))}</div></div>
-    <div className="fld"><label>Titre</label><input value={f.titre} onChange={(e) => up("titre", e.target.value)} placeholder="Ex : Relancer Cultura, Salon du jouet, Préparer pitch…" autoFocus /></div>
+    <div className="fld"><label>Titre</label><input value={f.titre} onChange={(e) => up("titre", e.target.value)} placeholder="Ex : Relancer Cultura, Salon du jouet, Préparer pitch…" autoFocus /><RecentChips champ="event.titre" onPick={(v) => up("titre", v)} /></div>
     <div className="row2"><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div><div className="fld"><label>Heure (optionnel)</label><input type="time" value={f.heure} onChange={(e) => up("heure", e.target.value)} /></div></div>
     <div className="fld"><label>Groupe / établissement lié (optionnel)</label><select value={f.accountId} onChange={(e) => up("accountId", e.target.value)}><option value="">Aucune</option><AccountOptions accounts={accounts} /></select></div>
     <div className="fld"><label>Couleur (par défaut selon le type, modifiable)</label><div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>{["#22C55E", "#3F60AA", "#0EA5A4", "#2563EB", "#F59E0B", "#A855F7", "#0891B2", "#EC4899", "#EF4444", "#475569", "#94A3B8"].map((c) => <button key={c} type="button" onClick={() => up("color", c)} style={{ width: 28, height: 28, borderRadius: 8, background: c, border: f.color === c ? "3px solid var(--ink)" : "1px solid var(--line)", cursor: "pointer" }} />)}<span style={{ fontSize: 11, color: "var(--muted)" }}>{f.color === EVENT_TYPES[f.type]?.color ? "couleur du type" : "couleur personnalisée"}</span></div></div>
     <div className="fld"><label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>Notes <MicDictate title="Dicter une note au micro" onText={(t) => up("notes", ((f.notes || "").trim() + (f.notes && f.notes.trim() ? " " : "") + t))} /></label><textarea rows={3} value={f.notes} onChange={(e) => up("notes", e.target.value)} placeholder="Détails, points à préparer, lien de visio…" /></div>
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>{isExisting ? <button className="btn btn-r btn-s" onClick={onDelete}><Trash2 size={14} /> Supprimer</button> : <span />}<button className="btn btn-p" onClick={() => onSave(f)} disabled={!f.titre || !f.date}>Enregistrer</button></div>
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>{isExisting ? <button className="btn btn-r btn-s" onClick={onDelete}><Trash2 size={14} /> Supprimer</button> : <span />}<button className="btn btn-p" onClick={() => { pousserRecent("event.titre", f.titre); onSave(f); }} disabled={!f.titre || !f.date}>Enregistrer</button></div>
   </>);
 }
 // Retrouve les fiches liées à un événement : établissement (site ou groupe), personne et échanges rattachés.
