@@ -8124,6 +8124,15 @@ const shapePath = (type) => type === "pin" ? "M0,0 C-6.5,-8 -6.5,-15 0,-15 C6.5,
   : type === "towers" ? "M-9,9 L-9,-10 L-1,-10 L-1,9 Z M-1,9 L-1,-2 L8,-2 L8,9 Z"
   : "M0,-10 L2.9,-3.1 L10,-3.1 L4.2,1.6 L6.4,9 L0,4.6 L-6.4,9 L-4.2,1.6 L-10,-3.1 L-2.9,-3.1 Z";
 const siteColor = (s, account) => s.type === "penup" || s.type === "usine" || s.type === "entrepot" ? "#FFD212" : s.type === "decision" ? enseigneColor(account) : (SURFACE_COLOR[s.typeSurface] || "#9aa6bd");
+// Département (2 chiffres, 2A/2B pour la Corse, 97x pour l'outre-mer) déduit d'un code postal ou
+// d'une adresse contenant un code postal.
+function deptDeCp(cpOuAdresse) {
+  const m = String(cpOuAdresse || "").match(/\b(\d{5})\b/); if (!m) return "";
+  const cp = m[1];
+  if (cp.startsWith("97")) return cp.slice(0, 3);
+  if (cp.startsWith("20")) return cp < "20200" ? "2A" : "2B";
+  return cp.slice(0, 2);
+}
 function Carte({ data, persist, go, focus }) {
   const { sites, accounts, prospects } = data;
   const accOf = (id) => accounts.find((x) => x.id === id);
@@ -8146,6 +8155,10 @@ function Carte({ data, persist, go, focus }) {
   const mapEl = useRef(null); const mapInst = useRef(null); const markersLayer = useRef(null); const routesLayer = useRef(null); const roadsLayer = useRef(null);
   // Isochrone : polygone « à moins de N minutes » + fiches qu'il contient.
   const isoLayer = useRef(null);
+  // Analyse de secteurs : départements colorés selon la part de clients facturés parmi les fiches
+  // suivies (sites + prospects). Contours France entière téléchargés une fois puis mis en cache local.
+  const secteursLayer = useRef(null);
+  const [secteurs, setSecteurs] = useState(false); const [sectMsg, setSectMsg] = useState(null); const [sectBusy, setSectBusy] = useState(false);
   const [isoMin, setIsoMin] = useState(30); const [isoBusy, setIsoBusy] = useState(false); const [isoMsg, setIsoMsg] = useState(null);
   // Marqueurs indexés par id de site, pour la mise en avant au survol de la liste « Tous les sites ».
   const markerById = useRef({});
@@ -8418,6 +8431,59 @@ function Carte({ data, persist, go, focus }) {
       if (cnt > 1) LF.marker([dest.lat, dest.lng], { icon: LF.divIcon({ html: `<div style="background:${col};color:#fff;font-weight:800;font-size:10px;width:18px;height:18px;border-radius:50%;display:grid;place-items:center;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4)">${cnt}</div>`, className: "route-badge", iconSize: [18, 18], iconAnchor: [9, 9] }) }).addTo(lg);
     });
   }, [mapReady, routeKey]);
+  // Couche « Secteurs » : choroplèthe des départements. Vert = bien couvert (part de clients élevée),
+  // rouge = zone sous-exploitée (des fiches suivies mais pas encore de client), gris = aucune fiche.
+  // L'intensité du remplissage suit le volume de fiches. Infobulle par département avec les comptes.
+  useEffect(() => {
+    if (!LF || !mapReady || !mapInst.current) return;
+    if (!secteurs) { if (secteursLayer.current) { try { secteursLayer.current.clearLayers(); } catch (e) { } } setSectMsg(null); return; }
+    let annule = false;
+    (async () => {
+      setSectBusy(true);
+      try {
+        let gj = null;
+        try { gj = await idbLire("geo_departements_v1"); } catch (e) { }
+        if (!gj) {
+          const r = await fetch("https://france-geojson.gregoiredavid.fr/repo/departements.geojson");
+          if (!r.ok) throw new Error("téléchargement des contours impossible (" + r.status + ")");
+          gj = await r.json();
+          try { await idbEcrire("geo_departements_v1", gj); } catch (e) { }
+        }
+        if (annule) return;
+        const clients = {}, prosp = {};
+        const bump = (o, d) => { if (d) o[d] = (o[d] || 0) + 1; };
+        liveSites.forEach((s) => {
+          if (s.type !== "pdv") return;
+          const a = accOf(s.accountId); const grp = isGroupe(a);
+          const dept = deptDeCp(s.adresse);
+          const estClient = grp ? hasFactureSite(s) : (a && a.stage === "referencement" && hasFacture(s.accountId));
+          bump(estClient ? clients : prosp, dept);
+        });
+        (prospects || []).filter((p) => !p.archived && !p.accountId && p.statut !== "converti" && p.statut !== "ecarte").forEach((p) => bump(prosp, deptDeCp(p.cp || p.adresse)));
+        if (!secteursLayer.current) secteursLayer.current = LF.layerGroup().addTo(mapInst.current);
+        secteursLayer.current.clearLayers();
+        LF.geoJSON(gj, {
+          style: (f) => {
+            const code = (f.properties || {}).code || "";
+            const c = clients[code] || 0, p = prosp[code] || 0, tot = c + p;
+            if (!tot) return { color: "#9aa6bd", weight: 0.5, opacity: 0.3, fillColor: "#9aa6bd", fillOpacity: 0.02 };
+            const teinte = Math.round((c / tot) * 120); // 0 = rouge (aucun client), 120 = vert (que des clients)
+            return { color: "hsl(" + teinte + ", 65%, 34%)", weight: 1.1, opacity: 0.75, fillColor: "hsl(" + teinte + ", 70%, 45%)", fillOpacity: Math.min(0.5, 0.16 + tot * 0.04) };
+          },
+          onEachFeature: (f, ly) => {
+            const code = (f.properties || {}).code || ""; const nom = (f.properties || {}).nom || code;
+            const c = clients[code] || 0, p = prosp[code] || 0;
+            ly.bindTooltip("<strong>" + nom + " (" + code + ")</strong><br/>" + c + " client(s) facturé(s) · " + p + " fiche(s) à conquérir", { sticky: true, className: "site-tip" });
+          },
+        }).addTo(secteursLayer.current);
+        const sousExpl = Object.keys(prosp).filter((d) => (prosp[d] || 0) >= 3 && (clients[d] || 0) === 0).sort((a, b) => prosp[b] - prosp[a]).slice(0, 4);
+        setSectMsg({ ok: true, t: "Vert = départements où vos fiches sont majoritairement clientes, rouge = beaucoup de fiches mais pas encore de client, gris = aucune fiche." + (sousExpl.length ? " Zones les plus sous-exploitées : " + sousExpl.map((d) => d + " (" + prosp[d] + " fiches)").join(", ") + "." : "") });
+      } catch (e) {
+        if (!annule) setSectMsg({ ok: false, t: "Analyse de secteurs indisponible : " + String((e && e.message) || e) });
+      } finally { if (!annule) setSectBusy(false); }
+    })();
+    return () => { annule = true; };
+  }, [secteurs, LF, mapReady]);
   // Navigation externe (clic « Voir sur la carte ») : sélectionne et vole vers le site.
   useEffect(() => {
     if (!mapReady || !focus || !focus.id) return;
@@ -8425,8 +8491,9 @@ function Carte({ data, persist, go, focus }) {
     if (target) { setSel(target.id); if (target.lat != null && target.lng != null && mapInst.current) mapInst.current.flyTo([target.lat, target.lng], 13, { duration: 0.8 }); }
   }, [mapReady, focus && focus.n]);
   return (<div className="fade">
-    <div className="card" style={{ marginBottom: 12, padding: "10px 14px" }}><div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}><div style={{ fontSize: 12.5, color: "var(--muted)", fontWeight: 600 }}><MapPin size={13} style={{ verticalAlign: -2, marginRight: 4 }} />{shown.length} site{shown.length > 1 ? "s" : ""} affiché{shown.length > 1 ? "s" : ""}{placed.length !== shown.length ? " · " + placed.length + " géolocalisé" + (placed.length > 1 ? "s" : "") : ""}{(liveSites.length - placed.length) > 0 ? " · " + (liveSites.length - placed.length) + " à géolocaliser" : ""}{showProspects && activeProspects.length > 0 ? " · " + prospPlaced.length + "/" + activeProspects.length + " prospect" + (activeProspects.length > 1 ? "s" : "") + " (onglet Prospection)" : ""}</div><div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}><label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, marginRight: 4 }} title="Tracer les itinéraires de livraison réels (routier) plutôt qu'à vol d'oiseau"><input type="checkbox" checked={useOSRM} onChange={(e) => setUseOSRM(e.target.checked)} style={{ width: 14, height: 14 }} />Itinéraires réels</label><button className={cx("btn", "btn-s", showRoads ? "btn-p" : "btn-g")} onClick={() => setShowRoads((v) => !v)} title="Afficher / masquer les grands axes routiers (autoroutes, nationales)"><Navigation size={15} /> Axes routiers</button><button className={cx("btn", "btn-s", showLegend ? "btn-p" : "btn-g")} onClick={() => setShowLegend((v) => !v)} title="Afficher / masquer la légende des couleurs et formes"><Layers size={15} /> Légende</button><button className="btn btn-g btn-s" onClick={aroundMe} disabled={meBusy} title="Se géolocaliser et lister les établissements / prospects les plus proches de moi"><MapPin size={15} className={meBusy ? "spin" : ""} /> Autour de moi</button><button className="btn btn-g btn-s" onClick={runTournee} title="Itinéraire optimisé des établissements affichés (selon les filtres)"><Navigation size={15} /> Tournée</button><span style={{ display: "inline-flex", alignItems: "center", gap: 4, border: "1px solid var(--line)", borderRadius: 9, padding: "3px 6px" }} title="Zone atteignable en voiture depuis ma position, et fiches qui s'y trouvent"><Clock size={13} style={{ color: "#7c5cf0" }} /><select value={isoMin} onChange={(e) => setIsoMin(+e.target.value)} style={{ border: "none", background: "transparent", fontFamily: "inherit", fontSize: 12, fontWeight: 700, padding: 0, maxWidth: 66 }}>{[15, 30, 45, 60].map((m) => <option key={m} value={m}>{m} min</option>)}</select><button className="btn btn-g btn-s" style={{ padding: "3px 8px" }} disabled={isoBusy} onClick={isoDepuisMoi}>{isoBusy ? "Calcul…" : "Zone"}</button>{isoMsg && <button className="iconbtn" onClick={effacerIso} title="Effacer la zone"><X size={13} /></button>}</span><button className="btn btn-p btn-s" onClick={() => setEdit({ id: "s_" + Date.now(), accountId: accounts[0]?.id || null, label: "", type: "pdv", adresse: "", lat: null, lng: null, siret: "", typeSurface: "", adresseLivraison: "", livraisonIdentique: true, contactId: "" })}><Plus size={15} /> Ajouter un site</button></div></div>
+    <div className="card" style={{ marginBottom: 12, padding: "10px 14px" }}><div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}><div style={{ fontSize: 12.5, color: "var(--muted)", fontWeight: 600 }}><MapPin size={13} style={{ verticalAlign: -2, marginRight: 4 }} />{shown.length} site{shown.length > 1 ? "s" : ""} affiché{shown.length > 1 ? "s" : ""}{placed.length !== shown.length ? " · " + placed.length + " géolocalisé" + (placed.length > 1 ? "s" : "") : ""}{(liveSites.length - placed.length) > 0 ? " · " + (liveSites.length - placed.length) + " à géolocaliser" : ""}{showProspects && activeProspects.length > 0 ? " · " + prospPlaced.length + "/" + activeProspects.length + " prospect" + (activeProspects.length > 1 ? "s" : "") + " (onglet Prospection)" : ""}</div><div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}><label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, marginRight: 4 }} title="Tracer les itinéraires de livraison réels (routier) plutôt qu'à vol d'oiseau"><input type="checkbox" checked={useOSRM} onChange={(e) => setUseOSRM(e.target.checked)} style={{ width: 14, height: 14 }} />Itinéraires réels</label><button className={cx("btn", "btn-s", showRoads ? "btn-p" : "btn-g")} onClick={() => setShowRoads((v) => !v)} title="Afficher / masquer les grands axes routiers (autoroutes, nationales)"><Navigation size={15} /> Axes routiers</button><button className={cx("btn", "btn-s", showLegend ? "btn-p" : "btn-g")} onClick={() => setShowLegend((v) => !v)} title="Afficher / masquer la légende des couleurs et formes"><Layers size={15} /> Légende</button><button className={cx("btn", "btn-s", secteurs ? "btn-p" : "btn-g")} onClick={() => setSecteurs((v) => !v)} title="Colorer les départements selon la part de clients facturés parmi vos fiches (sites + prospects) : vert = bien couvert, rouge = zone sous-exploitée"><PieIcon size={15} className={sectBusy ? "spin" : ""} /> Secteurs</button><button className="btn btn-g btn-s" onClick={aroundMe} disabled={meBusy} title="Se géolocaliser et lister les établissements / prospects les plus proches de moi"><MapPin size={15} className={meBusy ? "spin" : ""} /> Autour de moi</button><button className="btn btn-g btn-s" onClick={runTournee} title="Itinéraire optimisé des établissements affichés (selon les filtres)"><Navigation size={15} /> Tournée</button><span style={{ display: "inline-flex", alignItems: "center", gap: 4, border: "1px solid var(--line)", borderRadius: 9, padding: "3px 6px" }} title="Zone atteignable en voiture depuis ma position, et fiches qui s'y trouvent"><Clock size={13} style={{ color: "#7c5cf0" }} /><select value={isoMin} onChange={(e) => setIsoMin(+e.target.value)} style={{ border: "none", background: "transparent", fontFamily: "inherit", fontSize: 12, fontWeight: 700, padding: 0, maxWidth: 66 }}>{[15, 30, 45, 60].map((m) => <option key={m} value={m}>{m} min</option>)}</select><button className="btn btn-g btn-s" style={{ padding: "3px 8px" }} disabled={isoBusy} onClick={isoDepuisMoi}>{isoBusy ? "Calcul…" : "Zone"}</button>{isoMsg && <button className="iconbtn" onClick={effacerIso} title="Effacer la zone"><X size={13} /></button>}</span><button className="btn btn-p btn-s" onClick={() => setEdit({ id: "s_" + Date.now(), accountId: accounts[0]?.id || null, label: "", type: "pdv", adresse: "", lat: null, lng: null, siret: "", typeSurface: "", adresseLivraison: "", livraisonIdentique: true, contactId: "" })}><Plus size={15} /> Ajouter un site</button></div></div>
       {isoMsg && <div style={{ marginTop: 10, fontSize: 12.5, lineHeight: 1.5, color: isoMsg.ok ? "var(--ink)" : "var(--red)", display: "flex", alignItems: "center", gap: 7 }}><Clock size={14} style={{ color: "#7c5cf0", flexShrink: 0 }} />{isoMsg.t}</div>}
+      {sectMsg && <div style={{ marginTop: 10, fontSize: 12.5, lineHeight: 1.5, color: sectMsg.ok ? "var(--ink)" : "var(--red)", display: "flex", alignItems: "flex-start", gap: 7 }}><PieIcon size={14} style={{ color: "#3F60AA", flexShrink: 0, marginTop: 2 }} /><span>{sectMsg.t}</span></div>}
       {meMsg && <div style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}><strong style={{ fontSize: 13, color: meMsg.ok === false ? "var(--red)" : "var(--ink)" }}><MapPin size={14} style={{ verticalAlign: -2, color: "#2563EB" }} /> Autour de moi{meMsg.near ? " — les plus proches" : ""}</strong><button className="iconbtn" onClick={() => { setMeMsg(null); setMePos(null); }} title="Fermer"><X size={15} /></button></div>
         {meMsg.t && <div style={{ fontSize: 12.5, color: meMsg.ok === false ? "var(--red)" : "var(--muted)", marginTop: 6 }}>{meMsg.t}</div>}
