@@ -266,6 +266,44 @@ function fusionEtats(base, local, distant) {
   if (!local) return distant; if (!distant) return local;
   return fusionValeur(base || {}, local, distant, 0);
 }
+// ===== Cache local en IndexedDB =====
+// localStorage plafonne vers 5 Mo et déborde SILENCIEUSEMENT (photos volumineuses) : le cache local
+// devenait incomplet sans prévenir. IndexedDB accepte des centaines de Mo et stocke l'objet tel quel
+// (clonage structuré, pas de sérialisation JSON). localStorage reste le repli si IndexedDB est
+// indisponible, et la source de migration au premier lancement après cette version.
+let _idbPromesse = null;
+const idbBase = () => {
+  if (_idbPromesse) return _idbPromesse;
+  _idbPromesse = new Promise((res, rej) => {
+    if (typeof indexedDB === "undefined") { rej(new Error("indexedDB indisponible")); return; }
+    const rq = indexedDB.open("penup_cockpit_cache", 1);
+    rq.onupgradeneeded = () => { try { rq.result.createObjectStore("kv"); } catch (e) { } };
+    rq.onsuccess = () => res(rq.result);
+    rq.onerror = () => rej(rq.error || new Error("ouverture IndexedDB refusée"));
+  }).catch((e) => { _idbPromesse = null; throw e; });
+  return _idbPromesse;
+};
+const idbLire = async (k) => { const db = await idbBase(); return new Promise((res, rej) => { const rq = db.transaction("kv").objectStore("kv").get(k); rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); }); };
+const idbEcrire = async (k, v) => { const db = await idbBase(); return new Promise((res, rej) => { const tx = db.transaction("kv", "readwrite"); tx.objectStore("kv").put(v, k); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error); }); };
+async function lireCacheLocal() {
+  try { const v = await idbLire(KEY); if (v) return v; } catch (e) { }
+  try { const raw = localStorage.getItem(KEY); if (raw) return JSON.parse(raw); } catch (e) { }
+  return null;
+}
+// ===== Corbeille (30 jours) =====
+// Toute fiche supprimée passe par data.trash au lieu de disparaître : récupérable pendant 30 jours
+// depuis « Historique & corbeille ». La capture est automatique et centrale (différence avant/après
+// dans persist) : aucun point de suppression de l'app n'a besoin d'y penser. La corbeille fait partie
+// des données synchronisées, donc partagée entre appareils et fusionnée comme le reste.
+const CORBEILLE_COLLECTIONS = { accounts: "Groupe / compte", sites: "Établissement", contacts: "Contact", interactions: "Échange", events: "Événement", deals: "Document", prospects: "Prospect", tickets: "Ticket SAV" };
+const CORBEILLE_JOURS = 30;
+// Copie allégée pour la corbeille : les champs texte énormes (photos base64) sont vidés pour ne pas
+// tripler le poids des données synchronisées.
+const corbeilleAllege = (it) => { const o = {}; Object.keys(it || {}).forEach((k) => { const v = it[k]; o[k] = (typeof v === "string" && v.length > 20000) ? "" : v; }); return o; };
+function corbeilleLibelle(kind, it) {
+  if (!it) return "—";
+  return it.enseigne || it.label || [it.prenom, it.nom].filter(Boolean).join(" ") || it.titre || it.sujet || it.ref || (it.adresse ? String(it.adresse).slice(0, 40) : "") || it.id || "—";
+}
 const TODAY = () => new Date().toISOString().slice(0, 10);
 const SIEGE = { lat: 44.0177, lng: 1.3550, ville: "Montauban" };
 
@@ -4146,8 +4184,11 @@ function EntityPhoto({ value, onChange, initials: ini, bg, round, size = 64, ens
   const upload = async (file) => {
     if (!file) return;
     if (!/^image\//.test(file.type)) { setMsg("Choisissez un fichier image."); return; }
-    if (file.size > 2 * 1024 * 1024) { setMsg("Image trop lourde (max 2 Mo). Réduisez-la avant de l'ajouter."); return; }
-    const url = await fileToBase64(file); onChange(url); close();
+    if (file.size > 10 * 1024 * 1024) { setMsg("Image trop lourde (max 10 Mo)."); return; }
+    // Compression systématique (≤ 700 px, JPEG) : une photo de téléphone de 4 Mo devient ~60 Ko,
+    // ce qui allège chaque sauvegarde synchronisée — l'état complet voyage à chaque écriture.
+    let url; try { url = await compressImage(file, 700, 0.8); } catch (e) { url = await fileToBase64(file); }
+    onChange(url); close();
   };
   const fromUrl = () => { const u = window.prompt("Collez l'adresse (URL) de l'image :", typeof value === "string" && /^https?:/.test(value) ? value : ""); if (u && u.trim()) { onChange(u.trim()); close(); } };
   // Photo de profil LinkedIn : ouvre le profil dans un nouvel onglet puis invite à coller l'URL de la
@@ -13921,6 +13962,90 @@ function useAutoBackup(getData) {
   return { supported, enabled, dirName, status, lastAt, hasFolder: !!dirName, chooseFolder, setActive, forget, backupNow: () => doBackup(true) };
 }
 
+// ===== Historique & corbeille =====
+// Instantanés quotidiens côté serveur (30 jours) + corbeille des fiches supprimées : le filet de
+// sécurité contre les mauvaises manipulations, que la fusion multi-appareils ne couvre pas — le
+// « Annuler » ne garde qu'un niveau et meurt au rechargement.
+function SauvegardesModal({ data, persist, exportAll, onClose }) {
+  const [snaps, setSnaps] = useState(null); const [msg, setMsg] = useState(null); const [busy, setBusy] = useState(false);
+  const chargerSnaps = async () => {
+    if (!supabaseEnabled || !supabase) { setSnaps([]); return; }
+    try {
+      const { data: rows, error } = await supabase.from("cockpit_state").select("id, updated_at").like("id", "snapshot:%");
+      if (error) throw error;
+      setSnaps((rows || []).map((r) => ({ id: r.id, jour: r.id.slice(9), at: r.updated_at })).sort((a, b) => b.jour.localeCompare(a.jour)));
+    } catch (e) { setSnaps([]); setMsg("Instantanés indisponibles : " + String((e && e.message) || e)); }
+  };
+  useEffect(() => { chargerSnaps(); }, []);
+  const creerSnap = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const jour = TODAY();
+      await supabase.from("cockpit_state").upsert({ id: "snapshot:" + jour, data, updated_at: new Date().toISOString() }, { onConflict: "id" });
+      try { localStorage.setItem(KEY + ":snapJour", jour); } catch (e) { }
+      setMsg("Instantané du jour enregistré."); chargerSnaps();
+    } catch (e) { setMsg("Échec : " + String((e && e.message) || e)); } finally { setBusy(false); }
+  };
+  const restaurerSnap = async (s) => {
+    setBusy(true); setMsg(null);
+    try {
+      const { data: row, error } = await supabase.from("cockpit_state").select("data").eq("id", s.id).maybeSingle();
+      if (error || !row || !row.data) throw new Error("instantané illisible");
+      const d = row.data; const nA = (d.accounts || []).length; const nI = (d.interactions || []).length;
+      const ok = await appConfirm("Revenir à la version du " + s.jour + " (" + nA + " comptes, " + nI + " échanges) ?\n\nVos données actuelles seront remplacées sur tous les appareils. Une sauvegarde JSON de l'état actuel est téléchargée d'abord, et les fiches retirées passeront par la corbeille (" + CORBEILLE_JOURS + " jours).", { title: "Restaurer cet instantané ?", confirmLabel: "Restaurer" });
+      if (!ok) return;
+      exportAll();
+      persist(() => normalize(row.data));
+      setMsg("Version du " + s.jour + " restaurée.");
+    } catch (e) { setMsg("Échec : " + String((e && e.message) || e)); } finally { setBusy(false); }
+  };
+  const corbeille = (data.trash || []).slice().sort((a, b) => (b.at || "").localeCompare(a.at || ""));
+  const restaurerFiche = (t) => persist((p) => {
+    const list = Array.isArray(p[t.kind]) ? p[t.kind] : [];
+    return { ...p, [t.kind]: [...list.filter((x) => x.id !== t.item.id), t.item], trash: (p.trash || []).filter((x) => x.id !== t.id) };
+  });
+  const purgerFiche = (t) => persist((p) => ({ ...p, trash: (p.trash || []).filter((x) => x.id !== t.id) }));
+  const viderCorbeille = async () => { if (await appConfirm("Vider définitivement la corbeille (" + corbeille.length + " élément(s)) ?", { title: "Vider la corbeille ?", confirmLabel: "Vider" })) persist((p) => ({ ...p, trash: [] })); };
+  const frDate = (iso) => { try { return new Date(iso).toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "short" }); } catch (e) { return iso; } };
+  return (<Modal title="Historique & corbeille" onClose={onClose} wide>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
+          <div style={{ fontWeight: 800, fontSize: 13.5, display: "inline-flex", alignItems: "center", gap: 7 }}><Clock size={15} /> Instantanés quotidiens (serveur)</div>
+          {supabaseEnabled && <button className="btn btn-g btn-s" onClick={creerSnap} disabled={busy}><Save size={14} /> Créer un instantané maintenant</button>}
+        </div>
+        <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 8, lineHeight: 1.5 }}>Une photographie complète des données est enregistrée automatiquement chaque jour et conservée {CORBEILLE_JOURS} jours. Restaurer une version remplace les données actuelles (une sauvegarde JSON est téléchargée avant, et rien n'est perdu : les fiches retirées passent par la corbeille).</div>
+        {!supabaseEnabled ? <div className="empty">Synchronisation serveur inactive : instantanés indisponibles (export JSON seulement).</div>
+          : snaps === null ? <div className="empty">Chargement…</div>
+          : snaps.length === 0 ? <div className="empty">Aucun instantané pour l'instant — le premier sera pris automatiquement, ou créez-en un maintenant.</div>
+          : <div style={{ display: "flex", flexDirection: "column", gap: 5, maxHeight: 200, overflowY: "auto" }}>{snaps.map((s) => (
+            <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", background: "var(--bg)", borderRadius: 9, fontSize: 12.5 }}>
+              <Clock size={13} color="var(--muted)" />
+              <span style={{ fontWeight: 700, textTransform: "capitalize" }}>{frDate(s.jour)}</span>
+              <span className="tnum" style={{ color: "var(--muted)" }}>{s.jour}</span>
+              <span style={{ flex: 1 }} />
+              <button className="btn btn-ghost btn-s" onClick={() => restaurerSnap(s)} disabled={busy}><ArchiveRestore size={13} /> Restaurer</button>
+            </div>))}</div>}
+      </div>
+      <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
+          <div style={{ fontWeight: 800, fontSize: 13.5, display: "inline-flex", alignItems: "center", gap: 7 }}><Trash2 size={15} /> Corbeille ({corbeille.length})</div>
+          {corbeille.length > 0 && <button className="btn btn-ghost btn-s" onClick={viderCorbeille}><X size={13} /> Vider la corbeille</button>}
+        </div>
+        <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 8, lineHeight: 1.5 }}>Les fiches supprimées (comptes, établissements, contacts, échanges, événements, documents, prospects) restent récupérables ici pendant {CORBEILLE_JOURS} jours, sur tous vos appareils.</div>
+        {corbeille.length === 0 ? <div className="empty">Corbeille vide.</div>
+          : <div style={{ display: "flex", flexDirection: "column", gap: 5, maxHeight: 260, overflowY: "auto" }}>{corbeille.map((t) => (
+            <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", background: "var(--bg)", borderRadius: 9, fontSize: 12.5, minWidth: 0 }}>
+              <Badge color="#9aa6bd">{CORBEILLE_COLLECTIONS[t.kind] || t.kind}</Badge>
+              <span style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, flex: 1 }}>{corbeilleLibelle(t.kind, t.item)}</span>
+              <span className="tnum" style={{ color: "var(--muted)", flexShrink: 0 }}>{frDate(t.at)}</span>
+              <button className="btn btn-ghost btn-s" onClick={() => restaurerFiche(t)} title="Restaurer cette fiche"><ArchiveRestore size={13} /> Restaurer</button>
+              <button className="iconbtn" onClick={() => purgerFiche(t)} title="Supprimer définitivement"><X size={13} /></button>
+            </div>))}</div>}
+      </div>
+    </div>
+  </Modal>);
+}
 export default function App() {
   const [data, setData] = useState(() => normalize(emptyData()));
   const undoRef = useRef(null); const [canUndo, setCanUndo] = useState(false);
@@ -13956,8 +14081,25 @@ export default function App() {
   // volumineuses), cette garantie tombe : on retire alors le curseur au lieu de l'écrire, sinon un
   // prochain chargement « certifierait » un cache obsolète et le repousserait par-dessus le serveur.
   const cacheOk = useRef(true);
-  const ecrireCache = (state) => { try { localStorage.setItem(KEY, JSON.stringify(state)); cacheOk.current = true; } catch (e) { cacheOk.current = false; try { localStorage.removeItem(SYNC_KEY); } catch (e2) { } } };
-  const poserCurseur = (ts) => { lastSyncAt.current = ts || null; if (cacheOk.current) ecrireCurseurSync(ts); else { try { localStorage.removeItem(SYNC_KEY); } catch (e) { } } };
+  const cacheEcriture = useRef(Promise.resolve()); // dernière écriture du cache : le curseur persisté n'est certifié qu'après sa réussite
+  const ecrireCache = (state) => {
+    const p = (async () => {
+      try { await idbEcrire(KEY, state); cacheOk.current = true; try { localStorage.removeItem(KEY); } catch (e) { } } // migration : libère l'ancien cache localStorage
+      catch (e) {
+        try { localStorage.setItem(KEY, JSON.stringify(state)); cacheOk.current = true; }
+        catch (e2) { cacheOk.current = false; try { localStorage.removeItem(SYNC_KEY); } catch (e3) { } }
+      }
+    })();
+    cacheEcriture.current = p; return p;
+  };
+  const poserCurseur = (ts) => {
+    lastSyncAt.current = ts || null;
+    const attente = cacheEcriture.current;
+    attente.then(() => {
+      if (lastSyncAt.current !== (ts || null)) return; // un curseur plus récent a été posé entre-temps
+      if (cacheOk.current) ecrireCurseurSync(ts); else { try { localStorage.removeItem(SYNC_KEY); } catch (e) { } }
+    }).catch(() => { });
+  };
   // Chargement : cache localStorage, puis Supabase. Le curseur persisté départage : si le serveur n'a
   // pas bougé depuis notre dernier accusé, le cache local (qui peut contenir une fin de session jamais
   // poussée — fermeture avant le délai d'écriture) est AU MOINS aussi récent et n'est pas écrasé ;
@@ -13966,7 +14108,7 @@ export default function App() {
     let cancelled = false;
     (async () => {
       let current = null;
-      try { const c = localStorage.getItem(KEY); if (c) { current = normalize(JSON.parse(c)); if (!cancelled) setData(current); } } catch (e) { }
+      try { const c = await lireCacheLocal(); if (c) { current = normalize(c); if (!cancelled) setData(current); } } catch (e) { }
       if (supabaseEnabled && supabase) {
         try {
           const { data: row, error } = await supabase.from("cockpit_state").select("data, updated_at").eq("id", "shared").maybeSingle();
@@ -14032,22 +14174,63 @@ export default function App() {
     await supabase.from("cockpit_state").upsert({ id: "shared", data: payload, updated_at: ts }, { onConflict: "id" });
     poserCurseur(ts); baseRef.current = payload; return payload;
   }, []);
-  // Persistance : ecrit le cache localStorage immediatement, puis pousse vers Supabase (anti-rebond 800 ms).
+  // Reprise automatique : une écriture serveur échouée (réseau coupé, tunnel…) est retentée toute
+  // seule avec un délai croissant (5 s → 15 s → 45 s → 90 s max), et immédiatement au retour du
+  // réseau ou de l'onglet. Le drapeau « en attente » reste levé jusqu'au succès : les données locales
+  // sont protégées et l'indicateur reste honnête.
+  const repriseTimer = useRef(null); const repriseEssais = useRef(0);
+  const retenterPush = () => {
+    if (!supabaseEnabled || !supabase) return;
+    if (repriseTimer.current) { clearTimeout(repriseTimer.current); repriseTimer.current = null; }
+    if (!pendingWrite.current || saveTimer.current) return; // rien à repousser, ou une écriture débouncée arrive déjà
+    const payload = latestRef.current; if (!payload) { pendingWrite.current = false; return; }
+    setSyncState("saving");
+    pousserServeur(payload).then(
+      () => { pendingWrite.current = false; repriseEssais.current = 0; setSyncState("saved"); },
+      () => { repriseEssais.current++; setSyncState("offline"); planifierReprise(); }
+    );
+  };
+  const planifierReprise = () => {
+    if (repriseTimer.current) return;
+    const delai = Math.min(90000, 5000 * Math.pow(3, Math.min(3, repriseEssais.current)));
+    repriseTimer.current = setTimeout(() => { repriseTimer.current = null; retenterPush(); }, delai);
+  };
+  // Persistance : écrit le cache local immédiatement, capture les suppressions dans la corbeille,
+  // puis pousse vers Supabase (anti-rebond 800 ms, écriture protégée, reprise automatique en échec).
   const persist = useCallback((updater, opts) => {
     const snap = !opts || opts.snapshot !== false;
+    const corb = !opts || opts.corbeille !== false;
     setData((prev) => {
       if (snap) undoRef.current = clone(prev);
-      const next = normalize(typeof updater === "function" ? updater(clone(prev)) : updater);
+      let next = normalize(typeof updater === "function" ? updater(clone(prev)) : updater);
+      // Corbeille : toute fiche disparue entre avant et après est capturée (30 jours), sauf pour les
+      // opérations de remplacement global assumées (import de sauvegarde, démo).
+      try {
+        const captures = [];
+        if (corb) {
+          Object.keys(CORBEILLE_COLLECTIONS).forEach((k) => {
+            const av = prev[k], ap = next[k];
+            if (!Array.isArray(av) || !Array.isArray(ap) || !av.length) return;
+            const apIds = new Set(ap.map((x) => x && x.id));
+            av.forEach((x) => { if (x && x.id != null && !apIds.has(x.id)) captures.push({ id: "tr_" + x.id + "_" + Date.now().toString(36), kind: k, at: new Date().toISOString(), item: corbeilleAllege(x) }); });
+          });
+        }
+        const seuil = Date.now() - CORBEILLE_JOURS * 86400000;
+        const propres = (next.trash || []).filter((t) => t && t.at && new Date(t.at).getTime() > seuil);
+        if (captures.length || propres.length !== (next.trash || []).length) next = { ...next, trash: [...propres, ...captures].slice(-400) };
+      } catch (e) { }
       latestRef.current = next;
       ecrireCache(next);
       if (supabaseEnabled && supabase) {
         if (saveTimer.current) clearTimeout(saveTimer.current);
+        if (repriseTimer.current) { clearTimeout(repriseTimer.current); repriseTimer.current = null; }
         pendingWrite.current = true; setSyncState("saving");
         saveTimer.current = setTimeout(() => {
           // On pousse l'état le plus récent (latestRef) et non « next » : plusieurs persist rapprochés
           // partagent le même minuteur, seul le dernier état compte.
           pousserServeur(latestRef.current || next)
-            .then(() => { pendingWrite.current = false; saveTimer.current = null; setSyncState("saved"); }, () => { pendingWrite.current = false; saveTimer.current = null; setSyncState("offline"); });
+            .then(() => { pendingWrite.current = false; saveTimer.current = null; repriseEssais.current = 0; setSyncState("saved"); },
+              () => { saveTimer.current = null; repriseEssais.current = 0; setSyncState("offline"); planifierReprise(); });
         }, 800);
       }
       return next;
@@ -14074,10 +14257,9 @@ export default function App() {
             ? supabase.from("cockpit_state").update({ data: payload, updated_at: ts }).eq("id", "shared").eq("updated_at", depuis).select("updated_at")
             : supabase.from("cockpit_state").upsert({ id: "shared", data: payload, updated_at: ts }, { onConflict: "id" });
           q.then(({ data: rows, error }) => {
-            if (!error && (!depuis || (rows && rows.length))) { poserCurseur(ts); baseRef.current = payload; }
-            else if (!error && depuis) { pousserServeur(payload).catch(() => { }); } // conflit et onglet encore vivant : fusion immédiate
-          }, () => { });
-          pendingWrite.current = false;
+            if (!error && (!depuis || (rows && rows.length))) { poserCurseur(ts); baseRef.current = payload; pendingWrite.current = false; }
+            else if (!error && depuis) { pousserServeur(payload).then(() => { pendingWrite.current = false; }).catch(() => { }); } // conflit et onglet encore vivant : fusion immédiate
+          }, () => { }); // échec réseau : le drapeau reste levé, la reprise automatique ou le prochain chargement s'en chargera
         }
       } catch (e) { }
     };
@@ -14095,6 +14277,8 @@ export default function App() {
     let enCours = false;
     const rafraichir = async () => {
       if (enCours || (typeof document !== "undefined" && document.visibilityState === "hidden")) return;
+      // Une écriture locale attend depuis un échec : on la repousse d'abord (elle fusionnera au besoin).
+      if (pendingWrite.current && !saveTimer.current) { retenterPush(); return; }
       enCours = true;
       try {
         const { data: row, error } = await supabase.from("cockpit_state").select("data, updated_at").eq("id", "shared").maybeSingle();
@@ -14115,6 +14299,28 @@ export default function App() {
     const iv = setInterval(() => { if (document.visibilityState === "visible") rafraichir(); }, 120000);
     return () => { document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("focus", rafraichir); window.removeEventListener("online", rafraichir); clearInterval(iv); };
   }, []);
+  // Instantané quotidien automatique : une photographie complète des données par jour, côté serveur
+  // (lignes « snapshot:AAAA-MM-JJ » de la même table), conservée 30 jours puis élaguée. Restauration
+  // en un clic depuis « Historique & corbeille ». Premier appareil ouvert dans la journée s'en charge.
+  useEffect(() => {
+    if (loading || !supabaseEnabled || !supabase) return;
+    (async () => {
+      try {
+        const jour = TODAY();
+        let marque = null; try { marque = localStorage.getItem(KEY + ":snapJour"); } catch (e) { }
+        if (marque === jour) return;
+        const etat = latestRef.current;
+        if (!etat || !Array.isArray(etat.accounts) || etat.accounts.length === 0) return; // jamais d'instantané d'un état vide
+        const { data: deja } = await supabase.from("cockpit_state").select("id").eq("id", "snapshot:" + jour).maybeSingle();
+        if (!deja) await supabase.from("cockpit_state").upsert({ id: "snapshot:" + jour, data: etat, updated_at: new Date().toISOString() }, { onConflict: "id" });
+        try { localStorage.setItem(KEY + ":snapJour", jour); } catch (e) { }
+        const { data: rows } = await supabase.from("cockpit_state").select("id").like("id", "snapshot:%");
+        const limite = new Date(Date.now() - CORBEILLE_JOURS * 86400000).toISOString().slice(0, 10);
+        const vieux = (rows || []).map((r) => r.id).filter((id) => id.slice(9) < limite);
+        if (vieux.length) await supabase.from("cockpit_state").delete().in("id", vieux);
+      } catch (e) { }
+    })();
+  }, [loading]);
   // Planification automatique des suites au calendrier depuis le résumé des échanges.
   // Chaque échange (nouveau OU ancien) qui possède un résumé non encore analysé est lu par
   // l'IA, qui en déduit les événements à planifier (visio datée, relance après envoi de doc…).
@@ -14237,7 +14443,7 @@ export default function App() {
       .subscribe();
     return () => { try { supabase.removeChannel(ch); } catch (e) { } };
   }, []);
-  const loadDemo = useCallback(() => { appConfirm("Charger un jeu de données de démonstration ? Cela remplace les données actuelles.", { title: "Charger la démo ?", confirmLabel: "Charger" }).then((ok) => { if (ok) persist(() => normalize(buildSeed())); }); }, [persist]);
+  const loadDemo = useCallback(() => { appConfirm("Charger un jeu de données de démonstration ? Cela remplace les données actuelles.", { title: "Charger la démo ?", confirmLabel: "Charger" }).then((ok) => { if (ok) persist(() => normalize(buildSeed()), { corbeille: false }); }); }, [persist]);
   // Historique de navigation interne (onglet + fiche ouverte) : flèches Précédent / Suivant + Accueil.
   // Chaque navigation (onglet, ouverture d'une fiche via go) empile une « localisation » {tab, focus}.
   const navHist = useRef({ stack: [readSavedNav() || { tab: "dash", focus: null }], pos: 0 });
@@ -14335,6 +14541,7 @@ export default function App() {
   }, [pousserServeur]);
   const exportAll = () => { const today = new Date().toISOString().slice(0, 10); downloadJSON({ exportedAt: new Date().toISOString(), version: 1, data }, `penup3d-cockpit-${today}.json`); try { localStorage.setItem("penup_lastBackup", today); } catch {} setBackupDone(today); };
   const [backupDone, setBackupDone] = useState(() => { try { return localStorage.getItem("penup_lastBackup") || ""; } catch { return ""; } });
+  const [histOpen, setHistOpen] = useState(false);
   const importAll = async (file) => {
     try {
       const txt = await file.text(); const obj = JSON.parse(txt);
@@ -14351,7 +14558,7 @@ export default function App() {
       } else {
         if (!(await appConfirm(`Cet import REMPLACE toutes les données actuelles (${curA} comptes, ${curD} documents) par celles du fichier (${newA} comptes, ${newD} documents). Continuer ?`, { title: "Remplacer toutes les données ?", confirmLabel: "Remplacer" }))) return;
       }
-      persist(() => normalize({ ...payload, settings: { ...(payload.settings || {}), _restored_csv_v1: true } }));
+      persist(() => normalize({ ...payload, settings: { ...(payload.settings || {}), _restored_csv_v1: true } }), { corbeille: false });
       setImportMsg("Import réussi.");
       setTimeout(() => setImportMsg(null), 4000);
     } catch (e) { setImportMsg("Échec de l'import : " + (e.message || "fichier invalide")); setTimeout(() => setImportMsg(null), 5000); }
@@ -14430,6 +14637,7 @@ export default function App() {
           <button className="btn btn-ghost btn-s" onClick={exportAll} title="Exporter toutes les données"><Download size={15} /> Sauvegarde</button>
           <input ref={fileImportRef} type="file" accept="application/json" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) importAll(f); e.target.value = ""; }} />
           <button className="btn btn-ghost btn-s" onClick={() => fileImportRef.current && fileImportRef.current.click()} title="Restaurer depuis une sauvegarde"><Upload size={15} /> Restaurer</button>
+          <button className="btn btn-ghost btn-s" onClick={() => setHistOpen(true)} title="Instantanés quotidiens du serveur et corbeille des fiches supprimées (30 jours)"><Clock size={15} /> Historique</button>
           {(!data.accounts || data.accounts.length === 0) && <button className="btn btn-ghost btn-s" onClick={loadDemo} title="Charger un jeu de données de démonstration"><Sparkles size={15} /> Démo</button>}
           <button className="btn btn-ghost btn-s" onClick={hardRefresh} title="Forcer la mise à jour : vide le cache et recharge la dernière version"><RefreshCw size={15} /> Mettre à jour</button>
           <button className="btn btn-ghost btn-s" onClick={() => window.print()} title="Imprimer / PDF de la vue courante"><Printer size={15} /></button>
@@ -14439,6 +14647,11 @@ export default function App() {
         </div>
       </div>
       {importMsg && <div className="card" style={{ borderLeft: "4px solid var(--blue)", marginBottom: 14, fontSize: 13 }}>{importMsg}</div>}
+      {syncState === "offline" && supabaseEnabled && <div className="card no-print" style={{ borderLeft: "4px solid var(--red)", marginBottom: 14, fontSize: 13, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <AlertTriangle size={17} color="var(--red)" style={{ flexShrink: 0 }} />
+        <span style={{ flex: 1, minWidth: 200, lineHeight: 1.5 }}><strong>Modifications non synchronisées.</strong> Vos saisies sont enregistrées sur cet appareil et seront envoyées automatiquement dès que la connexion le permettra — laissez l'application ouverte, ou réessayez manuellement.</span>
+        <button className="btn btn-g btn-s" onClick={retenterPush}><RefreshCw size={14} /> Réessayer maintenant</button>
+      </div>}
       {coldStart && (
         <div className="fade no-print" aria-busy="true" aria-label="Chargement…">
           <div className="skel" style={{ height: 28, width: 220, marginBottom: 18 }} />
@@ -14481,6 +14694,7 @@ export default function App() {
     </main>
     <ScrollArrows />
     {cmdkOpen && <SearchPalette data={data} onClose={() => setCmdkOpen(false)} onPick={(target) => { setCmdkOpen(false); go(target.tab, target.id); }} />}
+    {histOpen && <SauvegardesModal data={data} persist={persist} exportAll={exportAll} onClose={() => setHistOpen(false)} />}
     {helpOpen && <Modal title="Raccourcis clavier" onClose={() => setHelpOpen(false)} guard={false}>
       {(() => { const Kbd = ({ children }) => <kbd style={{ fontFamily: "inherit", fontSize: 11.5, fontWeight: 700, background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 6, padding: "2px 7px", color: "var(--ink)", whiteSpace: "nowrap" }}>{children}</kbd>;
         const Row = ({ keys, label }) => <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--line)" }}><span style={{ fontSize: 13 }}>{label}</span><span style={{ display: "inline-flex", gap: 5, flexShrink: 0 }}>{keys.map((k, i) => <Kbd key={i}>{k}</Kbd>)}</span></div>;
