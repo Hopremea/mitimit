@@ -214,6 +214,58 @@ const mapProject=(lon,lat)=>({x:MAP_M+(lon-MAP_XMIN)*MAP_SCALE, y:MAP_M+(MAP_LAT
 
 const KEY = "penup_cockpit_v3";
 const KEY_OLD = ["penup_cockpit_v2", "penup_cockpit_v1"];
+// Curseur de synchronisation : updated_at de la dernière version serveur ACQUITTÉE par cet appareil.
+// Persisté pour qu'au rechargement on sache si le cache local contient une fin de session jamais
+// poussée (curseur égal au serveur → le local est au moins aussi récent) ou s'il est en retard.
+const SYNC_KEY = KEY + ":syncAt";
+const lireCurseurSync = () => { try { return localStorage.getItem(SYNC_KEY) || null; } catch (e) { return null; } };
+const ecrireCurseurSync = (ts) => { try { if (ts) localStorage.setItem(SYNC_KEY, ts); } catch (e) { } };
+// ===== Fusion à trois versions (base commune / local / distant) =====
+// Le stockage partagé est une seule ligne JSON : sans fusion, deux appareils qui écrivent chacun leur
+// état COMPLET s'écrasent mutuellement (« dernier écrivain gagne ») — un téléphone resté ouvert sur un
+// état ancien pouvait effacer toute une session faite sur l'ordinateur. Ici, en cas de conflit détecté,
+// on repart de la dernière version que les deux appareils avaient en commun (la base) : ce que CHAQUE
+// côté a changé par rapport à elle est conservé ; si les deux ont modifié la même chose, le local
+// (la saisie active de l'utilisateur) l'emporte.
+const jsonEgal = (a, b) => { try { return JSON.stringify(a) === JSON.stringify(b); } catch (e) { return false; } };
+function fusionValeur(b, l, r, prof) {
+  if (jsonEgal(l, r)) return l;
+  const listeId = (v) => Array.isArray(v) && v.every((x) => x && typeof x === "object" && x.id != null);
+  if ((Array.isArray(l) || Array.isArray(r)) && listeId(l || []) && listeId(r || []) && ((l && l.length) || (r && r.length))) {
+    const bM = new Map((Array.isArray(b) ? b : []).filter((x) => x && x.id != null).map((x) => [x.id, x]));
+    const lM = new Map((l || []).map((x) => [x.id, x]));
+    const rM = new Map((r || []).map((x) => [x.id, x]));
+    const res = [];
+    rM.forEach((rv, id) => {
+      if (lM.has(id)) { res.push(jsonEgal(lM.get(id), bM.get(id)) ? rv : lM.get(id)); return; } // inchangé ici → version distante ; modifié ici → la nôtre
+      const bv = bM.get(id);
+      if (bv && jsonEgal(rv, bv)) return; // supprimé ici, intact là-bas → la suppression tient
+      res.push(rv); // nouveau là-bas, ou supprimé ici mais modifié là-bas → on le garde (ne jamais perdre une modification)
+    });
+    lM.forEach((lv, id) => {
+      if (rM.has(id)) return;
+      const bv = bM.get(id);
+      if (!bv || !jsonEgal(lv, bv)) res.push(lv); // créé ici, ou supprimé là-bas mais modifié ici → on le garde
+    });
+    return res;
+  }
+  const objSimple = (v) => v && typeof v === "object" && !Array.isArray(v);
+  if (objSimple(l) && objSimple(r) && prof < 2) {
+    const out = {}; const bO = objSimple(b) ? b : {};
+    new Set([...Object.keys(l), ...Object.keys(r)]).forEach((k) => {
+      const v = fusionValeur(bO[k], l[k], r[k], prof + 1);
+      if (v !== undefined) out[k] = v;
+    });
+    // Clé supprimée d'un côté et intacte de l'autre : la suppression tient (sinon la clé restait via l'autre côté).
+    Object.keys(out).forEach((k) => { if (!(k in l) && jsonEgal(out[k], bO[k])) delete out[k]; });
+    return out;
+  }
+  return jsonEgal(l, b) ? r : l; // scalaire ou structure opaque : celui qui a changé l'emporte, le local en cas de double changement
+}
+function fusionEtats(base, local, distant) {
+  if (!local) return distant; if (!distant) return local;
+  return fusionValeur(base || {}, local, distant, 0);
+}
 const TODAY = () => new Date().toISOString().slice(0, 10);
 const SIEGE = { lat: 44.0177, lng: 1.3550, ville: "Montauban" };
 
@@ -13898,7 +13950,12 @@ export default function App() {
   const lastSyncAt = useRef(null);    // updated_at de la dernière version appliquée/écrite : ignore nos propres échos.
   const pendingWrite = useRef(false); // une écriture locale est en attente : ne pas l'écraser avec une version distante.
   const latestRef = useRef(null);     // dernier état persisté EN MÉMOIRE : source fiable pour les flush, même si le localStorage a débordé (photos volumineuses).
-  // Chargement : cache localStorage, puis Supabase. Restauration unique de la vraie base (export CSV) si pas encore appliquee.
+  const baseRef = useRef(null);       // dernière version ACQUITTÉE par le serveur : base commune des fusions à trois versions.
+  const poserCurseur = (ts) => { lastSyncAt.current = ts || null; ecrireCurseurSync(ts); };
+  // Chargement : cache localStorage, puis Supabase. Le curseur persisté départage : si le serveur n'a
+  // pas bougé depuis notre dernier accusé, le cache local (qui peut contenir une fin de session jamais
+  // poussée — fermeture avant le délai d'écriture) est AU MOINS aussi récent et n'est pas écrasé ;
+  // sinon la version serveur est plus fraîche et s'applique. Restauration unique (export CSV) si vide.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -13908,14 +13965,23 @@ export default function App() {
         try {
           const { data: row, error } = await supabase.from("cockpit_state").select("data, updated_at").eq("id", "shared").maybeSingle();
           if (!error && row && row.data) {
-            const aAssainir = donneesAAssainir(row.data);
-            current = normalize(row.data); lastSyncAt.current = row.updated_at || null;
-            if (!cancelled) { setData(current); try { localStorage.setItem(KEY, JSON.stringify(current)); } catch (e) { } }
-            // La base contient encore des valeurs que l'assainissement retire (fonction sans personne,
-            // marqueur « vide », dirigeant exclu…) : on réécrit la version propre UNE fois. Au chargement
-            // suivant la condition est fausse, donc aucune écriture répétée.
-            if (aAssainir && !cancelled) {
-              try { const ts = new Date().toISOString(); await supabase.from("cockpit_state").upsert({ id: "shared", data: current, updated_at: ts }, { onConflict: "id" }); lastSyncAt.current = ts; } catch (e) { }
+            const serveur = normalize(row.data);
+            const curseur = lireCurseurSync();
+            if (current && curseur && row.updated_at === curseur && !jsonEgal(current, serveur)) {
+              // Fin de session locale jamais poussée : le serveur n'a rien reçu d'autre entre-temps
+              // (curseur intact) → on repousse notre cache au lieu de le perdre.
+              baseRef.current = serveur; latestRef.current = current; poserCurseur(row.updated_at);
+              try { const ts = new Date().toISOString(); await supabase.from("cockpit_state").upsert({ id: "shared", data: current, updated_at: ts }, { onConflict: "id" }); poserCurseur(ts); baseRef.current = current; } catch (e) { }
+            } else {
+              const aAssainir = donneesAAssainir(row.data);
+              current = serveur; poserCurseur(row.updated_at || null); baseRef.current = serveur; latestRef.current = serveur;
+              if (!cancelled) { setData(current); try { localStorage.setItem(KEY, JSON.stringify(current)); } catch (e) { } }
+              // La base contient encore des valeurs que l'assainissement retire (fonction sans personne,
+              // marqueur « vide », dirigeant exclu…) : on réécrit la version propre UNE fois. Au chargement
+              // suivant la condition est fausse, donc aucune écriture répétée.
+              if (aAssainir && !cancelled) {
+                try { const ts = new Date().toISOString(); await supabase.from("cockpit_state").upsert({ id: "shared", data: current, updated_at: ts }, { onConflict: "id" }); poserCurseur(ts); baseRef.current = current; } catch (e) { }
+              }
             }
           }
         } catch (e) { }
@@ -13928,11 +13994,37 @@ export default function App() {
       if (!cancelled && !hasRealData) {
         const restored = normalize(JSON.parse(JSON.stringify(RESTORE_DATA)));
         if (!cancelled) { setData(restored); try { localStorage.setItem(KEY, JSON.stringify(restored)); } catch (e) { } }
-        if (supabaseEnabled && supabase) { try { await supabase.from("cockpit_state").upsert({ id: "shared", data: restored, updated_at: new Date().toISOString() }, { onConflict: "id" }); } catch (e) { } }
+        latestRef.current = restored;
+        if (supabaseEnabled && supabase) { try { const ts = new Date().toISOString(); await supabase.from("cockpit_state").upsert({ id: "shared", data: restored, updated_at: ts }, { onConflict: "id" }); poserCurseur(ts); baseRef.current = restored; } catch (e) { } }
       }
       if (!cancelled) setLoading(false);
     })();
     return () => { cancelled = true; };
+  }, []);
+  // Écriture serveur PROTÉGÉE : l'envoi n'aboutit que si le serveur en est toujours à la version que
+  // cet appareil a acquittée (curseur). Sinon un autre appareil a écrit entre-temps : on récupère sa
+  // version, on FUSIONNE (base commune / notre état / le sien) et on pousse le résultat — plus jamais
+  // d'écrasement d'une session entière par un appareil resté sur un état ancien.
+  const pousserServeur = useCallback(async (payload) => {
+    const depuis = lastSyncAt.current;
+    const ts = new Date().toISOString();
+    if (depuis) {
+      const { data: rows, error } = await supabase.from("cockpit_state").update({ data: payload, updated_at: ts }).eq("id", "shared").eq("updated_at", depuis).select("updated_at");
+      if (error) throw error;
+      if (rows && rows.length) { poserCurseur(ts); baseRef.current = payload; return payload; }
+      // Conflit : le serveur a reçu une autre version depuis notre dernier accusé.
+      const { data: row, error: e2 } = await supabase.from("cockpit_state").select("data, updated_at").eq("id", "shared").maybeSingle();
+      if (e2) throw e2;
+      const distant = row && row.data ? normalize(row.data) : null;
+      const fusion = distant ? normalize(fusionEtats(baseRef.current, payload, distant)) : payload;
+      const ts2 = new Date().toISOString();
+      await supabase.from("cockpit_state").upsert({ id: "shared", data: fusion, updated_at: ts2 }, { onConflict: "id" });
+      poserCurseur(ts2); baseRef.current = fusion; latestRef.current = fusion;
+      setData(fusion); try { localStorage.setItem(KEY, JSON.stringify(fusion)); } catch (e) { }
+      return fusion;
+    }
+    await supabase.from("cockpit_state").upsert({ id: "shared", data: payload, updated_at: ts }, { onConflict: "id" });
+    poserCurseur(ts); baseRef.current = payload; return payload;
   }, []);
   // Persistance : ecrit le cache localStorage immediatement, puis pousse vers Supabase (anti-rebond 800 ms).
   const persist = useCallback((updater, opts) => {
@@ -13946,15 +14038,16 @@ export default function App() {
         if (saveTimer.current) clearTimeout(saveTimer.current);
         pendingWrite.current = true; setSyncState("saving");
         saveTimer.current = setTimeout(() => {
-          const ts = new Date().toISOString();
-          supabase.from("cockpit_state").upsert({ id: "shared", data: next, updated_at: ts }, { onConflict: "id" })
-            .then(() => { lastSyncAt.current = ts; pendingWrite.current = false; saveTimer.current = null; setSyncState("saved"); }, () => { pendingWrite.current = false; saveTimer.current = null; setSyncState("offline"); });
+          // On pousse l'état le plus récent (latestRef) et non « next » : plusieurs persist rapprochés
+          // partagent le même minuteur, seul le dernier état compte.
+          pousserServeur(latestRef.current || next)
+            .then(() => { pendingWrite.current = false; saveTimer.current = null; setSyncState("saved"); }, () => { pendingWrite.current = false; saveTimer.current = null; setSyncState("offline"); });
         }, 800);
       }
       return next;
     });
     if (snap) setCanUndo(true);
-  }, []);
+  }, [pousserServeur]);
   const undo = useCallback(() => { if (!undoRef.current) return; const snap = undoRef.current; undoRef.current = null; setCanUndo(false); persist(() => snap, { snapshot: false }); }, [persist]);
   // Vide l'écriture Supabase en attente dès que l'onglet est masqué ou fermé (avant tout rechargement) :
   // évite qu'une modification récente (validation d'événement, réglage…) soit perdue si l'écriture
@@ -13964,12 +14057,57 @@ export default function App() {
       if (!supabaseEnabled || !supabase) return;
       if (!pendingWrite.current && !saveTimer.current) return;
       if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
-      try { const payload = latestRef.current || (() => { try { const raw = localStorage.getItem(KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } })(); if (payload) { supabase.from("cockpit_state").upsert({ id: "shared", data: payload, updated_at: new Date().toISOString() }, { onConflict: "id" }); pendingWrite.current = false; } } catch (e) { }
+      try {
+        const payload = latestRef.current || (() => { try { const raw = localStorage.getItem(KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } })();
+        if (payload) {
+          // Écriture protégée par le curseur : si un autre appareil a écrit entre-temps, cet envoi
+          // n'écrase rien (0 ligne touchée) — le cache local + curseur permettront de fusionner au
+          // prochain réveil ou chargement au lieu de perdre l'une des deux sessions.
+          const ts = new Date().toISOString(); const depuis = lastSyncAt.current;
+          const q = depuis
+            ? supabase.from("cockpit_state").update({ data: payload, updated_at: ts }).eq("id", "shared").eq("updated_at", depuis).select("updated_at")
+            : supabase.from("cockpit_state").upsert({ id: "shared", data: payload, updated_at: ts }, { onConflict: "id" });
+          q.then(({ data: rows, error }) => {
+            if (!error && (!depuis || (rows && rows.length))) { poserCurseur(ts); baseRef.current = payload; }
+            else if (!error && depuis) { pousserServeur(payload).catch(() => { }); } // conflit et onglet encore vivant : fusion immédiate
+          }, () => { });
+          pendingWrite.current = false;
+        }
+      } catch (e) { }
     };
     const onVis = () => { if (document.visibilityState === "hidden") flush(); };
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("pagehide", flush);
     return () => { document.removeEventListener("visibilitychange", onVis); window.removeEventListener("pagehide", flush); };
+  }, [pousserServeur]);
+  // Rafraîchissement au RÉVEIL de l'appareil (retour sur l'onglet, sortie de veille, retour du réseau)
+  // + filet périodique : le canal temps réel Supabase ne rejoue pas les événements manqués pendant
+  // qu'un téléphone dort — sans cette relecture, il repartait d'un état ancien et sa première
+  // sauvegarde pouvait effacer la session faite entre-temps sur l'ordinateur.
+  useEffect(() => {
+    if (!supabaseEnabled || !supabase) return;
+    let enCours = false;
+    const rafraichir = async () => {
+      if (enCours || (typeof document !== "undefined" && document.visibilityState === "hidden")) return;
+      enCours = true;
+      try {
+        const { data: row, error } = await supabase.from("cockpit_state").select("data, updated_at").eq("id", "shared").maybeSingle();
+        if (!error && row && row.data && row.updated_at && (!lastSyncAt.current || row.updated_at > lastSyncAt.current)) {
+          // Une saisie locale attend d'être poussée : on ne l'écrase pas, l'écriture protégée fusionnera.
+          if (pendingWrite.current || saveTimer.current) return;
+          const fresh = normalize(row.data);
+          poserCurseur(row.updated_at); baseRef.current = fresh; latestRef.current = fresh;
+          setData(fresh); try { localStorage.setItem(KEY, JSON.stringify(fresh)); } catch (e) { }
+          setSyncState("remote"); setTimeout(() => setSyncState((s) => s === "remote" ? "saved" : s), 2600);
+        }
+      } catch (e) { } finally { enCours = false; }
+    };
+    const onVisible = () => { if (document.visibilityState === "visible") rafraichir(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", rafraichir);
+    window.addEventListener("online", rafraichir);
+    const iv = setInterval(() => { if (document.visibilityState === "visible") rafraichir(); }, 120000);
+    return () => { document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("focus", rafraichir); window.removeEventListener("online", rafraichir); clearInterval(iv); };
   }, []);
   // Planification automatique des suites au calendrier depuis le résumé des échanges.
   // Chaque échange (nouveau OU ancien) qui possède un résumé non encore analysé est lu par
@@ -14082,9 +14220,10 @@ export default function App() {
         const row = payload && payload.new;
         if (!row || !row.data) return;
         if (row.updated_at && lastSyncAt.current && row.updated_at <= lastSyncAt.current) return; // notre propre écho ou plus ancien
-        if (pendingWrite.current) return; // une saisie locale non encore poussée a priorité
-        lastSyncAt.current = row.updated_at || lastSyncAt.current;
+        if (pendingWrite.current) return; // une saisie locale non encore poussée a priorité : l'écriture protégée fusionnera
+        if (row.updated_at) poserCurseur(row.updated_at);
         const merged = normalize(row.data);
+        baseRef.current = merged; latestRef.current = merged;
         setData(merged);
         try { localStorage.setItem(KEY, JSON.stringify(merged)); } catch (e) { }
         setSyncState("remote"); setTimeout(() => setSyncState((s) => s === "remote" ? "saved" : s), 2600);
@@ -14179,14 +14318,15 @@ export default function App() {
       if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
       if (supabaseEnabled && supabase && hadPending) {
         const payload = latestRef.current || (() => { try { const raw = localStorage.getItem(KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } })();
-        if (payload) { const ts = new Date().toISOString(); await borne(supabase.from("cockpit_state").upsert({ id: "shared", data: payload, updated_at: ts }, { onConflict: "id" }), 2500); pendingWrite.current = false; }
+        // Écriture protégée (fusion en cas de conflit) et bornée dans le temps : le rechargement prime.
+        if (payload) { await borne(pousserServeur(payload), 2500); pendingWrite.current = false; }
       }
     } catch (e) { }
     try { if (typeof caches !== "undefined") { const ks = await borne(caches.keys(), 1500) || []; await borne(Promise.all(ks.map((k) => caches.delete(k))), 1500); } } catch (e) { }
     try { if (navigator.serviceWorker) { const regs = await borne(navigator.serviceWorker.getRegistrations(), 1500) || []; await borne(Promise.all(regs.map((r) => r.unregister())), 1500); } } catch (e) { }
     clearTimeout(filet);
     go();
-  }, []);
+  }, [pousserServeur]);
   const exportAll = () => { const today = new Date().toISOString().slice(0, 10); downloadJSON({ exportedAt: new Date().toISOString(), version: 1, data }, `penup3d-cockpit-${today}.json`); try { localStorage.setItem("penup_lastBackup", today); } catch {} setBackupDone(today); };
   const [backupDone, setBackupDone] = useState(() => { try { return localStorage.getItem("penup_lastBackup") || ""; } catch { return ""; } });
   const importAll = async (file) => {
