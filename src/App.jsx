@@ -5985,6 +5985,23 @@ function plannedEvents(evs, base) {
   return (evs || []).map((e, i) => ({ id: "ev_" + Date.now() + "_" + i + Math.random().toString(36).slice(2, 4), date: e.date, heure: e.heure || "", titre: e.titre, notes: "Planifié automatiquement depuis un échange du " + (base.baseDate || ""), type: e.type, color: (EVENT_TYPES[e.type] || EVENT_TYPES.autre).color, accountId: base.accountId || "", siteId: base.siteId || "", contactId: base.contactId || "" }));
 }
 // Champ « Résumé » avec bouton de reformulation IA (réutilisé par les deux formulaires d'échange).
+// Structuration IA d'un compte rendu dicté : transforme un flot de parole brut en compte rendu
+// organisé (points clés, décisions, suites), sans rien inventer ni omettre d'important.
+const SYS_STRUCTURE_CR = `Tu structures le compte rendu d'un échange commercial (PEN'UP 3D, stylos 3D, B2B), souvent dicté à la voix d'un seul jet. Réorganise-le en sections à puces, en français :
+Points clés :
+• …
+Décisions :
+• …
+Suites à donner :
+• …
+Règles : reprendre UNIQUEMENT ce qui figure dans le texte (aucune invention, aucune interprétation) ; corriger les tics de l'oral (répétitions, hésitations) ; ne pas omettre un fait, un chiffre, une date ou un engagement ; omettre une section vide ; répondre avec le compte rendu seul, sans commentaire.`;
+async function aiStructureCR(texte, onUsage) {
+  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 900, temperature: 0.2, system: SYS_STRUCTURE_CR, messages: [{ role: "user", content: texte }] }) });
+  if (!res.ok) throw new Error(await claudeErrorText(res));
+  const dt = await res.json();
+  if (dt && dt.usage && onUsage) onUsage(dt.usage);
+  return (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+}
 function ResumeField({ value, onChange, onUsage, rows = 3, baseDate, onPlan }) {
   const [busy, setBusy] = useState(false); const [msg, setMsg] = useState(null); const [listening, setListening] = useState(false);
   const recRef = useRef(null);
@@ -6007,6 +6024,14 @@ function ResumeField({ value, onChange, onUsage, rows = 3, baseDate, onPlan }) {
     rec.onerror = () => { setListening(false); recRef.current = null; note("Dictée interrompue."); };
     recRef.current = rec; setListening(true); note("Dictée en cours… parlez, puis cliquez sur le micro pour arrêter, et « Reformuler » pour mettre au propre."); rec.start();
   };
+  // Structurer : le flot dicté devient un compte rendu organisé (points clés / décisions / suites).
+  const structurer = async () => {
+    if (!value || !value.trim()) { note("Écrivez ou dictez d'abord le compte rendu à structurer."); return; }
+    setBusy(true); setMsg(null);
+    try { const out = await aiStructureCR(value, onUsage); if (out) { onChange(out); setMsg({ kind: "ok", t: "Compte rendu structuré. Utilisez « Planifier (IA) » pour mettre les suites au calendrier." }); } else note("Structuration vide, texte conservé."); }
+    catch (e) { setMsg({ kind: "err", t: "Structuration IA indisponible : " + (e && e.message ? e.message : "erreur inconnue") + "." }); }
+    finally { setBusy(false); }
+  };
   const planifier = async () => {
     if (!value || !value.trim()) { note("Écrivez ou dictez d'abord le compte rendu."); return; }
     setBusy(true); setMsg(null);
@@ -6015,7 +6040,7 @@ function ResumeField({ value, onChange, onUsage, rows = 3, baseDate, onPlan }) {
     finally { setBusy(false); }
   };
   return (<div className="fld">
-    <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>Résumé<span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}><button type="button" className="btn btn-g btn-s" onClick={dicter} style={{ fontWeight: 700, color: listening ? "var(--red)" : undefined, borderColor: listening ? "var(--red)" : undefined }}><Mic size={13} className={listening ? "spin" : ""} /> {listening ? "Stop" : "Dicter"}</button><button type="button" className="btn btn-g btn-s" onClick={reformuler} disabled={busy} style={{ fontWeight: 700 }}><Sparkles size={13} className={busy ? "spin" : ""} /> {busy ? "…" : "Reformuler (IA)"}</button>{onPlan && <button type="button" className="btn btn-g btn-s" onClick={planifier} disabled={busy} title="Détecter les suites (visio, relance…) et les ajouter au calendrier"><CalendarDays size={13} className={busy ? "spin" : ""} /> Planifier (IA)</button>}</span></label>
+    <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>Résumé<span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}><button type="button" className="btn btn-g btn-s" onClick={dicter} style={{ fontWeight: 700, color: listening ? "var(--red)" : undefined, borderColor: listening ? "var(--red)" : undefined }}><Mic size={13} className={listening ? "spin" : ""} /> {listening ? "Stop" : "Dicter"}</button><button type="button" className="btn btn-g btn-s" onClick={reformuler} disabled={busy} style={{ fontWeight: 700 }}><Sparkles size={13} className={busy ? "spin" : ""} /> {busy ? "…" : "Reformuler (IA)"}</button><button type="button" className="btn btn-g btn-s" onClick={structurer} disabled={busy} style={{ fontWeight: 700 }} title="Transformer un compte rendu dicté d'un seul jet en compte rendu organisé : points clés, décisions, suites à donner"><ListChecks size={13} className={busy ? "spin" : ""} /> Structurer (IA)</button>{onPlan && <button type="button" className="btn btn-g btn-s" onClick={planifier} disabled={busy} title="Détecter les suites (visio, relance…) et les ajouter au calendrier"><CalendarDays size={13} className={busy ? "spin" : ""} /> Planifier (IA)</button>}</span></label>
     <textarea rows={rows} value={value} onChange={(e) => onChange(e.target.value)} placeholder="Points clés, décisions, prochaines étapes — ou dictez à la voix" />
     {msg && <div style={{ fontSize: 11.5, marginTop: 5, display: "inline-flex", alignItems: "flex-start", gap: 5, lineHeight: 1.45, fontWeight: msg.kind === "ok" ? 700 : 400, color: msg.kind === "ok" ? "var(--green)" : msg.kind === "err" ? "var(--red)" : "var(--muted)" }}>{msg.kind === "ok" ? <CheckCircle2 size={13} style={{ flexShrink: 0, marginTop: 1 }} /> : null}<span>{msg.t}</span></div>}
   </div>);
