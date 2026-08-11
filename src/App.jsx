@@ -893,6 +893,47 @@ async function gmailSyncAll(data, persist) {
   const dt = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(dt.error || ("Erreur " + res.status));
   const msgs = dt.messages || [];
+  const r = gmailIngestMessages(data, persist, addrMap, msgs, { cursor: true });
+  const converted = await gmailAutoConvertProspects(data, persist);
+  return { ...r, total: msgs.length, converted };
+}
+// Adresses rattachées à UNE seule fiche (groupe ou établissement) : celles de ses contacts, de ses
+// établissements et du compte lui-même. Un contact suivant plusieurs points de vente (siteIds) compte
+// pour chacun d'eux.
+function entityGmailAddresses(data, scope) {
+  const map = {};
+  const accountId = (scope && scope.accountId) || "";
+  const siteId = (scope && scope.siteId) || "";
+  const add = (e0, ent) => { const e = (e0 || "").trim().toLowerCase(); if (e.includes("@") && !map[e]) map[e] = ent; };
+  (data.contacts || []).forEach((c) => {
+    const sites = [c.siteId, ...(Array.isArray(c.siteIds) ? c.siteIds : [])].filter(Boolean);
+    const ok = siteId ? sites.includes(siteId) : (accountId && c.accountId === accountId);
+    if (ok) add(c.email, { contactId: c.id, accountId: c.accountId || accountId, siteId: siteId || c.siteId || "" });
+  });
+  (data.sites || []).forEach((s) => {
+    if (siteId ? s.id === siteId : (accountId && s.accountId === accountId)) add(s.contactMail || s.email, { contactId: "", accountId: s.accountId || accountId, siteId: s.id });
+  });
+  if (!siteId && accountId) (data.accounts || []).forEach((a) => { if (a.id === accountId) add(a.email, { contactId: "", accountId: a.id, siteId: "" }); });
+  return map;
+}
+// Synchronisation des courriels d'UNE fiche : mêmes règles que la synchro globale (brouillons exclus,
+// idempotence par identifiant Gmail), mais bornée aux adresses de la fiche. Ne touche pas au curseur
+// de synchro globale : une synchro ponctuelle ne doit pas faire croire que tout a été relevé.
+async function gmailSyncEntity(data, persist, scope) {
+  const addrMap = entityGmailAddresses(data, scope);
+  const addresses = Object.keys(addrMap);
+  if (!addresses.length) return { added: 0, updated: 0, purged: 0, total: 0, addresses: 0 };
+  const res = await fetch("/api/gmail-sync", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ addresses, max: 200 }) });
+  const dt = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(dt.error || ("Erreur " + res.status));
+  const msgs = dt.messages || [];
+  return { ...gmailIngestMessages(data, persist, addrMap, msgs, { cursor: false }), total: msgs.length, addresses: addresses.length };
+}
+// Ingestion commune : convertit les messages renvoyés par /api/gmail-sync en échanges du fil, d'après la
+// table adresse → entité fournie. `cursor` n'est vrai que pour la synchro globale, seule habilitée à
+// dater le dernier relevé complet de la boîte.
+function gmailIngestMessages(data, persist, addrMap, msgs, opts) {
+  const cursor = !!(opts && opts.cursor);
   const byId = new Map((data.interactions || []).filter((i) => i.gmailId).map((i) => [i.gmailId, i]));
   const toAdd = []; const updates = new Map(); // gmailId -> nouveau corps (réparation des anciens imports tronqués)
   // Un BROUILLON n'est pas un échange : le message n'a jamais quitté la boîte. On ne le journalise
@@ -929,10 +970,9 @@ async function gmailSyncAll(data, persist) {
     });
     if (updates.size) { interactions = interactions.map((i) => (i.gmailId && updates.has(i.gmailId)) ? (updated++, { ...i, resume: updates.get(i.gmailId) }) : i); }
     if (fresh.length) interactions = [...interactions, ...fresh];
-    return { ...p, interactions, settings: { ...p.settings, lastGmailSync: new Date().toISOString() } };
+    return cursor ? { ...p, interactions, settings: { ...p.settings, lastGmailSync: new Date().toISOString() } } : { ...p, interactions };
   }, { snapshot: false });
-  const converted = await gmailAutoConvertProspects(data, persist);
-  return { added, updated, purged, total: msgs.length, converted };
+  return { added, updated, purged };
 }
 // Conversion automatique des prospects contactés : dès que l'API Gmail confirme qu'un mail SORTANT
 // (libellé SENT, un brouillon ne compte pas) a été envoyé à l'adresse d'un prospect, sa fiche quitte
@@ -5509,6 +5549,18 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
   const [addInt, setAddInt] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
+  // Synchronisation Google (Gmail) bornée à cet établissement : relève les courriels échangés avec les
+  // adresses rattachées (contacts sur place, adresse de l'établissement) et les verse dans le fil.
+  const [gSync, setGSync] = useState(false); const [gMsg, setGMsg] = useState(null);
+  async function syncGoogle() {
+    setGSync(true); setGMsg(null);
+    try {
+      const r = await gmailSyncEntity(data, persist, { siteId: s.id });
+      if (!r.addresses) setGMsg("Aucune adresse e-mail rattachée à cet établissement : renseignez le courriel d'un contact sur place.");
+      else setGMsg(r.added ? (r.added + " courriel(s) importé(s) depuis Gmail.") : ("Aucun nouveau courriel — " + r.addresses + " adresse(s) relevée(s)."));
+    } catch (e) { setGMsg("Synchro Google indisponible : " + ((e && e.message) || "erreur") + " — reconnectez-vous avec Google pour accorder l'autorisation Gmail."); }
+    finally { setGSync(false); }
+  }
   const [codeEdit, setCodeEdit] = useState(null);
   const [filePreview, setFilePreview] = useState(null);
   // Enregistre un code client saisi à la main : sur le SITE pour un franchisé (code propre au pdv),
@@ -5721,7 +5773,8 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
       </div>);
     })()}
     <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", alignItems: "start", marginTop: 16 }}>
-      <div className="card"><div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 5, margin: 0 }}><MessageSquare size={15} />Fil des échanges</h3><div style={{ display: "flex", gap: 6 }}><button className="btn btn-g btn-s" onClick={() => setComposerOpen(true)} title="Rédiger un e-mail, message LinkedIn ou SMS avec l'IA (canal et ton au choix)"><MessageSquare size={14} /> Message IA</button><button className="btn btn-y btn-s" onClick={() => setAddInt(true)}><Plus size={14} /> Ajouter</button></div></div>
+      <div className="card"><div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 5, margin: 0 }}><MessageSquare size={15} />Fil des échanges</h3><div style={{ display: "flex", gap: 6 }}><button className="btn btn-g btn-s" onClick={() => setComposerOpen(true)} title="Rédiger un e-mail, message LinkedIn ou SMS avec l'IA (canal et ton au choix)"><MessageSquare size={14} /> Message IA</button><button className="btn btn-g btn-s" onClick={syncGoogle} disabled={gSync} title="Relever dans Gmail les courriels échangés avec les adresses de cette fiche et les journaliser ici"><RefreshCw size={14} className={gSync ? "spin" : ""} /> {gSync ? "Synchro…" : "Synchro Google"}</button><button className="btn btn-y btn-s" onClick={() => setAddInt(true)}><Plus size={14} /> Ajouter</button></div></div>
+        {gMsg && <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8, lineHeight: 1.5 }}>{gMsg}</div>}
         <InteractionThread interactions={ints} data={data} onView={(it) => setIntView(it)} onEdit={(it) => setIntEdit(it)} onDelete={delInteraction} showContact />
       </div>
       <div className="card"><div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 5, margin: 0 }}><Paperclip size={15} />Pièces jointes</h3><div><input ref={fileRef} type="file" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) uploadFile(f); e.target.value = ""; }} /><button className="btn btn-y btn-s" onClick={() => fileRef.current && fileRef.current.click()}><Upload size={14} /> Téléverser</button></div></div>
@@ -5769,6 +5822,18 @@ function AccountDetail({ account, data, persist, go, onBack, onEdit, onAddContac
   const [addInt, setAddInt] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
+  // Synchronisation Google (Gmail) bornée à cette fiche : relève les courriels échangés avec les
+  // adresses rattachées (contacts, établissements, compte) et les verse dans le fil des échanges.
+  const [gSync, setGSync] = useState(false); const [gMsg, setGMsg] = useState(null);
+  async function syncGoogle() {
+    setGSync(true); setGMsg(null);
+    try {
+      const r = await gmailSyncEntity(data, persist, { accountId: a.id });
+      if (!r.addresses) setGMsg("Aucune adresse e-mail rattachée à cette fiche : renseignez le courriel d'un contact ou de l'établissement.");
+      else setGMsg(r.added ? (r.added + " courriel(s) importé(s) depuis Gmail.") : ("Aucun nouveau courriel — " + r.addresses + " adresse(s) relevée(s)."));
+    } catch (e) { setGMsg("Synchro Google indisponible : " + ((e && e.message) || "erreur") + " — reconnectez-vous avec Google pour accorder l'autorisation Gmail."); }
+    finally { setGSync(false); }
+  }
   const [intEdit, setIntEdit] = useState(null);
   const [intView, setIntView] = useState(null);
   const [siteEdit, setSiteEdit] = useState(null);
@@ -5880,7 +5945,8 @@ function AccountDetail({ account, data, persist, go, onBack, onEdit, onAddContac
       </div>
     </div>
     <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", alignItems: "start", marginTop: 16 }}>
-      <div className="card"><div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 5, margin: 0 }}><MessageSquare size={15} />Fil des échanges</h3><div style={{ display: "flex", gap: 6 }}><button className="btn btn-g btn-s" onClick={() => setComposerOpen(true)} title="Rédiger un e-mail, message LinkedIn ou SMS avec l'IA (canal et ton au choix)"><MessageSquare size={14} /> Message IA</button><button className="btn btn-y btn-s" onClick={() => setAddInt(true)}><Plus size={14} /> Ajouter</button></div></div>
+      <div className="card"><div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 5, margin: 0 }}><MessageSquare size={15} />Fil des échanges</h3><div style={{ display: "flex", gap: 6 }}><button className="btn btn-g btn-s" onClick={() => setComposerOpen(true)} title="Rédiger un e-mail, message LinkedIn ou SMS avec l'IA (canal et ton au choix)"><MessageSquare size={14} /> Message IA</button><button className="btn btn-g btn-s" onClick={syncGoogle} disabled={gSync} title="Relever dans Gmail les courriels échangés avec les adresses de cette fiche et les journaliser ici"><RefreshCw size={14} className={gSync ? "spin" : ""} /> {gSync ? "Synchro…" : "Synchro Google"}</button><button className="btn btn-y btn-s" onClick={() => setAddInt(true)}><Plus size={14} /> Ajouter</button></div></div>
+        {gMsg && <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8, lineHeight: 1.5 }}>{gMsg}</div>}
         <InteractionThread interactions={accInteractions} data={data} onView={(it) => setIntView(it)} onEdit={(it) => setIntEdit(it)} onDelete={delInteraction} showContact />
       </div>
       <div className="card"><div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 5, margin: 0 }}><Paperclip size={15} />Pièces jointes</h3><div><input ref={fileRef} type="file" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) uploadFile(f); e.target.value = ""; }} /><button className="btn btn-y btn-s" onClick={() => fileRef.current && fileRef.current.click()}><Upload size={14} /> Téléverser</button></div></div>
