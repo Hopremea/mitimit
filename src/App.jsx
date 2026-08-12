@@ -3525,7 +3525,10 @@ ${ACCENT_CSS}
 .msg-actions{display:inline-flex;gap:3px;margin-left:auto;}
 .msg-actions .iconbtn{width:25px;height:25px;}
 .msg-subj{font-weight:700;font-size:13.5px;margin-top:4px;}
-.msg-body{font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.5;white-space:pre-wrap;}
+/* Un corps de courriel contient des URL de plusieurs centaines de caractères (liens Google Agenda) :
+   sans coupure autorisée, le bloc s'élargissait et faisait déborder toute la page vers la droite.
+   « anywhere » agit aussi sur la largeur minimale du bloc, contrairement à « break-word ». */
+.msg-body{font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;min-width:0;}
 .ev-link{display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#fff;cursor:pointer;font-family:inherit;color:var(--ink);transition:.15s;}
 .ev-link:hover{border-color:var(--blue);box-shadow:0 6px 16px rgba(20,32,58,.08);transform:translateY(-1px);}
 .ev-link svg:first-child{color:var(--blue);flex-shrink:0;}
@@ -3776,15 +3779,21 @@ ${ACCENT_CSS}
 }
 @media print{
 /* Impression d'un document (devis / commande / facture) : on imprime UNIQUEMENT le document. */
-@page{margin:0;}
+/* La marge est portée par la PAGE, pas par le document : elle se répète alors sur chaque feuille.
+   Un padding sur le document n'habille que le début et la fin du flux — une page 2 démarrait donc
+   collée au bord haut. */
+@page{margin:13mm 14mm;}
 /* Force le rendu des fonds colorés (bloc Total TTC, encadrés client/banque) à l'impression : sinon le PDF perd les aplats. */
 *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}
 /* Cas 1 — un document est ouvert : <body> porte la classe « doc-print » (posée par DevisPreview).
    On masque tout le reste (l'app) plutôt que de dépendre du sélecteur :has(), inégalement supporté à l'impression. */
+/* Le fond crème de l'application est peint par <html>/<body> sur TOUTE la feuille : sans cela, un
+   aplat coloré remplissait le bas de la dernière page, sous les mentions. */
+html,body{background:#fff!important;background-image:none!important;}
 body.doc-print > *:not(.print-doc-overlay){display:none!important;}
 body.doc-print .print-doc-overlay{position:static!important;inset:auto!important;display:block!important;background:#fff!important;backdrop-filter:none!important;padding:0!important;z-index:auto!important;}
 body.doc-print .print-doc-overlay .doc{position:static!important;max-height:none!important;overflow:visible!important;box-shadow:none!important;border-radius:0!important;width:100%!important;}
-body.doc-print .print-doc-overlay .devis-doc{position:static!important;width:auto!important;padding:12mm 14mm!important;}
+body.doc-print .print-doc-overlay .devis-doc{position:static!important;width:auto!important;padding:0!important;}
 body.doc-print .no-print{display:none!important;}
 /* Sauts de page soignés : un encadré, une ligne de tableau ou un bloc de mentions ne doit jamais
    être coupé en deux. S'il ne tient pas sur la page en cours, il repart entier sur la suivante.
@@ -13948,7 +13957,7 @@ function InteractionView({ interaction: it, data, go, onClose, onEdit }) {
     {it.email && <div style={{ fontSize: 12.5, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 5, marginTop: -6 }}><Mail size={13} /> {it.email}</div>}
     <div style={{ background: "#f5f7fb", border: "1px solid var(--line)", borderRadius: 16, borderTopLeftRadius: 5, padding: "14px 16px" }}>
       <div style={{ fontWeight: 800, fontSize: 15 }}>{(it.source === "gmail" ? decodeEntities(it.sujet) : it.sujet) || "Échange"}</div>
-      {it.resume ? (() => { const wa = it.type === "whatsapp" ? parseWaResume(it.resume) : null; return <div style={{ fontSize: 13.5, lineHeight: 1.6, marginTop: 8, whiteSpace: wa ? "normal" : "pre-wrap", maxHeight: 360, overflowY: "auto" }}>{wa ? <WaBubbles p={wa} who={ct ? fullName(ct) : (it.interlocuteur || "")} /> : (it.source === "gmail" ? decodeEntities(it.resume) : it.resume)}</div>; })() : <div className="empty" style={{ padding: 14 }}>Aucun compte rendu saisi.</div>}
+      {it.resume ? (() => { const wa = it.type === "whatsapp" ? parseWaResume(it.resume) : null; return <div style={{ fontSize: 13.5, lineHeight: 1.6, marginTop: 8, whiteSpace: wa ? "normal" : "pre-wrap", maxHeight: 360, overflowY: "auto", overflowWrap: "anywhere", wordBreak: "break-word", minWidth: 0 }}>{wa ? <WaBubbles p={wa} who={ct ? fullName(ct) : (it.interlocuteur || "")} /> : (it.source === "gmail" ? decodeEntities(it.resume) : it.resume)}</div>; })() : <div className="empty" style={{ padding: 14 }}>Aucun compte rendu saisi.</div>}
     </div>
     {(ct || it.interlocuteur || site || account) && <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
       {ct ? <button className="lnk" style={lnkStyle} onClick={() => nav(() => go("repertoire", ct.id))}><User size={14} /> {fullName(ct)}</button> : (it.interlocuteur ? <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, color: "var(--muted)" }}><User size={14} /> {it.interlocuteur}</span> : null)}
