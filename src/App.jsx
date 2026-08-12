@@ -3557,6 +3557,12 @@ ${ACCENT_CSS}
 .cal-ev{font-size:11px;padding:3px 6px;border-radius:6px;background:#eef2fb;color:var(--ink);cursor:pointer;border-left:3px solid var(--blue);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;align-self:stretch;}
 .cal-ev:hover{background:var(--blue-l);}
 .cal-ev-sub{color:var(--muted);font-weight:400;}
+/* Glisser-déposer d'un événement d'un jour à l'autre */
+.cal-ev.cal-mv{cursor:grab;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;}
+.cal-ev.cal-mv:active{cursor:grabbing;}
+.cal-ev.cal-dragging{opacity:.32;}
+.cal-cell.cal-drop{border-color:var(--blue);background:var(--blue-l);box-shadow:0 0 0 2px rgba(63,96,170,.3);}
+.cal-drag-ghost{position:fixed;z-index:99999;pointer-events:none;transform:translate(-50%,-150%);max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11.5px;font-weight:700;padding:5px 9px;border-radius:8px;background:#fff;color:#16203a;border:1px solid #e2e7f0;border-left:3px solid var(--blue);box-shadow:0 12px 30px rgba(20,32,58,.3);font-family:'Plus Jakarta Sans',system-ui,sans-serif;}
 
 /* Pièces jointes */
 .attach-list{display:flex;flex-direction:column;gap:6px;}
@@ -3588,6 +3594,7 @@ ${ACCENT_CSS}
 .pu-root.dark .acc-card,.pu-root.dark .deal-card,.pu-root.dark .col,.pu-root.dark .cal-cell{background:#171f33;}
 .pu-root.dark .col{background:rgba(23,31,51,.45);border-color:rgba(255,255,255,.10);}
 .pu-root.dark .cal-ev{background:#1d2945;color:var(--ink);}
+.pu-root.dark .cal-drag-ghost{background:#1d2945;color:#e8ecf6;border-color:rgba(255,255,255,.14);box-shadow:0 12px 30px rgba(0,0,0,.5);}
 .pu-root.dark .attach-row{background:#10172a;}
 .pu-root.dark .dup-warn{background:#3a2f12;color:#f8d68b;}
 .pu-root.dark .modal-h{background:var(--card);}
@@ -13413,6 +13420,83 @@ function Agenda({ data, persist, go }) {
   }, [data]);
   const fmtDate = (y, m, d) => `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
   const newEvent = (date) => ({ id: "ev_" + Date.now(), date, heure: "", titre: "", notes: "", type: "rdv", color: EVENT_TYPES.rdv.color, accountId: "" });
+
+  // ====== Glisser-déposer : replanifier un événement d'un jour à l'autre ======
+  // Déplaçables : les événements du calendrier (verts) et la prochaine action d'un compte (bleu) —
+  // ce sont les seules dates que l'on « planifie ». Un devis, un échange déjà eu ou un anniversaire
+  // sont des faits datés : on ne les fait pas glisser, on les corrige dans leur fiche.
+  // Souris/stylet : glissé direct dès quelques pixels. Tactile : appui long (~320 ms) puis glissé,
+  // pour que le simple défilement de la page reste possible depuis une pastille.
+  const gridRef = useRef(null);
+  const dragRef = useRef(null);
+  const clickGuard = useRef(0);
+  const [drag, setDrag] = useState(null);   // { key, label, color, from, over, x, y }
+  const [moved, setMoved] = useState(null); // confirmation fugace après un déplacement
+  useEffect(() => { if (!moved) return; const t = setTimeout(() => setMoved(null), 2800); return () => clearTimeout(t); }, [moved]);
+  useEffect(() => () => { if (dragRef.current && dragRef.current.timer) clearTimeout(dragRef.current.timer); }, []);
+  // Pendant un glissé tactile, on bloque le défilement (écouteur non passif : impossible via React).
+  useEffect(() => {
+    const el = gridRef.current; if (!el) return;
+    const stop = (e) => { const d = dragRef.current; if (d && d.started) e.preventDefault(); };
+    el.addEventListener("touchmove", stop, { passive: false });
+    return () => el.removeEventListener("touchmove", stop);
+  }, []);
+
+  const movableOf = (it) => (it.kind === "custom" && it.ev) ? { type: "event", id: it.ev.id, key: "ev:" + it.ev.id } : ((it.kind === "action" && it.target) ? { type: "account", id: it.target.id, key: "ac:" + it.target.id } : null);
+  const applyMove = (it, ds) => {
+    const mv = movableOf(it); if (!mv || !ds) return;
+    if (mv.type === "event") {
+      if (it.ev.date === ds) return;
+      persist((p) => ({ ...p, events: (p.events || []).map((x) => x.id === mv.id ? { ...x, date: ds } : x) }));
+    } else {
+      const acc = data.accounts.find((a) => a.id === mv.id);
+      if (!acc || acc.dateAction === ds) return;
+      persist((p) => ({ ...p, accounts: p.accounts.map((a) => a.id === mv.id ? { ...a, dateAction: ds } : a) }));
+    }
+    setMoved({ label: it.label, ds });
+  };
+  const beginDrag = (d, x, y) => { d.started = true; setDrag({ key: movableOf(d.item).key, label: d.item.label, color: d.item.color, from: d.ds, over: d.ds, x, y }); };
+  const evDown = (e, it, ds) => {
+    if (!movableOf(it)) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    const touch = e.pointerType !== "mouse";
+    const d = { item: it, ds, x0: e.clientX, y0: e.clientY, started: false, touch, over: ds, timer: null };
+    dragRef.current = d;
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* navigateur sans capture */ }
+    if (touch) d.timer = setTimeout(() => { if (dragRef.current === d) { beginDrag(d, d.x0, d.y0); try { if (navigator.vibrate) navigator.vibrate(12); } catch { /* ignoré */ } } }, 320);
+  };
+  const evMove = (e) => {
+    const d = dragRef.current; if (!d) return;
+    const dx = Math.abs(e.clientX - d.x0), dy = Math.abs(e.clientY - d.y0);
+    if (!d.started) {
+      if (dx + dy < (d.touch ? 14 : 5)) return;
+      // Tactile : un mouvement avant la fin de l'appui long = l'utilisateur veut défiler.
+      if (d.touch) { clearTimeout(d.timer); dragRef.current = null; return; }
+      beginDrag(d, e.clientX, e.clientY);
+    }
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const cell = (el && el.closest) ? el.closest("[data-cal-day]") : null;
+    const over = cell ? cell.getAttribute("data-cal-day") : null;
+    d.over = over;
+    setDrag((c) => c ? { ...c, x: e.clientX, y: e.clientY, over } : c);
+  };
+  const evUp = () => {
+    const d = dragRef.current; if (!d) return;
+    if (d.timer) clearTimeout(d.timer);
+    dragRef.current = null;
+    if (!d.started) return;
+    clickGuard.current = Date.now(); // le clic qui suit le glissé ne doit rien ouvrir
+    setDrag(null);
+    if (d.over && d.over !== d.ds) applyMove(d.item, d.over);
+  };
+  const evCancel = () => {
+    const d = dragRef.current; if (!d) return;
+    if (d.timer) clearTimeout(d.timer);
+    dragRef.current = null;
+    if (d.started) { clickGuard.current = Date.now(); setDrag(null); }
+  };
+  const justDragged = () => Date.now() - clickGuard.current < 350;
+
   return (<div className="fade">
     <div className="card" style={{ marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -13433,18 +13517,20 @@ function Agenda({ data, persist, go }) {
       </div>
     </div>
     <div className="card">
-      <div className="cal-grid">
+      <div className="cal-grid" ref={gridRef}>
         {["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map((d) => <div key={d} className="cal-head">{d}</div>)}
-        {cells.map((c, i) => { const ds = fmtDate(c.y, c.m, c.day); const evs = eventsByDate[ds] || []; const isToday = ds === todayStr; return (
-          <div key={i} className={cx("cal-cell", c.out && "cal-out", isToday && "cal-today")} onClick={() => { if (evs.length) setDayOpen(ds); }} onDoubleClick={() => setEdit(newEvent(ds))} style={{ cursor: "pointer" }} title={evs.length ? "Clic : voir les " + evs.length + " événement(s) du jour · double-clic : ajouter" : "Double-clic pour ajouter un événement à cette date"}>
+        {cells.map((c, i) => { const ds = fmtDate(c.y, c.m, c.day); const evs = eventsByDate[ds] || []; const isToday = ds === todayStr; const isDrop = !!drag && drag.over === ds && drag.from !== ds; return (
+          <div key={i} data-cal-day={ds} className={cx("cal-cell", c.out && "cal-out", isToday && "cal-today", isDrop && "cal-drop")} onClick={() => { if (justDragged()) return; if (evs.length) setDayOpen(ds); }} onDoubleClick={() => setEdit(newEvent(ds))} style={{ cursor: "pointer" }} title={evs.length ? "Clic : voir les " + evs.length + " événement(s) du jour · double-clic : ajouter" : "Double-clic pour ajouter un événement à cette date"}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><div className="cal-num">{c.day}</div><button className="iconbtn" style={{ width: 18, height: 18, opacity: .5 }} onClick={(e) => { e.stopPropagation(); setEdit(newEvent(ds)); }} title="Ajouter un événement ce jour"><Plus size={11} /></button></div>
-            {evs.slice(0, 4).map((e, j) => { const evDone = e.kind === "custom" && e.ev && e.ev.done; return (<div key={j} className="cal-ev" style={{ borderLeftColor: e.color, ...(evDone ? { opacity: .5, textDecoration: "line-through" } : {}) }} title={e.label + (e.sub ? " — " + e.sub : "")} onClick={(ee) => { ee.stopPropagation(); if (e.kind === "custom") setView(e.ev); else if (e.target) go(e.target.tab, e.target.id); }}>{evDone ? "✓ " : ""}{e.label}{e.sub && <span className="cal-ev-sub"> · {e.sub}</span>}</div>); })}
+            {evs.slice(0, 4).map((e, j) => { const evDone = e.kind === "custom" && e.ev && e.ev.done; const mv = movableOf(e); const isDragged = !!drag && !!mv && drag.key === mv.key; return (<div key={j} className={cx("cal-ev", mv && "cal-mv", isDragged && "cal-dragging")} style={{ borderLeftColor: e.color, ...(evDone ? { opacity: .5, textDecoration: "line-through" } : {}) }} title={e.label + (e.sub ? " — " + e.sub : "") + (mv ? " — glissez-le sur un autre jour pour le déplacer" : "")} onPointerDown={mv ? ((ee) => evDown(ee, e, ds)) : undefined} onPointerMove={mv ? evMove : undefined} onPointerUp={mv ? evUp : undefined} onPointerCancel={mv ? evCancel : undefined} onClick={(ee) => { ee.stopPropagation(); if (justDragged()) return; if (e.kind === "custom") setView(e.ev); else if (e.target) go(e.target.tab, e.target.id); }}>{evDone ? "✓ " : ""}{e.label}{e.sub && <span className="cal-ev-sub"> · {e.sub}</span>}</div>); })}
             {evs.length > 4 && <button onClick={(e) => { e.stopPropagation(); setDayOpen(ds); }} title={"Voir les " + evs.length + " événements de ce jour"} style={{ fontSize: 10.5, fontWeight: 800, color: "var(--blue)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "center", padding: "2px 0", fontFamily: "inherit" }}>+{evs.length - 4} · tout voir</button>}
           </div>
         ); })}
       </div>
-      <div style={{ marginTop: 10, fontSize: 11, color: "var(--muted)", textAlign: "center" }}>Astuce : cliquez sur un jour pour voir tous ses événements, double-cliquez pour en ajouter un, cliquez sur un événement perso pour le modifier.</div>
+      {moved ? <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, color: "var(--green)", textAlign: "center" }}>« {moved.label} » déplacé au {new Date(moved.ds + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}.</div>
+      : <div style={{ marginTop: 10, fontSize: 11, color: "var(--muted)", textAlign: "center" }}>Astuce : glissez un événement sur un autre jour pour le replanifier (sur mobile, appui long puis glissé). Cliquez sur un jour pour voir tous ses événements, double-cliquez pour en ajouter un.</div>}
     </div>
+    {drag && createPortal(<div className="cal-drag-ghost" style={{ left: drag.x, top: drag.y, borderLeftColor: drag.color }}>{drag.label}</div>, document.body)}
     <div className="card" style={{ marginTop: 14 }}>
       <h3 className="pu-display" style={{ margin: "0 0 10px", fontSize: 16 }}>À venir, 14 prochains jours</h3>
       {(() => {
