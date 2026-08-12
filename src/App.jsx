@@ -7753,7 +7753,7 @@ function ImportCommande({ accounts, sites, products, onCreate, onUsage }) {
 }
 function Deals({ data, persist, go, focus }) {
   const { deals, accounts, products, settings } = data;
-  const [filt, setFilt] = useState("tous"); const [edit, setEdit] = useState(null); const [preview, setPreview] = useState(null); const [imp, setImp] = useState(false);
+  const [filt, setFilt] = useState("tous"); const [edit, setEdit] = useState(null); const [preview, setPreview] = useState(null); const [imp, setImp] = useState(false); const [bdc, setBdc] = useState(false);
   const [q, setQ] = useState(""); const [filtStatut, setFiltStatut] = useState("tous"); const [filtAcc, setFiltAcc] = useState("tous"); const [dateFrom, setDateFrom] = useState(""); const [dateTo, setDateTo] = useState(""); const [grp, setGrp] = useState("statut"); const [dir, setDir] = useState("asc");
   const [sel, setSel] = useState(() => new Set());
   useEffect(() => { if (focus && focus.id) { const d = data.deals.find((x) => x.id === focus.id); if (d) setPreview(d); } }, [focus && focus.n]);
@@ -7807,7 +7807,7 @@ function Deals({ data, persist, go, focus }) {
     <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
       <div style={{ position: "relative", flex: 1, minWidth: 200 }}><Search size={15} style={{ position: "absolute", left: 11, top: 11, color: "var(--muted)" }} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher par référence, groupe, établissement, produit, note…" style={{ width: "100%", padding: "9px 11px 9px 32px", border: "1px solid var(--line)", borderRadius: 11, fontFamily: "inherit", fontSize: 13.5 }} /></div>
       <GroupBar value={grp} onChange={setGrp} dir={dir} onToggleDir={() => setDir((d) => d === "asc" ? "desc" : "asc")} options={[{ id: "statut", label: "statut" }, { id: "enseigne", label: "groupe / établissement" }, { id: "type", label: "type" }, { id: "mois", label: "mois" }]} />
-      <div style={{ display: "flex", gap: 8 }}><button className="btn btn-ghost btn-s" onClick={() => downloadCSV(list.map((d) => { const acc = accOf(d.accountId); return { Reference: d.ref || "", Type: d.type, Date: d.date, Enseigne: acc ? acc.enseigne : "", Statut: (DEAL_STATUS[d.statut] || {}).label || d.statut, TVA_pct: d.tva, Montant_TTC_EUR: d.montant, Note: d.note || "" }; }), "deals-penup3d-" + new Date().toISOString().slice(0, 10) + ".csv")} title="Exporter en CSV"><FileDown size={14} /> CSV</button><button className="btn btn-g" onClick={() => setImp(true)} title="Coller une commande reçue et créer un brouillon de devis"><Upload size={16} /> Importer</button><button className="btn btn-g" onClick={() => setEdit(newDeal("Commande"))}><ShoppingCart size={16} /> Commande</button><button className="btn btn-p" onClick={() => setEdit(newDeal("Devis"))}><Plus size={16} /> Nouveau devis</button></div>
+      <div style={{ display: "flex", gap: 8 }}><button className="btn btn-ghost btn-s" onClick={() => downloadCSV(list.map((d) => { const acc = accOf(d.accountId); return { Reference: d.ref || "", Type: d.type, Date: d.date, Enseigne: acc ? acc.enseigne : "", Statut: (DEAL_STATUS[d.statut] || {}).label || d.statut, TVA_pct: d.tva, Montant_TTC_EUR: d.montant, Note: d.note || "" }; }), "deals-penup3d-" + new Date().toISOString().slice(0, 10) + ".csv")} title="Exporter en CSV"><FileDown size={14} /> CSV</button><button className="btn btn-g" onClick={() => setImp(true)} title="Coller une commande reçue et créer un brouillon de devis"><Upload size={16} /> Importer</button><button className="btn btn-g" onClick={() => setBdc(true)} title="Formulaire vierge à envoyer à un revendeur : il coche ses quantités, vous lui retournez un devis"><FileText size={16} /> Bon de commande</button><button className="btn btn-g" onClick={() => setEdit(newDeal("Commande"))}><ShoppingCart size={16} /> Commande</button><button className="btn btn-p" onClick={() => setEdit(newDeal("Devis"))}><Plus size={16} /> Nouveau devis</button></div>
     </div>
     <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "stretch", marginBottom: 14 }}>
       <FilterGroup label="Type" color="#3F60AA">{[["tous", "Tous"], ["devis", "Devis"], ["commande", "Commandes"], ["facture", "Factures"]].map(([k, l]) => k === "tous" ? <AllChip key={k} active={filt === "tous"} onClick={() => setFilt("tous")}>Tous</AllChip> : <button key={k} className={cx("chip", filt === k && "on")} onClick={() => setFilt(k)} style={filt === k ? { background: "#3F60AA", borderColor: "#3F60AA", color: "#fff" } : {}}>{l}</button>)}</FilterGroup>
@@ -7829,6 +7829,7 @@ function Deals({ data, persist, go, focus }) {
       })()}
     </tbody></table></div></div>
     {edit && <Modal title={edit.ref + " — " + edit.type} onClose={() => setEdit(null)} xl><DealForm deal={edit} accounts={accounts} products={products} sites={data.sites} onSave={(d) => { save(d); setEdit(null); }} onPreview={(d) => { save(d); setEdit(null); setPreview({ ...d, montant: dealMontant(d.lines), qte: dealQte(d.lines) }); }} /></Modal>}
+    {bdc && <BonCommandeModal data={data} persist={persist} products={products} onClose={() => setBdc(false)} />}
     {imp && <Modal title="Importer une commande" onClose={() => setImp(false)} wide><ImportCommande accounts={accounts} sites={data.sites || []} products={products} onCreate={importToDraft} onUsage={(u) => persist((d) => ({ ...d, claudeUsage: addUsage(d.claudeUsage, u) }))} /></Modal>}
     {preview && <DevisPreview deal={preview} account={dealAccount(data, preview)} settings={settings} products={products} data={data} onClose={() => setPreview(null)} />}
   </div>);
@@ -8020,6 +8021,151 @@ function DevisPreview({ deal, account, settings, products = [], data = {}, onClo
       </div>
     </div>
   </div></div>, document.body);
+}
+// ===== Bon de commande revendeur =====
+// Formulaire VIERGE adressé aux revendeurs : un bloc de coordonnées à remplir, puis la grille du
+// catalogue avec une case « quantité souhaitée » par référence. Ce qui se modifie ici, ce sont les
+// références présentes dans la grille. Le document emprunte la chaîne d'impression du devis
+// (.print-doc-overlay / .devis-doc) : marges de page, blocs insécables et bouton Imprimer / PDF.
+const bdcPU = (p) => Number(p.cessionHT != null ? p.cessionHT : p.pvc) || 0;
+function BonCommandeDoc({ products, refs, onClose }) {
+  const groupes = useMemo(() => {
+    const choisis = sortProducts((products || []).filter((p) => refs.includes(p.code)));
+    const m = {}; choisis.forEach((p) => { const g = prodCat(p); (m[g] = m[g] || []).push(p); });
+    return CAT_ORDER.filter((g) => m[g]).map((g) => ({ g, items: m[g] }));
+  }, [products, refs]);
+  useEffect(() => {
+    document.body.classList.add("doc-print");
+    const prev = document.title; document.title = "Bon de commande revendeur";
+    return () => { document.body.classList.remove("doc-print"); document.title = prev; };
+  }, []);
+  const annee = new Date().getFullYear();
+  const zc = francoZone("metropole");
+  const Case = ({ h = 26 }) => <div style={{ height: h, border: "1px solid #d3dae8", borderRadius: 5, background: "#fbfcfe" }} />;
+  const Champ = ({ label }) => (<div style={{ flex: "1 1 44%", minWidth: 190 }}>
+    <div style={{ fontSize: 10.5, color: "#6b7589", marginBottom: 3 }}>{label}</div><Case />
+  </div>);
+  return createPortal(<div className="ov print-doc-overlay" onClick={onClose}><div className="doc" onClick={(e) => e.stopPropagation()}>
+    <div className="no-print" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: "1px solid var(--line)", position: "sticky", top: 0, background: "#fff", zIndex: 3 }}>
+      <strong>Bon de commande revendeur</strong>
+      <div style={{ display: "flex", gap: 8 }}><button className="btn btn-p btn-s" onClick={() => window.print()}><Printer size={15} /> Imprimer / PDF</button><button className="iconbtn" onClick={onClose}><X size={16} /></button></div>
+    </div>
+    <div className="devis-doc">
+      <div className="doc-bloc" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
+        <div>{LOGO_DATA_URI ? <img src={LOGO_DATA_URI} alt="Pen'Up 3D" style={{ height: 54 }} /> : <div style={{ fontFamily: "'Bricolage Grotesque',sans-serif", fontSize: 22, fontWeight: 800, color: "#3F60AA" }}>PEN'UP 3D</div>}</div>
+        <div style={{ textAlign: "right", fontSize: 11, color: "#6b7589", lineHeight: 1.5 }}>Pen'Up 3D SAS<br />20 Place Prax Paris, 82000 Montauban<br />SIRET 978 651 891 00035<br />matthis-anael@penup3d.com<br />+33 6 95 50 37 68</div>
+      </div>
+      <div className="doc-bloc" style={{ display: "flex", alignItems: "baseline", gap: 10, marginTop: 10, paddingBottom: 8, borderBottom: "3px solid #F8B133" }}>
+        <span style={{ fontFamily: "'Bricolage Grotesque',sans-serif", fontSize: 20, fontWeight: 800, color: "#3F60AA" }}>BON DE COMMANDE</span>
+        <span style={{ fontSize: 12, color: "#6b7589" }}>· Revendeurs — Tarifs {annee}</span>
+      </div>
+
+      <div className="doc-bloc" style={{ marginTop: 18 }}>
+        <div style={{ fontSize: 11.5, fontWeight: 800, color: "#3F60AA", letterSpacing: ".04em", borderBottom: "2px solid #F8B133", paddingBottom: 4, marginBottom: 10 }}>VOS COORDONNÉES</div>
+        <div style={{ background: "#f4f6fb", borderRadius: 8, padding: 14, display: "flex", flexWrap: "wrap", gap: 12 }}>
+          <Champ label="Raison sociale" />
+          <Champ label="Magasin / Enseigne" />
+          <Champ label="Adresse de livraison" />
+          <Champ label="Nom du contact" />
+          <Champ label="Email" />
+          <Champ label="Téléphone" />
+          <Champ label="N° SIRET / TVA intracom." />
+        </div>
+      </div>
+
+      <div style={{ marginTop: 18 }}>
+        <div className="doc-bloc">
+          <div style={{ fontSize: 11.5, fontWeight: 800, color: "#3F60AA", letterSpacing: ".04em", borderBottom: "2px solid #F8B133", paddingBottom: 4, marginBottom: 6 }}>VOTRE SÉLECTION</div>
+          <div style={{ fontSize: 10.5, fontStyle: "italic", color: "#6b7589", marginBottom: 8 }}>Tous nos produits sont conformes aux normes jouets en vigueur (CE, EN 71).</div>
+        </div>
+        {groupes.length === 0 ? <div style={{ fontSize: 12, color: "#6b7589" }}>Aucune référence sélectionnée.</div> : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead><tr style={{ background: "#3F60AA", color: "#fff" }}>
+              <th style={{ textAlign: "left", padding: "6px 9px", fontWeight: 700 }}>Référence</th>
+              <th style={{ textAlign: "left", padding: "6px 9px", fontWeight: 700 }}>Désignation</th>
+              <th style={{ textAlign: "right", padding: "6px 9px", fontWeight: 700, whiteSpace: "nowrap" }}>Prix unitaire HT (€)</th>
+              <th style={{ textAlign: "center", padding: "6px 9px", fontWeight: 700, width: 130 }}>Quantité souhaitée</th>
+            </tr></thead>
+            <tbody>{groupes.map(({ g, items }) => (<React.Fragment key={g}>
+              <tr><td colSpan={4} style={{ background: "#2f4c86", color: "#fff", fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: ".03em", padding: "5px 9px" }}>{g}</td></tr>
+              {items.map((p, i) => (<tr key={p.code} style={{ background: i % 2 ? "#fff" : "#f7f9fd" }}>
+                <td style={{ padding: "6px 9px", fontSize: 10.5, color: "#6b7589" }}>{p.code}</td>
+                <td style={{ padding: "6px 9px", fontWeight: 700 }}>{p.designation}</td>
+                <td style={{ padding: "6px 9px", textAlign: "right" }} className="tnum">{eur2(bdcPU(p))}</td>
+                <td style={{ padding: "4px 9px" }}><Case h={20} /></td>
+              </tr>))}
+            </React.Fragment>))}</tbody>
+          </table>)}
+        <div className="doc-bloc" style={{ fontSize: 10.5, fontStyle: "italic", color: "#6b7589", marginTop: 8 }}>Indiquez les quantités souhaitées. Nous vous adresserons en retour un devis chiffré et détaillé pour validation.</div>
+      </div>
+
+      <div className="doc-bloc" style={{ marginTop: 18, border: "1px solid #3F60AA", borderRadius: 8, padding: 12, fontSize: 11.5, lineHeight: 1.6 }}>
+        <div style={{ fontWeight: 800, color: "#3F60AA", marginBottom: 5 }}>CONDITIONS</div>
+        <div><strong>Livraison :</strong> franco {zc.seuil} € HT France métropolitaine, participation {zc.part} € HT en dessous (Monaco {FRANCO_ZONES.monaco.seuil} € HT et Corse {FRANCO_ZONES.corse.seuil} € HT : voir grille tarifaire).</div>
+        <div><strong>Paiement :</strong> première commande à régler à la commande. Des conditions à 30 jours date de facture peuvent être mises en place après ouverture de compte et validation du dossier.</div>
+      </div>
+      <div className="doc-bloc" style={{ marginTop: 16, fontSize: 10.5, color: "#6b7589", lineHeight: 1.7 }}>
+        <div>Document à compléter et à retourner à : matthis-anael@penup3d.com</div>
+        <div>Cette sélection vaut demande de commande ; elle sera confirmée par notre devis, soumis à nos CGV.</div>
+        <div style={{ marginTop: 8, textAlign: "center", borderTop: "1px solid #eef1f7", paddingTop: 8 }}>Pen'Up 3D SAS · 20 Place Prax Paris, 82000 Montauban · matthis-anael@penup3d.com · +33 6 95 50 37 68</div>
+      </div>
+    </div>
+  </div></div>, document.body);
+}
+// Éditeur du bon de commande : on coche les références à faire figurer dans la grille. La sélection
+// est enregistrée avec les réglages, donc retrouvée d'une fois sur l'autre et partagée entre appareils.
+function BonCommandeModal({ data, persist, products, onClose }) {
+  const vend = useMemo(() => sortProducts((products || []).filter((p) => p.vendable)), [products]);
+  const enregistre = (data.settings && data.settings.bonCommandeRefs) || null;
+  const [refs, setRefs] = useState(() => {
+    const dispo = new Set(vend.map((p) => p.code));
+    const gardes = Array.isArray(enregistre) ? enregistre.filter((c) => dispo.has(c)) : null;
+    return gardes && gardes.length ? gardes : vend.map((p) => p.code);
+  });
+  const [apercu, setApercu] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const groupes = useMemo(() => {
+    const m = {}; vend.forEach((p) => { const g = prodCat(p); (m[g] = m[g] || []).push(p); });
+    return CAT_ORDER.filter((g) => m[g]).map((g) => ({ g, items: m[g] }));
+  }, [vend]);
+  const coche = (code) => refs.includes(code);
+  const bascule = (code) => setRefs((r) => r.includes(code) ? r.filter((x) => x !== code) : [...r, code]);
+  const basculeGroupe = (items) => {
+    const codes = items.map((p) => p.code);
+    const tout = codes.every((c) => refs.includes(c));
+    setRefs((r) => tout ? r.filter((c) => !codes.includes(c)) : Array.from(new Set([...r, ...codes])));
+  };
+  const enregistrer = () => { persist((p) => ({ ...p, settings: { ...p.settings, bonCommandeRefs: refs } })); setMsg("Sélection enregistrée : elle sera reprise la prochaine fois."); setTimeout(() => setMsg(null), 3000); };
+  return (<>
+    <Modal title="Bon de commande revendeur" onClose={onClose} wide>
+      <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55, marginBottom: 12 }}>Formulaire vierge à envoyer à un revendeur : il remplit ses coordonnées et les quantités souhaitées, vous lui retournez un devis chiffré. Cochez ici les références à faire figurer dans la grille, puis imprimez ou enregistrez en PDF comme un devis.</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 700 }}>{refs.length} référence{refs.length > 1 ? "s" : ""} sur {vend.length}</span>
+        <span style={{ flex: 1 }} />
+        <button className="btn btn-g btn-s" onClick={() => setRefs(vend.map((p) => p.code))}>Tout cocher</button>
+        <button className="btn btn-g btn-s" onClick={() => setRefs([])}>Tout décocher</button>
+      </div>
+      <div style={{ maxHeight: 380, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 11, padding: 8 }}>
+        {groupes.map(({ g, items }) => (<div key={g} style={{ marginBottom: 10 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: .3, color: "var(--muted)", padding: "4px 2px", cursor: "pointer" }}>
+            <input type="checkbox" checked={items.every((p) => coche(p.code))} onChange={() => basculeGroupe(items)} style={{ width: 15, height: 15 }} />{g}
+          </label>
+          {items.map((p) => (<label key={p.code} style={{ display: "flex", alignItems: "center", gap: 9, padding: "5px 8px", borderRadius: 8, fontSize: 13, cursor: "pointer" }}>
+            <input type="checkbox" checked={coche(p.code)} onChange={() => bascule(p.code)} style={{ width: 15, height: 15 }} />
+            <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.designation}</span>
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>{p.code}</span>
+            <span className="tnum" style={{ fontWeight: 700, fontSize: 12.5, minWidth: 62, textAlign: "right" }}>{eur2(bdcPU(p))}</span>
+          </label>))}
+        </div>))}
+      </div>
+      {msg && <div style={{ fontSize: 12, color: "var(--green)", fontWeight: 700, marginTop: 8 }}>{msg}</div>}
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+        <button className="btn btn-g" onClick={enregistrer}><Save size={15} /> Enregistrer la sélection</button>
+        <button className="btn btn-p" onClick={() => setApercu(true)} disabled={!refs.length}><Printer size={15} /> Aperçu / Imprimer</button>
+      </div>
+    </Modal>
+    {apercu && <BonCommandeDoc products={products} refs={refs} onClose={() => setApercu(false)} />}
+  </>);
 }
 function buildBonCommandeHTML(products) {
   const vend = sortProducts((products || []).filter((p) => p.vendable && !(p.code || "").includes("-KIT-")));
