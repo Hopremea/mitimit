@@ -4537,9 +4537,8 @@ function EntityAgenda({ events, onAdd, onOpen, onView, onSuggest, onMerge, onSav
 const Stat = ({ label, value }) => (<div><div style={{ color: "var(--muted)", fontSize: 11.5, fontWeight: 600 }}>{label}</div><div className="pu-display tnum" style={{ fontSize: 18, marginTop: 2 }}>{value}</div></div>);
 // Pile d'établissements d'un même groupe. Repliée, elle occupe une seule case de la grille et
 // laisse deviner l'épaisseur du paquet ; dépliée, elle s'étale sur toute la largeur avec ses tuiles.
-function PileEtablissements({ acc, rows, ouvert, onToggle, rendreTuile }) {
+function PileEtablissements({ acc, rows, ouvert, onToggle, rendreTuile, siege }) {
   const n = rows.length;
-  const villes = Array.from(new Set(rows.map((r) => (r.kind === "site" ? (r.site.ville || "") : "")).filter(Boolean)));
   if (!ouvert) {
     return (<button className="tile pile" onClick={onToggle} title={"Déployer les " + n + " établissements de " + (acc.enseigne || "ce groupe")} style={{ textAlign: "left", border: "1px solid var(--line)", borderRadius: 12, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4, fontFamily: "inherit" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
@@ -4547,7 +4546,7 @@ function PileEtablissements({ acc, rows, ouvert, onToggle, rendreTuile }) {
         <span style={{ fontWeight: 700, fontSize: 13.5, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{acc.enseigne || "Groupe"}</span>
       </div>
       <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{n} établissements</div>
-      {villes.length > 0 && <div style={{ fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{villes.slice(0, 3).join(", ")}{villes.length > 3 ? "…" : ""}</div>}
+      {siege && <div style={{ fontSize: 11.5, color: "var(--muted)", display: "flex", alignItems: "flex-start", gap: 5, minWidth: 0 }} title={"Siège : " + siege}><MapPin size={12} style={{ flexShrink: 0, marginTop: 2 }} /><span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{siege}</span></div>}
       <div style={{ marginTop: 3, display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 700, color: "var(--blue)" }}><ChevronDown size={13} /> Déployer</div>
     </button>);
   }
@@ -5787,6 +5786,13 @@ function Accounts({ data, persist, go, focus }) {
   // Empilement par groupe : les établissements d'une même enseigne sont rangés en pile, les uns
   // derrière les autres, et se déploient d'un clic. Une enseigne à 300 magasins ne noie plus la
   // grille. Une recherche en cours déploie tout : on cherche un magasin précis, pas une pile.
+  // Adresse du siège d'un groupe : l'établissement décisionnaire s'il existe (c'est LE siège),
+  // sinon l'adresse postale du compte, sinon sa ville. Les sièges ne figurent pas dans la grille,
+  // qui ne liste que les points de vente : il faut donc aller les chercher dans les sites.
+  const adresseSiege = (a) => {
+    const dec = (data.sites || []).find((x) => x.accountId === a.id && x.type === "decision" && !x.archived && x.adresse);
+    return (dec && dec.adresse) || a.adressePostale || a.adresseLivraison || a.ville || "";
+  };
   const entrees = (() => {
     const out = []; const pos = new Map();
     visibleRows.forEach((r) => {
@@ -5861,7 +5867,7 @@ function Accounts({ data, persist, go, focus }) {
           <button onClick={() => setDirPdv((d) => d === "asc" ? "desc" : "asc")} title={dirPdv === "asc" ? "Ordre croissant (cliquer pour inverser)" : "Ordre décroissant (cliquer pour inverser)"} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 11px", border: "1px solid var(--line)", borderRadius: "0 9px 9px 0", background: "#fff", cursor: "pointer", color: "var(--blue)" }}>{dirPdv === "asc" ? <ArrowDown size={15} /> : <ArrowUp size={15} />}</button>
         </div>
       </div>
-      {pdvRows.length === 0 ? <div className="empty">Aucun point de vente enregistré.</div> : visibleRows.length === 0 ? <div className="empty">Aucun établissement ne correspond à la recherche.</div> : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(238px, 1fr))", gap: 10 }}>{entrees.map((e) => e.type === "pile" ? <PileEtablissements key={e.key} acc={e.acc} rows={e.rows} ouvert={pilesOuvertes.has(e.acc.id) || !!nq} onToggle={() => basculerPile(e.acc.id)} rendreTuile={rendreTuile} /> : rendreTuile(e.row))}</div>}
+      {pdvRows.length === 0 ? <div className="empty">Aucun point de vente enregistré.</div> : visibleRows.length === 0 ? <div className="empty">Aucun établissement ne correspond à la recherche.</div> : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(238px, 1fr))", gap: 10 }}>{entrees.map((e) => e.type === "pile" ? <PileEtablissements key={e.key} acc={e.acc} rows={e.rows} siege={adresseSiege(e.acc)} ouvert={pilesOuvertes.has(e.acc.id) || !!nq} onToggle={() => basculerPile(e.acc.id)} rendreTuile={rendreTuile} /> : rendreTuile(e.row))}</div>}
     </div>
     </>)}
     {archiveEdit && <ArchiveModal account={archiveEdit} existing={archiveEdit} onUsage={(u) => persist((d) => ({ ...d, claudeUsage: addUsage(d.claudeUsage, u) }))} onArchive={(info) => { saveArchive(archiveEdit, info); setArchiveEdit(null); }} onClose={() => setArchiveEdit(null)} />}
