@@ -9,7 +9,7 @@ import {
   Calculator, Percent, Truck, ArrowRightLeft, RefreshCw, Eye, Printer,
   LifeBuoy, Repeat, Zap, Map as MapIcon, Send, ExternalLink, Link2,
   Layers, ShoppingCart, Navigation, Copy, Sparkles, Camera, Image as ImageIcon, Palette, Mic, MessageSquare, Video, Archive, ArchiveRestore,
-  Download, Paperclip, Moon, Sun, ChevronRight, ChevronDown, CalendarDays,
+  Download, Paperclip, Moon, Sun, ChevronRight, ChevronDown, ChevronUp, CalendarDays,
   Wand2, Scissors, Check, CheckSquare, Tag as TagIcon, ListChecks, Bookmark,
   Clock, Hourglass, Flame, Trophy, Award, Coffee,
   GitBranch, Save, FileDown, ArrowDown, ArrowUp, Undo2,
@@ -3456,7 +3456,7 @@ ${ACCENT_CSS}
 .acc-card{background:#fff;border:1px solid var(--line);border-radius:13px;padding:12px;margin-bottom:9px;cursor:pointer;transition:.16s;border-left:4px solid var(--blue);}
 .acc-card:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(20,32,58,.1);}
 /* Tuile cliquable : réagit au survol (légère élévation + ombre) comme les boutons. */
-.tile{cursor:pointer;background:rgba(255,255,255,.52);-webkit-backdrop-filter:blur(16px) saturate(170%);backdrop-filter:blur(16px) saturate(170%);box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 4px 16px rgba(20,32,58,.06);transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease;}
+.tile{cursor:pointer;color:var(--ink);background:rgba(255,255,255,.52);-webkit-backdrop-filter:blur(16px) saturate(170%);backdrop-filter:blur(16px) saturate(170%);box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 4px 16px rgba(20,32,58,.06);transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease;}
 .tile:hover{transform:translateY(-3px);box-shadow:0 12px 26px rgba(20,32,58,.14);border-color:#cfdcf3;background:var(--bg);}
 .warntip{position:relative;display:inline-flex;align-items:center;cursor:help;flex-shrink:0;}
 /* Flèches de défilement, en bas à droite. z-index 35 : au-dessus du contenu, mais SOUS la barre de
@@ -3601,6 +3601,18 @@ ${ACCENT_CSS}
 .deal-card h5{margin:0 0 4px;font-size:13px;font-weight:700;}
 .deal-card .deal-meta{color:var(--muted);font-size:11px;display:flex;align-items:center;gap:6px;}
 .deal-card .deal-amount{font-weight:700;font-size:13px;color:var(--ink);}
+
+/* Pile d'établissements : deux cartes décalées derrière la tuile donnent l'épaisseur du paquet.
+   Dessinées à l'ombre portée plutôt qu'avec des éléments fantômes — l'ombre épouse exactement la
+   taille et l'arrondi de la tuile, sans dépendre d'un empilement de plans. Le décalage (9 px) reste
+   sous l'écart de la grille (10 px) : une pile ne mord jamais sur sa voisine. */
+.tile.pile{background:var(--card);-webkit-backdrop-filter:none;backdrop-filter:none;
+  box-shadow:4px 4px 0 -1px var(--card),4px 4px 0 0 var(--line),9px 9px 0 -1px var(--card),9px 9px 0 0 var(--line),0 4px 16px rgba(20,32,58,.07);}
+.tile.pile:hover{box-shadow:6px 6px 0 -1px var(--card),6px 6px 0 0 var(--line),13px 13px 0 -1px var(--card),13px 13px 0 0 var(--line),0 8px 22px rgba(20,32,58,.12);}
+/* En thème sombre, « .pu-root.dark .tile » est plus spécifique et écraserait ces ombres. */
+.pu-root.dark .tile.pile{background:var(--card);-webkit-backdrop-filter:none;backdrop-filter:none;
+  box-shadow:4px 4px 0 -1px var(--card),4px 4px 0 0 var(--line),9px 9px 0 -1px var(--card),9px 9px 0 0 var(--line),0 4px 16px rgba(0,0,0,.35);}
+.pu-root.dark .tile.pile:hover{box-shadow:6px 6px 0 -1px var(--card),6px 6px 0 0 var(--line),13px 13px 0 -1px var(--card),13px 13px 0 0 var(--line),0 8px 22px rgba(0,0,0,.45);}
 
 /* Calendrier */
 .cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;}
@@ -4432,6 +4444,29 @@ function EntityAgenda({ events, onAdd, onOpen, onView, onSuggest, onMerge, onSav
   </div>);
 }
 const Stat = ({ label, value }) => (<div><div style={{ color: "var(--muted)", fontSize: 11.5, fontWeight: 600 }}>{label}</div><div className="pu-display tnum" style={{ fontSize: 18, marginTop: 2 }}>{value}</div></div>);
+// Pile d'établissements d'un même groupe. Repliée, elle occupe une seule case de la grille et
+// laisse deviner l'épaisseur du paquet ; dépliée, elle s'étale sur toute la largeur avec ses tuiles.
+function PileEtablissements({ acc, rows, ouvert, onToggle, rendreTuile }) {
+  const n = rows.length;
+  const villes = Array.from(new Set(rows.map((r) => (r.kind === "site" ? (r.site.ville || "") : "")).filter(Boolean)));
+  if (!ouvert) {
+    return (<button className="tile pile" onClick={onToggle} title={"Déployer les " + n + " établissements de " + (acc.enseigne || "ce groupe")} style={{ textAlign: "left", border: "1px solid var(--line)", borderRadius: 12, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4, fontFamily: "inherit" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+        {acc.logo ? <img src={acc.logo} alt="" style={{ width: 22, height: 22, borderRadius: 6, objectFit: "cover", flexShrink: 0 }} /> : <Building2 size={15} style={{ color: "var(--muted)", flexShrink: 0 }} />}
+        <span style={{ fontWeight: 700, fontSize: 13.5, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{acc.enseigne || "Groupe"}</span>
+      </div>
+      <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{n} établissements</div>
+      {villes.length > 0 && <div style={{ fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{villes.slice(0, 3).join(", ")}{villes.length > 3 ? "…" : ""}</div>}
+      <div style={{ marginTop: 3, display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 700, color: "var(--blue)" }}><ChevronDown size={13} /> Déployer</div>
+    </button>);
+  }
+  return (<div style={{ gridColumn: "1 / -1" }}>
+    <button onClick={onToggle} className="btn btn-ghost btn-s" style={{ marginBottom: 8, fontWeight: 700 }} title="Replier la pile">
+      <ChevronUp size={14} /> {acc.enseigne || "Groupe"} · {n} établissements — replier
+    </button>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(238px, 1fr))", gap: 10 }}>{rows.map(rendreTuile)}</div>
+  </div>);
+}
 // Options groupées (Groupes / Indépendants) pour les sélecteurs simples au niveau compte.
 function AccountOptions({ accounts = [] }) {
   const groups = accounts.filter(isGroupe); const independents = accounts.filter((a) => !isGroupe(a));
@@ -5644,6 +5679,31 @@ function Accounts({ data, persist, go, focus }) {
   const _ouvCache = new Map();
   const ouvRank = (r) => { if (_ouvCache.has(r.key)) return _ouvCache.get(r.key); const e = statutHoraire((r.kind === "site" && r.site.horaires) || "").etat; const v = e === "ouvert" ? 0 : e === "ferme" ? 1 : 2; _ouvCache.set(r.key, v); return v; };
   const visibleRows = pdvRows.filter((r) => !nq || rowHay(r).includes(nq)).sort((x, y) => { const c = sortPdv === "enseigne" ? (ensName(x).localeCompare(ensName(y)) || storeName(x).localeCompare(storeName(y))) : sortPdv === "ville" ? (adrName(x).localeCompare(adrName(y)) || storeName(x).localeCompare(storeName(y))) : sortPdv === "type" ? ((surfName(x) || "\uffff").localeCompare(surfName(y) || "\uffff") || storeName(x).localeCompare(storeName(y))) : sortPdv === "etape" ? (stageRank(x) - stageRank(y) || storeName(x).localeCompare(storeName(y))) : sortPdv === "ouverture" ? (ouvRank(x) - ouvRank(y) || storeName(x).localeCompare(storeName(y))) : storeName(x).localeCompare(storeName(y)); return dirPdv === "asc" ? c : -c; });
+  const rendreTuile = (r) => { const acc = r.acc; const st = acc ? stageMeta(acc.stage) : null; const adr = r.kind === "site" ? (r.site.adresse || "") : (acc && (acc.ville || acc.adressePostale) || ""); const surf = r.kind === "site" ? r.site.typeSurface : (acc && acc.typeSurface); const ens = r.kind === "site" && acc ? acc.enseigne : ""; return (
+        <button key={r.key} className="tile" onClick={() => openStore(r)} style={{ textAlign: "left", border: "1px solid var(--line)", borderRadius: 12, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4, fontFamily: "inherit" }}>
+          {(() => { const img = r.kind === "site" ? (r.site.photo || (acc && acc.logo)) : (acc && acc.logo); return (<div style={{ display: "flex", alignItems: "center", gap: 7 }}>{img ? <img src={img} alt="" style={{ width: 22, height: 22, borderRadius: 6, objectFit: "contain", background: "#fff", border: "1px solid var(--line)", flexShrink: 0 }} /> : <Store size={15} color="var(--blue)" style={{ flexShrink: 0 }} />}<span style={{ fontWeight: 800, fontSize: 13.5, lineHeight: 1.2 }}>{storeName(r)}</span><PastilleHoraire txt={r.kind === "site" ? r.site.horaires : ""} /><WarnTip msgs={r.kind === "site" ? anoms["s:" + r.site.id] : (acc ? anoms["a:" + acc.id] : null)} /></div>); })()}
+          {ens && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{ens}</div>}
+          {adr && <div style={{ fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{adr}</div>}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 5, marginTop: 2 }}>{surf && <Badge color="#3F60AA">{surf}</Badge>}{r.kind === "acc" && <Badge color="#9aa6bd">point de vente unique</Badge>}{st && <StageTag stage={st} />}</div>
+          {(() => { const ca = sumMontant((data.deals || []).filter((d) => isCaSigne(d) && (r.kind === "site" ? d.livraisonSiteId === r.site.id : (acc && d.accountId === acc.id)))); return <div style={{ marginTop: 3, fontWeight: 700, color: ca > 0 ? "var(--green)" : "var(--muted)", fontSize: 12.5 }} className="tnum" title="Chiffre d'affaires HT généré (factures validées)">CA : {eur(ca)}</div>; })()}
+        </button>);
+  };
+  // Empilement par groupe : les établissements d'une même enseigne sont rangés en pile, les uns
+  // derrière les autres, et se déploient d'un clic. Une enseigne à 300 magasins ne noie plus la
+  // grille. Une recherche en cours déploie tout : on cherche un magasin précis, pas une pile.
+  const [pilesOuvertes, setPilesOuvertes] = useState(() => new Set());
+  const basculerPile = (id) => setPilesOuvertes((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const entrees = (() => {
+    const out = []; const pos = new Map();
+    visibleRows.forEach((r) => {
+      const gid = (r.kind === "site" && r.acc && isMulti(r.acc)) ? r.acc.id : null;
+      if (!gid) { out.push({ type: "tuile", key: r.key, row: r }); return; }
+      if (!pos.has(gid)) { pos.set(gid, out.length); out.push({ type: "pile", key: "pile_" + gid, acc: r.acc, rows: [] }); }
+      out[pos.get(gid)].rows.push(r);
+    });
+    // Un groupe dont un seul établissement est visible n'a pas de pile à faire.
+    return out.map((e) => (e.type === "pile" && e.rows.length < 2) ? { type: "tuile", key: e.rows[0].key, row: e.rows[0] } : e);
+  })();
   return (<div className="fade">
     <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}><button className={cx("btn", "btn-s", view === "actifs" ? "btn-p" : "btn-g")} onClick={() => setView("actifs")}>Actifs ({accounts.length - archivedAccounts.length})</button><button className={cx("btn", "btn-s", view === "archive" ? "btn-p" : "btn-g")} onClick={() => setView("archive")}><Archive size={14} /> Archivés ({archivedAccounts.length + archivedSites.length})</button></div>
     {view === "archive" ? (<div>
@@ -5707,14 +5767,7 @@ function Accounts({ data, persist, go, focus }) {
           <button onClick={() => setDirPdv((d) => d === "asc" ? "desc" : "asc")} title={dirPdv === "asc" ? "Ordre croissant (cliquer pour inverser)" : "Ordre décroissant (cliquer pour inverser)"} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 11px", border: "1px solid var(--line)", borderRadius: "0 9px 9px 0", background: "#fff", cursor: "pointer", color: "var(--blue)" }}>{dirPdv === "asc" ? <ArrowDown size={15} /> : <ArrowUp size={15} />}</button>
         </div>
       </div>
-      {pdvRows.length === 0 ? <div className="empty">Aucun point de vente enregistré.</div> : visibleRows.length === 0 ? <div className="empty">Aucun établissement ne correspond à la recherche.</div> : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(238px, 1fr))", gap: 10 }}>{visibleRows.map((r) => { const acc = r.acc; const st = acc ? stageMeta(acc.stage) : null; const adr = r.kind === "site" ? (r.site.adresse || "") : (acc && (acc.ville || acc.adressePostale) || ""); const surf = r.kind === "site" ? r.site.typeSurface : (acc && acc.typeSurface); const ens = r.kind === "site" && acc ? acc.enseigne : ""; return (
-        <button key={r.key} className="tile" onClick={() => openStore(r)} style={{ textAlign: "left", border: "1px solid var(--line)", borderRadius: 12, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4, fontFamily: "inherit" }}>
-          {(() => { const img = r.kind === "site" ? (r.site.photo || (acc && acc.logo)) : (acc && acc.logo); return (<div style={{ display: "flex", alignItems: "center", gap: 7 }}>{img ? <img src={img} alt="" style={{ width: 22, height: 22, borderRadius: 6, objectFit: "contain", background: "#fff", border: "1px solid var(--line)", flexShrink: 0 }} /> : <Store size={15} color="var(--blue)" style={{ flexShrink: 0 }} />}<span style={{ fontWeight: 800, fontSize: 13.5, lineHeight: 1.2 }}>{storeName(r)}</span><PastilleHoraire txt={r.kind === "site" ? r.site.horaires : ""} /><WarnTip msgs={r.kind === "site" ? anoms["s:" + r.site.id] : (acc ? anoms["a:" + acc.id] : null)} /></div>); })()}
-          {ens && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{ens}</div>}
-          {adr && <div style={{ fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{adr}</div>}
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 5, marginTop: 2 }}>{surf && <Badge color="#3F60AA">{surf}</Badge>}{r.kind === "acc" && <Badge color="#9aa6bd">point de vente unique</Badge>}{st && <StageTag stage={st} />}</div>
-          {(() => { const ca = sumMontant((data.deals || []).filter((d) => isCaSigne(d) && (r.kind === "site" ? d.livraisonSiteId === r.site.id : (acc && d.accountId === acc.id)))); return <div style={{ marginTop: 3, fontWeight: 700, color: ca > 0 ? "var(--green)" : "var(--muted)", fontSize: 12.5 }} className="tnum" title="Chiffre d'affaires HT généré (factures validées)">CA : {eur(ca)}</div>; })()}
-        </button>); })}</div>}
+      {pdvRows.length === 0 ? <div className="empty">Aucun point de vente enregistré.</div> : visibleRows.length === 0 ? <div className="empty">Aucun établissement ne correspond à la recherche.</div> : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(238px, 1fr))", gap: 10 }}>{entrees.map((e) => e.type === "pile" ? <PileEtablissements key={e.key} acc={e.acc} rows={e.rows} ouvert={pilesOuvertes.has(e.acc.id) || !!nq} onToggle={() => basculerPile(e.acc.id)} rendreTuile={rendreTuile} /> : rendreTuile(e.row))}</div>}
     </div>
     </>)}
     {archiveEdit && <ArchiveModal account={archiveEdit} existing={archiveEdit} onUsage={(u) => persist((d) => ({ ...d, claudeUsage: addUsage(d.claudeUsage, u) }))} onArchive={(info) => { saveArchive(archiveEdit, info); setArchiveEdit(null); }} onClose={() => setArchiveEdit(null)} />}
