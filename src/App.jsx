@@ -3399,6 +3399,16 @@ ${ACCENT_CSS}
 .kan{display:grid;grid-template-columns:repeat(5,1fr);gap:13px;}
 .col{background:rgba(255,255,255,.5);-webkit-backdrop-filter:blur(14px) saturate(160%);backdrop-filter:blur(14px) saturate(160%);border:1px solid rgba(255,255,255,.55);border-radius:16px;padding:11px;min-height:120px;box-shadow:0 6px 22px rgba(20,32,58,.08);}
 .col-h{display:flex;align-items:center;gap:7px;font-weight:700;font-size:12.5px;margin-bottom:10px;}.col-h .cnt{margin-left:auto;color:var(--muted);font-weight:600;}
+/* Corps d'une colonne : trois fiches visibles au maximum (hauteur posée en JS), le reste défile. */
+/* Colonne du pipeline : trois fiches visibles au maximum (hauteur posée en JS), le reste défile.
+   La barre native est masquée au profit de la nôtre, toujours visible à droite. */
+.col-scroll{position:relative;}
+.col-body{overflow-y:auto;overscroll-behavior:contain;padding-right:13px;scrollbar-width:none;-ms-overflow-style:none;}
+.col-body::-webkit-scrollbar{width:0;height:0;}
+.col-sb{position:absolute;top:0;right:0;bottom:0;width:7px;border-radius:7px;background:rgba(20,32,58,.08);cursor:pointer;}
+.col-sb-th{position:absolute;left:0;right:0;border-radius:7px;background:rgba(20,32,58,.3);cursor:grab;transition:background .15s ease;}
+.col-sb-th:hover{background:rgba(20,32,58,.48);}
+.col-sb-th:active{cursor:grabbing;background:rgba(20,32,58,.55);}
 .acc-card{background:#fff;border:1px solid var(--line);border-radius:13px;padding:12px;margin-bottom:9px;cursor:pointer;transition:.16s;border-left:4px solid var(--blue);}
 .acc-card:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(20,32,58,.1);}
 /* Tuile cliquable : réagit au survol (légère élévation + ombre) comme les boutons. */
@@ -3564,6 +3574,22 @@ ${ACCENT_CSS}
 .cal-cell.cal-drop{border-color:var(--blue);background:var(--blue-l);box-shadow:0 0 0 2px rgba(63,96,170,.3);}
 .cal-drag-ghost{position:fixed;z-index:99999;pointer-events:none;transform:translate(-50%,-150%);max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11.5px;font-weight:700;padding:5px 9px;border-radius:8px;background:#fff;color:#16203a;border:1px solid #e2e7f0;border-left:3px solid var(--blue);box-shadow:0 12px 30px rgba(20,32,58,.3);font-family:'Plus Jakarta Sans',system-ui,sans-serif;}
 
+/* Sélecteur à remplissage progressif (SearchSelect) */
+.ss{position:relative;}
+.ss>.ss-input{width:100%;padding-right:28px;text-overflow:ellipsis;}
+.ss-caret{position:absolute;right:9px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none;}
+.ss-pop{position:fixed;z-index:100000;overflow-y:auto;overscroll-behavior:contain;background:var(--card,#fff);border:1px solid var(--line);border-radius:11px;box-shadow:0 14px 36px rgba(20,32,58,.22);padding:5px;font-family:'Plus Jakarta Sans',system-ui,sans-serif;}
+.ss-group{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);padding:8px 9px 3px;}
+.ss-opt{display:flex;align-items:baseline;gap:7px;padding:7px 9px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--ink);}
+.ss-opt .ss-lab{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ss-opt .ss-sub{color:var(--muted);font-size:11.5px;flex-shrink:0;}
+.ss-opt.ss-act{background:var(--blue-l);}
+.ss-opt.ss-sel .ss-lab{font-weight:800;}
+.ss-empty{padding:11px 9px;font-size:12.5px;color:var(--muted);text-align:center;}
+/* La liste est posée sur <body> par un portail : le thème sombre de .pu-root ne la traverse pas,
+   on lui redonne donc ses propres variables. */
+.ss-pop.ss-dark{--ink:#e8edf5;--muted:#94a0b8;--line:#28324a;--blue-l:#1d2945;background:#171f33;border-color:#28324a;box-shadow:0 14px 36px rgba(0,0,0,.55);}
+
 /* Pièces jointes */
 .attach-list{display:flex;flex-direction:column;gap:6px;}
 .attach-row{display:flex;align-items:center;gap:10px;padding:8px 10px;background:#fafbfd;border:1px solid var(--line);border-radius:9px;font-size:13px;}
@@ -3593,6 +3619,9 @@ ${ACCENT_CSS}
 .pu-root.dark .topbar h2{color:var(--ink);}
 .pu-root.dark .acc-card,.pu-root.dark .deal-card,.pu-root.dark .col,.pu-root.dark .cal-cell{background:#171f33;}
 .pu-root.dark .col{background:rgba(23,31,51,.45);border-color:rgba(255,255,255,.10);}
+.pu-root.dark .col-sb{background:rgba(255,255,255,.08);}
+.pu-root.dark .col-sb-th{background:rgba(255,255,255,.32);}
+.pu-root.dark .col-sb-th:hover{background:rgba(255,255,255,.5);}
 .pu-root.dark .cal-ev{background:#1d2945;color:var(--ink);}
 .pu-root.dark .cal-drag-ghost{background:#1d2945;color:#e8ecf6;border-color:rgba(255,255,255,.14);box-shadow:0 12px 30px rgba(0,0,0,.5);}
 .pu-root.dark .attach-row{background:#10172a;}
@@ -4341,6 +4370,15 @@ function AccountOptions({ accounts = [] }) {
   const groups = accounts.filter(isGroupe); const independents = accounts.filter((a) => !isGroupe(a));
   return (<>{groups.length > 0 && <optgroup label="Groupes">{groups.map((a) => <option key={a.id} value={a.id}>{a.enseigne}</option>)}</optgroup>}{independents.length > 0 && <optgroup label="Établissements indépendants">{independents.map((a) => <option key={a.id} value={a.id}>{a.enseigne}{a.ville ? " · " + a.ville : ""}</option>)}</optgroup>}</>);
 }
+// Mêmes options, à plat, pour le sélecteur à remplissage progressif (SearchSelect).
+function accountOptionList(accounts = [], head = []) {
+  const groups = accounts.filter(isGroupe); const independents = accounts.filter((a) => !isGroupe(a));
+  return [
+    ...head,
+    ...groups.map((a) => ({ value: a.id, label: a.enseigne, sub: a.code || "", group: "Groupes" })),
+    ...independents.map((a) => ({ value: a.id, label: a.enseigne, sub: a.ville || a.code || "", group: "Établissements indépendants" })),
+  ];
+}
 // Sélecteur d'établissement unifié, partagé par tous les formulaires : groupes (qui déroulent
 // leurs établissements), indépendants, et établissements sans groupe. Valeur = accountId::siteId.
 function EtabPicker({ accounts = [], sites = [], accountId, siteId, onChange, allowNone = true, noneLabel = "— Aucun —" }) {
@@ -4348,18 +4386,110 @@ function EtabPicker({ accounts = [], sites = [], accountId, siteId, onChange, al
   const orphans = (sites || []).filter((s) => !s.accountId && (s.type === "pdv" || s.type === "decision"));
   const acc = accounts.find((a) => a.id === accountId);
   const cur = (!accountId && siteId) ? "::" + siteId : (accountId ? ((acc && isGroupe(acc)) ? accountId + "::" + (siteId || "") : accountId + "::") : "");
-  return (<select value={cur} onChange={(e) => { const [a, s] = e.target.value.split("::"); onChange(a || "", s || ""); }}>
-    {allowNone && <option value="">{noneLabel}</option>}
-    {groups.map((g) => { const ss = (sites || []).filter((s) => s.accountId === g.id && (s.type === "pdv" || s.type === "decision")); return (<optgroup key={g.id} label={g.enseigne}><option value={g.id + "::"}>{g.enseigne} — niveau groupe</option>{ss.map((s) => <option key={s.id} value={g.id + "::" + s.id}>{(s.type === "decision" ? "Siège · " : "") + (s.label || s.adresse || s.id)}</option>)}</optgroup>); })}
-    {independents.length > 0 && <optgroup label="Établissements indépendants">{independents.map((a) => <option key={a.id} value={a.id + "::"}>{a.enseigne}{a.ville ? " · " + a.ville : ""}</option>)}</optgroup>}
-    {orphans.length > 0 && <optgroup label="Établissements sans groupe">{orphans.map((s) => <option key={s.id} value={"::" + s.id}>{s.label || s.adresse || s.id}</option>)}</optgroup>}
-  </select>);
+  const options = useMemo(() => {
+    const out = [];
+    if (allowNone) out.push({ value: "", label: noneLabel });
+    groups.forEach((g) => {
+      out.push({ value: g.id + "::", label: g.enseigne + " — niveau groupe", sub: g.code || "", group: g.enseigne });
+      (sites || []).filter((s) => s.accountId === g.id && (s.type === "pdv" || s.type === "decision")).forEach((s) => out.push({ value: g.id + "::" + s.id, label: (s.type === "decision" ? "Siège · " : "") + (s.label || s.adresse || s.id), sub: s.ville || "", group: g.enseigne }));
+    });
+    independents.forEach((a) => out.push({ value: a.id + "::", label: a.enseigne, sub: a.ville || a.code || "", group: "Établissements indépendants" }));
+    orphans.forEach((s) => out.push({ value: "::" + s.id, label: s.label || s.adresse || s.id, sub: s.ville || "", group: "Établissements sans groupe" }));
+    return out;
+  }, [accounts, sites, allowNone, noneLabel]);
+  return (<SearchSelect value={cur} options={options} placeholder={allowNone ? noneLabel : "Rechercher un groupe ou un établissement…"} emptyLabel="Aucun groupe ni établissement ne correspond" onChange={(v) => { const [a, s] = String(v).split("::"); onChange(a || "", s || ""); }} />);
 }
 const KV = ({ icon, k, v, last }) => (<div className="kv" style={last ? { borderBottom: 0 } : undefined}><span className="k">{icon}{k}</span><span className="v" style={{ color: v ? "var(--ink)" : "var(--muted)" }}>{v || "—"}</span></div>);
 let _cb = 0;
 function Combo({ value, onChange, options, placeholder, transform }) {
   const id = useMemo(() => "cb" + (++_cb), []);
   return (<><input list={id} value={value || ""} placeholder={placeholder} onChange={(e) => onChange(transform ? transform(e.target.value) : e.target.value)} /><datalist id={id}>{options.map((o) => <option key={o} value={o} />)}</datalist></>);
+}
+// Sélecteur à remplissage progressif : on tape, la liste se filtre au fil des lettres (accents et
+// ponctuation ignorés, mots dans n'importe quel ordre), on choisit à la souris ou au clavier.
+// Même confort que le champ « Sujet » d'un échange, mais la valeur retenue reste un identifiant :
+// impossible d'enregistrer un texte libre qui ne correspond à aucune fiche.
+// Chaque option : { value, label, sub?, group? }.
+function SearchSelect({ value, onChange, options = [], placeholder = "Rechercher ou choisir…", emptyLabel = "Aucun résultat", style, inputStyle, title, disabled }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [act, setAct] = useState(0);
+  const [pos, setPos] = useState(null);
+  const boxRef = useRef(null); const popRef = useRef(null); const inputRef = useRef(null);
+  const sel = options.find((o) => o.value === value) || null;
+  const selText = sel ? (sel.label + (sel.sub ? " · " + sel.sub : "")) : "";
+  const filtered = useMemo(() => {
+    const n = normSansAccents(q).replace(/[^a-z0-9]+/g, " ").trim();
+    if (!n) return options;
+    const words = n.split(" ");
+    return options.filter((o) => { const hay = normSansAccents([o.label, o.sub, o.group].filter(Boolean).join(" ")).replace(/[^a-z0-9]+/g, " "); return words.every((w) => hay.includes(w)); });
+  }, [options, q]);
+
+  // La liste est posée en position fixe (portail) : elle n'est jamais rognée par une fenêtre
+  // modale ou une carte à débordement caché, et se retourne vers le haut si le bas manque de place.
+  const place = useCallback(() => {
+    const el = boxRef.current; if (!el) return;
+    const r = el.getBoundingClientRect();
+    const vh = (typeof window !== "undefined" && window.visualViewport) ? window.visualViewport.height : window.innerHeight;
+    const vw = window.innerWidth;
+    const below = vh - r.bottom, above = r.top;
+    const down = below >= 220 || below >= above;
+    // La liste peut déborder d'un champ étroit (barre de filtres) pour ne pas tronquer les noms,
+    // sans jamais sortir de l'écran.
+    const width = Math.min(Math.max(r.width, 260), vw - 16);
+    const left = Math.max(8, Math.min(r.left, vw - width - 8));
+    setPos({ left, width, top: down ? r.bottom + 4 : null, bottom: down ? null : Math.max(4, vh - r.top + 4), maxH: Math.max(140, Math.min(300, (down ? below : above) - 12)), dark: !!document.querySelector(".pu-root.dark") });
+  }, []);
+  useEffect(() => {
+    if (!open) { setPos(null); return; }
+    place();
+    const h = () => place();
+    window.addEventListener("scroll", h, true); window.addEventListener("resize", h);
+    return () => { window.removeEventListener("scroll", h, true); window.removeEventListener("resize", h); };
+  }, [open, place]);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e) => { if (boxRef.current && boxRef.current.contains(e.target)) return; if (popRef.current && popRef.current.contains(e.target)) return; setOpen(false); setQ(""); };
+    document.addEventListener("mousedown", away); document.addEventListener("touchstart", away);
+    return () => { document.removeEventListener("mousedown", away); document.removeEventListener("touchstart", away); };
+  }, [open]);
+  // Garde l'option survolée au clavier dans le champ de vision.
+  useEffect(() => { const el = popRef.current && popRef.current.querySelector('[data-ss-act="1"]'); if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" }); }, [act, pos]);
+
+  const openList = () => { if (open || disabled) return; setQ(""); setAct(Math.max(0, options.findIndex((o) => o.value === value))); setOpen(true); };
+  const pick = (o) => { setOpen(false); setQ(""); if (o.value !== value) onChange(o.value); };
+  const onKey = (e) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!open) { openList(); return; }
+      const n = filtered.length; if (!n) return;
+      setAct((i) => (i + (e.key === "ArrowDown" ? 1 : -1) + n) % n);
+    } else if (e.key === "Enter") { if (open && filtered[act]) { e.preventDefault(); pick(filtered[act]); } }
+    else if (e.key === "Escape") { if (open) { e.preventDefault(); e.stopPropagation(); setOpen(false); setQ(""); } }
+    else if (e.key === "Tab") { if (open) { setOpen(false); setQ(""); } }
+  };
+
+  return (<div className="ss" ref={boxRef} style={style}>
+    <input ref={inputRef} className="ss-input" style={inputStyle} title={title || selText} disabled={disabled} autoComplete="off" spellCheck={false} role="combobox" aria-expanded={open}
+      value={open ? q : selText}
+      placeholder={open ? (selText || placeholder) : placeholder}
+      onChange={(e) => { setQ(e.target.value); setAct(0); if (!open) setOpen(true); }}
+      onFocus={openList} onClick={openList} onKeyDown={onKey} />
+    <ChevronDown className="ss-caret" size={15} />
+    {open && pos && createPortal(
+      <div className={cx("ss-pop", pos.dark && "ss-dark")} ref={popRef} style={{ left: pos.left, width: pos.width, top: pos.top != null ? pos.top : "auto", bottom: pos.bottom != null ? pos.bottom : "auto", maxHeight: pos.maxH }}>
+        {filtered.length === 0 ? <div className="ss-empty">{emptyLabel}</div> : filtered.map((o, i) => {
+          const head = o.group && (i === 0 || filtered[i - 1].group !== o.group);
+          return (<React.Fragment key={o.value + "|" + i}>
+            {head && <div className="ss-group">{o.group}</div>}
+            <div className={cx("ss-opt", i === act && "ss-act", o.value === value && "ss-sel")} data-ss-act={i === act ? "1" : undefined}
+              onMouseEnter={() => setAct(i)} onMouseDown={(e) => e.preventDefault()} onClick={() => pick(o)}>
+              <span className="ss-lab">{o.label}</span>{o.sub && <span className="ss-sub">{o.sub}</span>}
+            </div>
+          </React.Fragment>);
+        })}
+      </div>, document.body)}
+  </div>);
 }
 function AddrInput({ value, onChange, onCoords, placeholder, rows = 2, known = [] }) {
   const [res, setRes] = useState([]); const [open, setOpen] = useState(false); const [busy, setBusy] = useState(false);
@@ -7540,7 +7670,7 @@ function ImportCommande({ accounts, products, onCreate, onUsage }) {
       {fileName && <span style={{ fontSize: 12, color: "var(--muted)" }}>{fileName}</span>}
       {aiBusy && <span style={{ fontSize: 12, color: "var(--blue)", display: "inline-flex", alignItems: "center", gap: 6 }}><Sparkles size={13} className="spin" /> Lecture du document en cours…</span>}
     </div>
-    <div className="fld"><label>Rattacher à l'enseigne</label><select value={accountId} onChange={(e) => setAccountId(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.enseigne}{a.code ? " · " + a.code : ""}</option>)}</select></div>
+    <div className="fld"><label>Rattacher à l'enseigne</label><SearchSelect value={accountId} onChange={setAccountId} options={accountOptionList(accounts)} placeholder="Taper les premières lettres de l'enseigne…" emptyLabel="Aucune enseigne ne correspond" /></div>
     {aiErr && <div className="dup-warn" style={{ marginBottom: 10 }}><AlertTriangle size={15} /> {aiErr}</div>}
     {!parsed && <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}><button className="btn btn-p" onClick={() => runAI()} disabled={!text.trim() || aiBusy} title="L'IA lit le texte ou le mail, propose les lignes de commande, et vous vérifiez avant de créer le brouillon"><Sparkles size={15} className={aiBusy ? "spin" : ""} /> {aiBusy ? "Lecture en cours…" : "Importer la commande"}</button></div>}
     {parsed && <>
@@ -7615,7 +7745,7 @@ function Deals({ data, persist, go, focus }) {
     <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "stretch", marginBottom: 14 }}>
       <FilterGroup label="Type" color="#3F60AA">{[["tous", "Tous"], ["devis", "Devis"], ["commande", "Commandes"], ["facture", "Factures"]].map(([k, l]) => k === "tous" ? <AllChip key={k} active={filt === "tous"} onClick={() => setFilt("tous")}>Tous</AllChip> : <button key={k} className={cx("chip", filt === k && "on")} onClick={() => setFilt(k)} style={filt === k ? { background: "#3F60AA", borderColor: "#3F60AA", color: "#fff" } : {}}>{l}</button>)}</FilterGroup>
       <FilterGroup label="Statut" color="#F8B133"><AllChip active={filtStatut === "tous"} onClick={() => setFiltStatut("tous")}>Tous</AllChip>{Object.entries(DEAL_STATUS).map(([k, v]) => <button key={k} className={cx("chip", filtStatut === k && "on")} onClick={() => setFiltStatut(k)} style={filtStatut === k ? { background: v.color, borderColor: v.color, color: onColor(v.color) } : { borderLeft: `4px solid ${v.color}` }}>{v.label}</button>)}</FilterGroup>
-      <FilterGroup label="Groupe / établissement" color="#2bb673"><select value={filtAcc} onChange={(e) => setFiltAcc(e.target.value)} style={{ border: "1px solid rgba(43,182,115,.4)", background: "#fff", borderRadius: 8, padding: "5px 9px", fontFamily: "inherit", fontSize: 12.5, minWidth: 140 }}><option value="tous">Toutes</option><AccountOptions accounts={accounts} /></select></FilterGroup>
+      <FilterGroup label="Groupe / établissement" color="#2bb673"><SearchSelect value={filtAcc} onChange={setFiltAcc} options={accountOptionList(accounts, [{ value: "tous", label: "Toutes" }])} placeholder="Toutes" style={{ minWidth: 160 }} inputStyle={{ border: "1px solid rgba(43,182,115,.4)", background: "#fff", borderRadius: 8, padding: "5px 26px 5px 9px", fontFamily: "inherit", fontSize: 12.5 }} /></FilterGroup>
       <FilterGroup label="Période" color="#7c5cf0"><input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="Date à partir de" style={{ border: "1px solid rgba(124,92,240,.4)", background: "#fff", borderRadius: 8, padding: "5px 8px", fontFamily: "inherit", fontSize: 12 }} /><span style={{ fontSize: 12, color: "#7c5cf0", fontWeight: 700 }}>→</span><input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="Date jusqu'à" style={{ border: "1px solid rgba(124,92,240,.4)", background: "#fff", borderRadius: 8, padding: "5px 8px", fontFamily: "inherit", fontSize: 12 }} /></FilterGroup>
       {hasFilter && <div style={{ display: "flex", alignItems: "center" }}><button className="btn btn-ghost btn-s" onClick={resetFilters} title="Réinitialiser tous les filtres"><X size={13} /> Effacer</button></div>}
     </div>
@@ -8080,7 +8210,7 @@ function Reassort({ data, persist }) {
     </div>
     <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "stretch", marginBottom: 14 }}>
       <FilterGroup label="Urgence" color="#FF5A45"><AllChip active={filtUrg === "tous"} onClick={() => setFiltUrg("tous")}>Toutes</AllChip><button className={cx("chip", filtUrg === "rupture" && "on")} onClick={() => setFiltUrg("rupture")} style={filtUrg === "rupture" ? { background: "var(--red)", borderColor: "var(--red)", color: "#fff" } : { borderLeft: "4px solid var(--red)" }}>Rupture imminente</button><button className={cx("chip", filtUrg === "alerte" && "on")} onClick={() => setFiltUrg("alerte")} style={filtUrg === "alerte" ? { background: "var(--amber)", borderColor: "var(--amber)", color: "#fff" } : { borderLeft: "4px solid var(--amber)" }}>À réassortir</button><button className={cx("chip", filtUrg === "ok" && "on")} onClick={() => setFiltUrg("ok")} style={filtUrg === "ok" ? { background: "var(--green)", borderColor: "var(--green)", color: "#fff" } : { borderLeft: "4px solid var(--green)" }}>OK</button></FilterGroup>
-      <FilterGroup label="Groupe / établissement" color="#2bb673"><select value={filtAcc} onChange={(e) => setFiltAcc(e.target.value)} style={{ border: "1px solid rgba(43,182,115,.4)", background: "#fff", borderRadius: 8, padding: "5px 9px", fontFamily: "inherit", fontSize: 12.5, minWidth: 140 }}><option value="tous">Toutes</option><AccountOptions accounts={accounts} /></select></FilterGroup>
+      <FilterGroup label="Groupe / établissement" color="#2bb673"><SearchSelect value={filtAcc} onChange={setFiltAcc} options={accountOptionList(accounts, [{ value: "tous", label: "Toutes" }])} placeholder="Toutes" style={{ minWidth: 160 }} inputStyle={{ border: "1px solid rgba(43,182,115,.4)", background: "#fff", borderRadius: 8, padding: "5px 26px 5px 9px", fontFamily: "inherit", fontSize: 12.5 }} /></FilterGroup>
       {hasFilter && <div style={{ display: "flex", alignItems: "center" }}><button className="btn btn-ghost btn-s" onClick={() => { setQ(""); setFiltAcc("tous"); setFiltUrg("tous"); }}><X size={13} /> Effacer</button></div>}
     </div>
     <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>{rows.length} ligne{rows.length > 1 ? "s" : ""} {hasFilter ? "filtrée" + (rows.length > 1 ? "s" : "") : ""}</div>
@@ -8122,7 +8252,7 @@ function Sav({ data, persist }) {
     <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "stretch", marginBottom: 14 }}>
       <FilterGroup label="Statut" color="#3F60AA">{[["actifs", "Actifs"], ["tous", "Tous"], ["resolu", "Résolus"], ["clos", "Clos"]].map(([k, l]) => k === "tous" ? <AllChip key={k} active={filt === "tous"} onClick={() => setFilt("tous")}>Tous</AllChip> : <button key={k} className={cx("chip", filt === k && "on")} onClick={() => setFilt(k)} style={filt === k ? { background: "#3F60AA", borderColor: "#3F60AA", color: "#fff" } : {}}>{l}</button>)}</FilterGroup>
       <FilterGroup label="Gravité" color="#FF5A45"><AllChip active={filtGrav === "tous"} onClick={() => setFiltGrav("tous")}>Toutes</AllChip>{Object.entries(SAV_GRAV).map(([k, v]) => <button key={k} className={cx("chip", filtGrav === k && "on")} onClick={() => setFiltGrav(k)} style={filtGrav === k ? { background: v.color, borderColor: v.color, color: onColor(v.color) } : { borderLeft: `4px solid ${v.color}` }}>{v.label}</button>)}</FilterGroup>
-      <FilterGroup label="Groupe / établissement" color="#2bb673"><select value={filtAcc} onChange={(e) => setFiltAcc(e.target.value)} style={{ border: "1px solid rgba(43,182,115,.4)", background: "#fff", borderRadius: 8, padding: "5px 9px", fontFamily: "inherit", fontSize: 12.5, minWidth: 140 }}><option value="tous">Toutes</option><AccountOptions accounts={accounts} /></select></FilterGroup>
+      <FilterGroup label="Groupe / établissement" color="#2bb673"><SearchSelect value={filtAcc} onChange={setFiltAcc} options={accountOptionList(accounts, [{ value: "tous", label: "Toutes" }])} placeholder="Toutes" style={{ minWidth: 160 }} inputStyle={{ border: "1px solid rgba(43,182,115,.4)", background: "#fff", borderRadius: 8, padding: "5px 26px 5px 9px", fontFamily: "inherit", fontSize: 12.5 }} /></FilterGroup>
       {hasFilter && <div style={{ display: "flex", alignItems: "center" }}><button className="btn btn-ghost btn-s" onClick={() => { setQ(""); setFiltAcc("tous"); setFiltGrav("tous"); setFilt("actifs"); }}><X size={13} /> Effacer</button></div>}
     </div>
     {(() => {
@@ -8176,7 +8306,7 @@ function SavForm({ ticket, accounts, products, sites = [], contacts = [], deals 
   return (<>
     <div className="fld"><label>Titre</label><input value={f.titre} onChange={(e) => up("titre", e.target.value)} /></div>
     <div className="row2"><div className="fld"><label>Canal</label><select value={f.canal} onChange={(e) => up("canal", e.target.value)}>{Object.entries(SAV_CANAL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div><div className="fld"><label>Gravité</label><select value={f.gravite} onChange={(e) => up("gravite", e.target.value)}>{Object.entries(SAV_GRAV).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div></div>
-    <div className="row2"><div className="fld"><label>Groupe / établissement</label><select value={f.accountId} onChange={(e) => onAccount(e.target.value)}><option value="">—</option><AccountOptions accounts={accounts} /></select></div><div className="fld"><label>Produit</label><select value={f.code} onChange={(e) => up("code", e.target.value)}><option value="">—</option>{sortProducts(products).map((p) => <option key={p.code} value={p.code}>{p.designation}</option>)}</select></div></div>
+    <div className="row2"><div className="fld"><label>Groupe / établissement</label><SearchSelect value={f.accountId} onChange={onAccount} options={accountOptionList(accounts, [{ value: "", label: "—" }])} placeholder="Rechercher une enseigne…" emptyLabel="Aucune enseigne ne correspond" /></div><div className="fld"><label>Produit</label><select value={f.code} onChange={(e) => up("code", e.target.value)}><option value="">—</option>{sortProducts(products).map((p) => <option key={p.code} value={p.code}>{p.designation}</option>)}</select></div></div>
     <div className="row2"><div className="fld"><label>Établissement concerné</label><select value={f.siteId || ""} onChange={(e) => up("siteId", e.target.value)}><option value="">— tout le compte —</option>{accSites.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select></div><div className="fld"><label>Commande / facture liée</label><select value={f.dealId || ""} onChange={(e) => up("dealId", e.target.value)}><option value="">— aucune —</option>{accDeals.map((d) => <option key={d.id} value={d.id}>{(d.ref || d.type) + " · " + (d.date || "")}</option>)}</select></div></div>
     <div className="row2"><div className="fld"><label>Contact concerné</label><select value={f.contactId || ""} onChange={(e) => up("contactId", e.target.value)}><option value="">— aucun —</option>{accContacts.map((c) => <option key={c.id} value={c.id}>{fullName(c)}{c.fonction ? " (" + c.fonction + ")" : ""}</option>)}</select></div><div className="fld"><label>Lot / n° de série (optionnel)</label><input value={f.lot || ""} onChange={(e) => up("lot", e.target.value)} placeholder="Ex : LOT-2026-04" /></div></div>
     <div className="row2"><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div><div className="fld"><label>Statut</label><select value={f.statut} onChange={(e) => up("statut", e.target.value)}>{Object.entries(SAV_STATUT).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div></div>
@@ -12301,6 +12431,52 @@ function ScrollArrows() {
 }
 
 // ============== PIPELINE KANBAN (deals par étape) ==============
+// Corps d'une colonne du pipeline : au-delà de TROIS fiches, la colonne défile sur place au lieu
+// de s'allonger. La hauteur est mesurée sur la 3e fiche réellement rendue, jamais devinée : les
+// cartes n'ont pas toutes la même taille (référence sur une ou deux lignes).
+// La barre de droite est dessinée par nous : les barres natives sont flottantes sur macOS comme
+// sous Linux et disparaissent au repos, alors qu'on veut un repère visible en permanence.
+function KanColumn({ children }) {
+  const bodyRef = useRef(null);
+  const dragRef = useRef(null);
+  const [thumb, setThumb] = useState(null);
+  const sync = useCallback(() => {
+    const el = bodyRef.current; if (!el) return;
+    const cards = el.querySelectorAll(".deal-card");
+    if (cards.length > 3) { const t = cards[2]; el.style.maxHeight = Math.round(t.offsetTop + t.offsetHeight - cards[0].offsetTop + 2) + "px"; }
+    else el.style.maxHeight = "";
+    const ch = el.clientHeight, sh = el.scrollHeight, st = el.scrollTop;
+    if (sh <= ch + 1) { setThumb((p) => p ? null : p); return; }
+    const h = Math.max(30, Math.round(ch * ch / sh));
+    const top = Math.round((ch - h) * (st / (sh - ch)));
+    setThumb((p) => (p && p.top === top && p.h === h) ? p : { top, h });
+  }, []);
+  useEffect(() => { sync(); });
+  useEffect(() => { const h = () => sync(); window.addEventListener("resize", h); return () => window.removeEventListener("resize", h); }, [sync]);
+  const onThumbDown = (e) => {
+    const el = bodyRef.current; if (!el) return;
+    e.preventDefault(); e.stopPropagation();
+    dragRef.current = { y: e.clientY, st: el.scrollTop };
+    const move = (ev) => {
+      const b = bodyRef.current, d = dragRef.current; if (!b || !d) return;
+      const ch = b.clientHeight, sh = b.scrollHeight;
+      const range = ch - Math.max(30, ch * ch / sh);
+      if (range > 0) b.scrollTop = d.st + (ev.clientY - d.y) * (sh - ch) / range;
+    };
+    const up = () => { dragRef.current = null; document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up); };
+    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
+  };
+  const onTrackDown = (e) => {
+    const el = bodyRef.current; if (!el || !thumb) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const y = e.clientY - r.top;
+    el.scrollTop += (y < thumb.top ? -1 : y > thumb.top + thumb.h ? 1 : 0) * el.clientHeight * 0.9;
+  };
+  return (<div className="col-scroll">
+    <div className="col-body" ref={bodyRef} onScroll={sync}>{children}</div>
+    {thumb && <div className="col-sb" onPointerDown={onTrackDown}><div className="col-sb-th" style={{ top: thumb.top, height: thumb.h }} onPointerDown={onThumbDown} /></div>}
+  </div>);
+}
 function PipelineKanban({ data, persist, go, embedded }) {
   const STAGES_K = [
     { id: "brouillon", label: "Brouillon", color: "#9aa6bd" },
@@ -12334,11 +12510,13 @@ function PipelineKanban({ data, persist, go, embedded }) {
   const onDragEnd = () => { setDragId(null); setDragCol(null); };
   const onDragOver = (e, st) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (st && st !== dragCol) setDragCol(st); };
   const onDrop = (e, st) => { e.preventDefault(); const id = e.dataTransfer.getData("text/plain") || dragId; setDragId(null); setDragCol(null); if (id) moveDeal(id, st); };
+
   return (<div className={embedded ? "" : "fade"}>
     {!embedded && <div className="card" style={{ marginBottom: 14, borderLeft: "4px solid var(--blue)", fontSize: 13, lineHeight: 1.55 }}>Glissez les fiches deals entre les colonnes pour faire évoluer l'étape. Pipeline total visible en haut de chaque colonne.</div>}
     <div className="kan kan-deals">
       {STAGES_K.map((s) => (<div key={s.id} className="col" onDragOver={(e) => onDragOver(e, s.id)} onDrop={(e) => onDrop(e, s.id)} style={dragCol === s.id && dragId ? { background: s.color + "1f", outline: `2px dashed ${s.color}`, outlineOffset: -2 } : undefined}>
         <div className="col-h"><i className="dot" style={{ background: s.color }} />{s.label}<span className="cnt">{cntBy(s.id)} · {eur(totalBy(s.id))}</span></div>
+        <KanColumn>
         {data.deals.filter((d) => d.statut === s.id).sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((d) => { const cli = dealClient(d); const dref = docRef(d, { code: dealDocCode(data, d) }); return (
           <div key={d.id} className="deal-card" draggable onDragStart={(e) => { dwell.hide(); onDragStart(e, d.id); }} onDragEnd={onDragEnd} onClick={() => go("deals", d.id)} {...dwell.bind(() => { const ds = DEAL_STATUS[d.statut] || DEAL_STATUS.brouillon; return { title: dref || d.ref || d.type, subtitle: cli, badge: ds.label, badgeColor: ds.color, accent: s.color, rows: [{ label: "Type", value: d.type }, { label: "Date", value: d.date }, { label: "Montant", value: eur(d.montant) }, { label: "Statut", value: ds.label }] }; })} style={{ borderLeft: `4px solid ${s.color}`, opacity: dragId === d.id ? 0.4 : 1, cursor: "grab" }}>
             <h5>{dref || d.ref || d.type}</h5>
@@ -12350,6 +12528,7 @@ function PipelineKanban({ data, persist, go, embedded }) {
           </div>
         ); })}
         {data.deals.filter((d) => d.statut === s.id).length === 0 && <div style={{ fontSize: 11.5, color: "var(--muted)", padding: "8px 4px", textAlign: "center" }}>Vide</div>}
+        </KanColumn>
       </div>))}
     </div>
     {dwell.node}
@@ -13566,7 +13745,7 @@ function EventForm({ event, accounts, onSave, onDelete, isExisting }) {
     <div className="fld"><label>Type d'événement</label><div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 6 }}>{Object.entries(EVENT_TYPES).map(([k, v]) => (<button key={k} type="button" onClick={() => setType(k)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", border: f.type === k ? `2px solid ${v.color}` : "1px solid var(--line)", borderRadius: 10, background: f.type === k ? v.color + "18" : "transparent", color: "var(--ink)", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, textAlign: "left" }}><span style={{ fontSize: 14 }}>{v.icon}</span><span style={{ flex: 1 }}>{v.label}</span><i className="dot" style={{ background: v.color }} /></button>))}</div></div>
     <div className="fld"><label>Titre</label><input value={f.titre} onChange={(e) => up("titre", e.target.value)} placeholder="Ex : Relancer Cultura, Salon du jouet, Préparer pitch…" autoFocus /><RecentChips champ="event.titre" onPick={(v) => up("titre", v)} /></div>
     <div className="row2"><div className="fld"><label>Date</label><input type="date" value={f.date} onChange={(e) => up("date", e.target.value)} /></div><div className="fld"><label>Heure (optionnel)</label><input type="time" value={f.heure} onChange={(e) => up("heure", e.target.value)} /></div></div>
-    <div className="fld"><label>Groupe / établissement lié (optionnel)</label><select value={f.accountId} onChange={(e) => up("accountId", e.target.value)}><option value="">Aucune</option><AccountOptions accounts={accounts} /></select></div>
+    <div className="fld"><label>Groupe / établissement lié (optionnel)</label><SearchSelect value={f.accountId || ""} onChange={(v) => up("accountId", v)} options={accountOptionList(accounts, [{ value: "", label: "Aucune" }])} placeholder="Aucune" emptyLabel="Aucune enseigne ne correspond" /></div>
     <div className="fld"><label>Couleur (par défaut selon le type, modifiable)</label><div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>{["#22C55E", "#3F60AA", "#0EA5A4", "#2563EB", "#F59E0B", "#A855F7", "#0891B2", "#EC4899", "#EF4444", "#475569", "#94A3B8"].map((c) => <button key={c} type="button" onClick={() => up("color", c)} style={{ width: 28, height: 28, borderRadius: 8, background: c, border: f.color === c ? "3px solid var(--ink)" : "1px solid var(--line)", cursor: "pointer" }} />)}<span style={{ fontSize: 11, color: "var(--muted)" }}>{f.color === EVENT_TYPES[f.type]?.color ? "couleur du type" : "couleur personnalisée"}</span></div></div>
     <div className="fld"><label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>Notes <MicDictate title="Dicter une note au micro" onText={(t) => up("notes", ((f.notes || "").trim() + (f.notes && f.notes.trim() ? " " : "") + t))} /></label><textarea rows={3} value={f.notes} onChange={(e) => up("notes", e.target.value)} placeholder="Détails, points à préparer, lien de visio…" /></div>
     <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>{isExisting ? <button className="btn btn-r btn-s" onClick={onDelete}><Trash2 size={14} /> Supprimer</button> : <span />}<button className="btn btn-p" onClick={() => { pousserRecent("event.titre", f.titre); onSave(f); }} disabled={!f.titre || !f.date}>Enregistrer</button></div>
