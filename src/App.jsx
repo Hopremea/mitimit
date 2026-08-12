@@ -3525,7 +3525,10 @@ ${ACCENT_CSS}
 .msg-actions{display:inline-flex;gap:3px;margin-left:auto;}
 .msg-actions .iconbtn{width:25px;height:25px;}
 .msg-subj{font-weight:700;font-size:13.5px;margin-top:4px;}
-.msg-body{font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.5;white-space:pre-wrap;}
+/* Un corps de courriel contient des URL de plusieurs centaines de caractères (liens Google Agenda) :
+   sans coupure autorisée, le bloc s'élargissait et faisait déborder toute la page vers la droite.
+   « anywhere » agit aussi sur la largeur minimale du bloc, contrairement à « break-word ». */
+.msg-body{font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;min-width:0;}
 .ev-link{display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#fff;cursor:pointer;font-family:inherit;color:var(--ink);transition:.15s;}
 .ev-link:hover{border-color:var(--blue);box-shadow:0 6px 16px rgba(20,32,58,.08);transform:translateY(-1px);}
 .ev-link svg:first-child{color:var(--blue);flex-shrink:0;}
@@ -3776,15 +3779,21 @@ ${ACCENT_CSS}
 }
 @media print{
 /* Impression d'un document (devis / commande / facture) : on imprime UNIQUEMENT le document. */
-@page{margin:0;}
+/* La marge est portée par la PAGE, pas par le document : elle se répète alors sur chaque feuille.
+   Un padding sur le document n'habille que le début et la fin du flux — une page 2 démarrait donc
+   collée au bord haut. */
+@page{margin:13mm 14mm;}
 /* Force le rendu des fonds colorés (bloc Total TTC, encadrés client/banque) à l'impression : sinon le PDF perd les aplats. */
 *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}
 /* Cas 1 — un document est ouvert : <body> porte la classe « doc-print » (posée par DevisPreview).
    On masque tout le reste (l'app) plutôt que de dépendre du sélecteur :has(), inégalement supporté à l'impression. */
+/* Le fond crème de l'application est peint par <html>/<body> sur TOUTE la feuille : sans cela, un
+   aplat coloré remplissait le bas de la dernière page, sous les mentions. */
+html,body{background:#fff!important;background-image:none!important;}
 body.doc-print > *:not(.print-doc-overlay){display:none!important;}
 body.doc-print .print-doc-overlay{position:static!important;inset:auto!important;display:block!important;background:#fff!important;backdrop-filter:none!important;padding:0!important;z-index:auto!important;}
 body.doc-print .print-doc-overlay .doc{position:static!important;max-height:none!important;overflow:visible!important;box-shadow:none!important;border-radius:0!important;width:100%!important;}
-body.doc-print .print-doc-overlay .devis-doc{position:static!important;width:auto!important;padding:12mm 14mm!important;}
+body.doc-print .print-doc-overlay .devis-doc{position:static!important;width:auto!important;padding:0!important;}
 body.doc-print .no-print{display:none!important;}
 /* Sauts de page soignés : un encadré, une ligne de tableau ou un bloc de mentions ne doit jamais
    être coupé en deux. S'il ne tient pas sur la page en cours, il repart entier sur la suivante.
@@ -7744,7 +7753,7 @@ function ImportCommande({ accounts, sites, products, onCreate, onUsage }) {
 }
 function Deals({ data, persist, go, focus }) {
   const { deals, accounts, products, settings } = data;
-  const [filt, setFilt] = useState("tous"); const [edit, setEdit] = useState(null); const [preview, setPreview] = useState(null); const [imp, setImp] = useState(false);
+  const [filt, setFilt] = useState("tous"); const [edit, setEdit] = useState(null); const [preview, setPreview] = useState(null); const [imp, setImp] = useState(false); const [bdc, setBdc] = useState(false);
   const [q, setQ] = useState(""); const [filtStatut, setFiltStatut] = useState("tous"); const [filtAcc, setFiltAcc] = useState("tous"); const [dateFrom, setDateFrom] = useState(""); const [dateTo, setDateTo] = useState(""); const [grp, setGrp] = useState("statut"); const [dir, setDir] = useState("asc");
   const [sel, setSel] = useState(() => new Set());
   useEffect(() => { if (focus && focus.id) { const d = data.deals.find((x) => x.id === focus.id); if (d) setPreview(d); } }, [focus && focus.n]);
@@ -7798,7 +7807,7 @@ function Deals({ data, persist, go, focus }) {
     <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
       <div style={{ position: "relative", flex: 1, minWidth: 200 }}><Search size={15} style={{ position: "absolute", left: 11, top: 11, color: "var(--muted)" }} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher par référence, groupe, établissement, produit, note…" style={{ width: "100%", padding: "9px 11px 9px 32px", border: "1px solid var(--line)", borderRadius: 11, fontFamily: "inherit", fontSize: 13.5 }} /></div>
       <GroupBar value={grp} onChange={setGrp} dir={dir} onToggleDir={() => setDir((d) => d === "asc" ? "desc" : "asc")} options={[{ id: "statut", label: "statut" }, { id: "enseigne", label: "groupe / établissement" }, { id: "type", label: "type" }, { id: "mois", label: "mois" }]} />
-      <div style={{ display: "flex", gap: 8 }}><button className="btn btn-ghost btn-s" onClick={() => downloadCSV(list.map((d) => { const acc = accOf(d.accountId); return { Reference: d.ref || "", Type: d.type, Date: d.date, Enseigne: acc ? acc.enseigne : "", Statut: (DEAL_STATUS[d.statut] || {}).label || d.statut, TVA_pct: d.tva, Montant_TTC_EUR: d.montant, Note: d.note || "" }; }), "deals-penup3d-" + new Date().toISOString().slice(0, 10) + ".csv")} title="Exporter en CSV"><FileDown size={14} /> CSV</button><button className="btn btn-g" onClick={() => setImp(true)} title="Coller une commande reçue et créer un brouillon de devis"><Upload size={16} /> Importer</button><button className="btn btn-g" onClick={() => setEdit(newDeal("Commande"))}><ShoppingCart size={16} /> Commande</button><button className="btn btn-p" onClick={() => setEdit(newDeal("Devis"))}><Plus size={16} /> Nouveau devis</button></div>
+      <div style={{ display: "flex", gap: 8 }}><button className="btn btn-ghost btn-s" onClick={() => downloadCSV(list.map((d) => { const acc = accOf(d.accountId); return { Reference: d.ref || "", Type: d.type, Date: d.date, Enseigne: acc ? acc.enseigne : "", Statut: (DEAL_STATUS[d.statut] || {}).label || d.statut, TVA_pct: d.tva, Montant_TTC_EUR: d.montant, Note: d.note || "" }; }), "deals-penup3d-" + new Date().toISOString().slice(0, 10) + ".csv")} title="Exporter en CSV"><FileDown size={14} /> CSV</button><button className="btn btn-g" onClick={() => setImp(true)} title="Coller une commande reçue et créer un brouillon de devis"><Upload size={16} /> Importer</button><button className="btn btn-g" onClick={() => setBdc(true)} title="Formulaire vierge à envoyer à un revendeur : il coche ses quantités, vous lui retournez un devis"><FileText size={16} /> Bon de commande</button><button className="btn btn-g" onClick={() => setEdit(newDeal("Commande"))}><ShoppingCart size={16} /> Commande</button><button className="btn btn-p" onClick={() => setEdit(newDeal("Devis"))}><Plus size={16} /> Nouveau devis</button></div>
     </div>
     <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "stretch", marginBottom: 14 }}>
       <FilterGroup label="Type" color="#3F60AA">{[["tous", "Tous"], ["devis", "Devis"], ["commande", "Commandes"], ["facture", "Factures"]].map(([k, l]) => k === "tous" ? <AllChip key={k} active={filt === "tous"} onClick={() => setFilt("tous")}>Tous</AllChip> : <button key={k} className={cx("chip", filt === k && "on")} onClick={() => setFilt(k)} style={filt === k ? { background: "#3F60AA", borderColor: "#3F60AA", color: "#fff" } : {}}>{l}</button>)}</FilterGroup>
@@ -7820,6 +7829,7 @@ function Deals({ data, persist, go, focus }) {
       })()}
     </tbody></table></div></div>
     {edit && <Modal title={edit.ref + " — " + edit.type} onClose={() => setEdit(null)} xl><DealForm deal={edit} accounts={accounts} products={products} sites={data.sites} onSave={(d) => { save(d); setEdit(null); }} onPreview={(d) => { save(d); setEdit(null); setPreview({ ...d, montant: dealMontant(d.lines), qte: dealQte(d.lines) }); }} /></Modal>}
+    {bdc && <BonCommandeModal data={data} persist={persist} products={products} onClose={() => setBdc(false)} />}
     {imp && <Modal title="Importer une commande" onClose={() => setImp(false)} wide><ImportCommande accounts={accounts} sites={data.sites || []} products={products} onCreate={importToDraft} onUsage={(u) => persist((d) => ({ ...d, claudeUsage: addUsage(d.claudeUsage, u) }))} /></Modal>}
     {preview && <DevisPreview deal={preview} account={dealAccount(data, preview)} settings={settings} products={products} data={data} onClose={() => setPreview(null)} />}
   </div>);
@@ -8011,6 +8021,151 @@ function DevisPreview({ deal, account, settings, products = [], data = {}, onClo
       </div>
     </div>
   </div></div>, document.body);
+}
+// ===== Bon de commande revendeur =====
+// Formulaire VIERGE adressé aux revendeurs : un bloc de coordonnées à remplir, puis la grille du
+// catalogue avec une case « quantité souhaitée » par référence. Ce qui se modifie ici, ce sont les
+// références présentes dans la grille. Le document emprunte la chaîne d'impression du devis
+// (.print-doc-overlay / .devis-doc) : marges de page, blocs insécables et bouton Imprimer / PDF.
+const bdcPU = (p) => Number(p.cessionHT != null ? p.cessionHT : p.pvc) || 0;
+function BonCommandeDoc({ products, refs, onClose }) {
+  const groupes = useMemo(() => {
+    const choisis = sortProducts((products || []).filter((p) => refs.includes(p.code)));
+    const m = {}; choisis.forEach((p) => { const g = prodCat(p); (m[g] = m[g] || []).push(p); });
+    return CAT_ORDER.filter((g) => m[g]).map((g) => ({ g, items: m[g] }));
+  }, [products, refs]);
+  useEffect(() => {
+    document.body.classList.add("doc-print");
+    const prev = document.title; document.title = "Bon de commande revendeur";
+    return () => { document.body.classList.remove("doc-print"); document.title = prev; };
+  }, []);
+  const annee = new Date().getFullYear();
+  const zc = francoZone("metropole");
+  const Case = ({ h = 26 }) => <div style={{ height: h, border: "1px solid #d3dae8", borderRadius: 5, background: "#fbfcfe" }} />;
+  const Champ = ({ label }) => (<div style={{ flex: "1 1 44%", minWidth: 190 }}>
+    <div style={{ fontSize: 10.5, color: "#6b7589", marginBottom: 3 }}>{label}</div><Case />
+  </div>);
+  return createPortal(<div className="ov print-doc-overlay" onClick={onClose}><div className="doc" onClick={(e) => e.stopPropagation()}>
+    <div className="no-print" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: "1px solid var(--line)", position: "sticky", top: 0, background: "#fff", zIndex: 3 }}>
+      <strong>Bon de commande revendeur</strong>
+      <div style={{ display: "flex", gap: 8 }}><button className="btn btn-p btn-s" onClick={() => window.print()}><Printer size={15} /> Imprimer / PDF</button><button className="iconbtn" onClick={onClose}><X size={16} /></button></div>
+    </div>
+    <div className="devis-doc">
+      <div className="doc-bloc" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
+        <div>{LOGO_DATA_URI ? <img src={LOGO_DATA_URI} alt="Pen'Up 3D" style={{ height: 54 }} /> : <div style={{ fontFamily: "'Bricolage Grotesque',sans-serif", fontSize: 22, fontWeight: 800, color: "#3F60AA" }}>PEN'UP 3D</div>}</div>
+        <div style={{ textAlign: "right", fontSize: 11, color: "#6b7589", lineHeight: 1.5 }}>Pen'Up 3D SAS<br />20 Place Prax Paris, 82000 Montauban<br />SIRET 978 651 891 00035<br />matthis-anael@penup3d.com<br />+33 6 95 50 37 68</div>
+      </div>
+      <div className="doc-bloc" style={{ display: "flex", alignItems: "baseline", gap: 10, marginTop: 10, paddingBottom: 8, borderBottom: "3px solid #F8B133" }}>
+        <span style={{ fontFamily: "'Bricolage Grotesque',sans-serif", fontSize: 20, fontWeight: 800, color: "#3F60AA" }}>BON DE COMMANDE</span>
+        <span style={{ fontSize: 12, color: "#6b7589" }}>· Revendeurs — Tarifs {annee}</span>
+      </div>
+
+      <div className="doc-bloc" style={{ marginTop: 18 }}>
+        <div style={{ fontSize: 11.5, fontWeight: 800, color: "#3F60AA", letterSpacing: ".04em", borderBottom: "2px solid #F8B133", paddingBottom: 4, marginBottom: 10 }}>VOS COORDONNÉES</div>
+        <div style={{ background: "#f4f6fb", borderRadius: 8, padding: 14, display: "flex", flexWrap: "wrap", gap: 12 }}>
+          <Champ label="Raison sociale" />
+          <Champ label="Magasin / Enseigne" />
+          <Champ label="Adresse de livraison" />
+          <Champ label="Nom du contact" />
+          <Champ label="Email" />
+          <Champ label="Téléphone" />
+          <Champ label="N° SIRET / TVA intracom." />
+        </div>
+      </div>
+
+      <div style={{ marginTop: 18 }}>
+        <div className="doc-bloc">
+          <div style={{ fontSize: 11.5, fontWeight: 800, color: "#3F60AA", letterSpacing: ".04em", borderBottom: "2px solid #F8B133", paddingBottom: 4, marginBottom: 6 }}>VOTRE SÉLECTION</div>
+          <div style={{ fontSize: 10.5, fontStyle: "italic", color: "#6b7589", marginBottom: 8 }}>Tous nos produits sont conformes aux normes jouets en vigueur (CE, EN 71).</div>
+        </div>
+        {groupes.length === 0 ? <div style={{ fontSize: 12, color: "#6b7589" }}>Aucune référence sélectionnée.</div> : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead><tr style={{ background: "#3F60AA", color: "#fff" }}>
+              <th style={{ textAlign: "left", padding: "6px 9px", fontWeight: 700 }}>Référence</th>
+              <th style={{ textAlign: "left", padding: "6px 9px", fontWeight: 700 }}>Désignation</th>
+              <th style={{ textAlign: "right", padding: "6px 9px", fontWeight: 700, whiteSpace: "nowrap" }}>Prix unitaire HT (€)</th>
+              <th style={{ textAlign: "center", padding: "6px 9px", fontWeight: 700, width: 130 }}>Quantité souhaitée</th>
+            </tr></thead>
+            <tbody>{groupes.map(({ g, items }) => (<React.Fragment key={g}>
+              <tr><td colSpan={4} style={{ background: "#2f4c86", color: "#fff", fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: ".03em", padding: "5px 9px" }}>{g}</td></tr>
+              {items.map((p, i) => (<tr key={p.code} style={{ background: i % 2 ? "#fff" : "#f7f9fd" }}>
+                <td style={{ padding: "6px 9px", fontSize: 10.5, color: "#6b7589" }}>{p.code}</td>
+                <td style={{ padding: "6px 9px", fontWeight: 700 }}>{p.designation}</td>
+                <td style={{ padding: "6px 9px", textAlign: "right" }} className="tnum">{eur2(bdcPU(p))}</td>
+                <td style={{ padding: "4px 9px" }}><Case h={20} /></td>
+              </tr>))}
+            </React.Fragment>))}</tbody>
+          </table>)}
+        <div className="doc-bloc" style={{ fontSize: 10.5, fontStyle: "italic", color: "#6b7589", marginTop: 8 }}>Indiquez les quantités souhaitées. Nous vous adresserons en retour un devis chiffré et détaillé pour validation.</div>
+      </div>
+
+      <div className="doc-bloc" style={{ marginTop: 18, border: "1px solid #3F60AA", borderRadius: 8, padding: 12, fontSize: 11.5, lineHeight: 1.6 }}>
+        <div style={{ fontWeight: 800, color: "#3F60AA", marginBottom: 5 }}>CONDITIONS</div>
+        <div><strong>Livraison :</strong> franco {zc.seuil} € HT France métropolitaine, participation {zc.part} € HT en dessous (Monaco {FRANCO_ZONES.monaco.seuil} € HT et Corse {FRANCO_ZONES.corse.seuil} € HT : voir grille tarifaire).</div>
+        <div><strong>Paiement :</strong> première commande à régler à la commande. Des conditions à 30 jours date de facture peuvent être mises en place après ouverture de compte et validation du dossier.</div>
+      </div>
+      <div className="doc-bloc" style={{ marginTop: 16, fontSize: 10.5, color: "#6b7589", lineHeight: 1.7 }}>
+        <div>Document à compléter et à retourner à : matthis-anael@penup3d.com</div>
+        <div>Cette sélection vaut demande de commande ; elle sera confirmée par notre devis, soumis à nos CGV.</div>
+        <div style={{ marginTop: 8, textAlign: "center", borderTop: "1px solid #eef1f7", paddingTop: 8 }}>Pen'Up 3D SAS · 20 Place Prax Paris, 82000 Montauban · matthis-anael@penup3d.com · +33 6 95 50 37 68</div>
+      </div>
+    </div>
+  </div></div>, document.body);
+}
+// Éditeur du bon de commande : on coche les références à faire figurer dans la grille. La sélection
+// est enregistrée avec les réglages, donc retrouvée d'une fois sur l'autre et partagée entre appareils.
+function BonCommandeModal({ data, persist, products, onClose }) {
+  const vend = useMemo(() => sortProducts((products || []).filter((p) => p.vendable)), [products]);
+  const enregistre = (data.settings && data.settings.bonCommandeRefs) || null;
+  const [refs, setRefs] = useState(() => {
+    const dispo = new Set(vend.map((p) => p.code));
+    const gardes = Array.isArray(enregistre) ? enregistre.filter((c) => dispo.has(c)) : null;
+    return gardes && gardes.length ? gardes : vend.map((p) => p.code);
+  });
+  const [apercu, setApercu] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const groupes = useMemo(() => {
+    const m = {}; vend.forEach((p) => { const g = prodCat(p); (m[g] = m[g] || []).push(p); });
+    return CAT_ORDER.filter((g) => m[g]).map((g) => ({ g, items: m[g] }));
+  }, [vend]);
+  const coche = (code) => refs.includes(code);
+  const bascule = (code) => setRefs((r) => r.includes(code) ? r.filter((x) => x !== code) : [...r, code]);
+  const basculeGroupe = (items) => {
+    const codes = items.map((p) => p.code);
+    const tout = codes.every((c) => refs.includes(c));
+    setRefs((r) => tout ? r.filter((c) => !codes.includes(c)) : Array.from(new Set([...r, ...codes])));
+  };
+  const enregistrer = () => { persist((p) => ({ ...p, settings: { ...p.settings, bonCommandeRefs: refs } })); setMsg("Sélection enregistrée : elle sera reprise la prochaine fois."); setTimeout(() => setMsg(null), 3000); };
+  return (<>
+    <Modal title="Bon de commande revendeur" onClose={onClose} wide>
+      <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55, marginBottom: 12 }}>Formulaire vierge à envoyer à un revendeur : il remplit ses coordonnées et les quantités souhaitées, vous lui retournez un devis chiffré. Cochez ici les références à faire figurer dans la grille, puis imprimez ou enregistrez en PDF comme un devis.</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 700 }}>{refs.length} référence{refs.length > 1 ? "s" : ""} sur {vend.length}</span>
+        <span style={{ flex: 1 }} />
+        <button className="btn btn-g btn-s" onClick={() => setRefs(vend.map((p) => p.code))}>Tout cocher</button>
+        <button className="btn btn-g btn-s" onClick={() => setRefs([])}>Tout décocher</button>
+      </div>
+      <div style={{ maxHeight: 380, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 11, padding: 8 }}>
+        {groupes.map(({ g, items }) => (<div key={g} style={{ marginBottom: 10 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: .3, color: "var(--muted)", padding: "4px 2px", cursor: "pointer" }}>
+            <input type="checkbox" checked={items.every((p) => coche(p.code))} onChange={() => basculeGroupe(items)} style={{ width: 15, height: 15 }} />{g}
+          </label>
+          {items.map((p) => (<label key={p.code} style={{ display: "flex", alignItems: "center", gap: 9, padding: "5px 8px", borderRadius: 8, fontSize: 13, cursor: "pointer" }}>
+            <input type="checkbox" checked={coche(p.code)} onChange={() => bascule(p.code)} style={{ width: 15, height: 15 }} />
+            <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.designation}</span>
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>{p.code}</span>
+            <span className="tnum" style={{ fontWeight: 700, fontSize: 12.5, minWidth: 62, textAlign: "right" }}>{eur2(bdcPU(p))}</span>
+          </label>))}
+        </div>))}
+      </div>
+      {msg && <div style={{ fontSize: 12, color: "var(--green)", fontWeight: 700, marginTop: 8 }}>{msg}</div>}
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+        <button className="btn btn-g" onClick={enregistrer}><Save size={15} /> Enregistrer la sélection</button>
+        <button className="btn btn-p" onClick={() => setApercu(true)} disabled={!refs.length}><Printer size={15} /> Aperçu / Imprimer</button>
+      </div>
+    </Modal>
+    {apercu && <BonCommandeDoc products={products} refs={refs} onClose={() => setApercu(false)} />}
+  </>);
 }
 function buildBonCommandeHTML(products) {
   const vend = sortProducts((products || []).filter((p) => p.vendable && !(p.code || "").includes("-KIT-")));
@@ -13948,7 +14103,7 @@ function InteractionView({ interaction: it, data, go, onClose, onEdit }) {
     {it.email && <div style={{ fontSize: 12.5, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 5, marginTop: -6 }}><Mail size={13} /> {it.email}</div>}
     <div style={{ background: "#f5f7fb", border: "1px solid var(--line)", borderRadius: 16, borderTopLeftRadius: 5, padding: "14px 16px" }}>
       <div style={{ fontWeight: 800, fontSize: 15 }}>{(it.source === "gmail" ? decodeEntities(it.sujet) : it.sujet) || "Échange"}</div>
-      {it.resume ? (() => { const wa = it.type === "whatsapp" ? parseWaResume(it.resume) : null; return <div style={{ fontSize: 13.5, lineHeight: 1.6, marginTop: 8, whiteSpace: wa ? "normal" : "pre-wrap", maxHeight: 360, overflowY: "auto" }}>{wa ? <WaBubbles p={wa} who={ct ? fullName(ct) : (it.interlocuteur || "")} /> : (it.source === "gmail" ? decodeEntities(it.resume) : it.resume)}</div>; })() : <div className="empty" style={{ padding: 14 }}>Aucun compte rendu saisi.</div>}
+      {it.resume ? (() => { const wa = it.type === "whatsapp" ? parseWaResume(it.resume) : null; return <div style={{ fontSize: 13.5, lineHeight: 1.6, marginTop: 8, whiteSpace: wa ? "normal" : "pre-wrap", maxHeight: 360, overflowY: "auto", overflowWrap: "anywhere", wordBreak: "break-word", minWidth: 0 }}>{wa ? <WaBubbles p={wa} who={ct ? fullName(ct) : (it.interlocuteur || "")} /> : (it.source === "gmail" ? decodeEntities(it.resume) : it.resume)}</div>; })() : <div className="empty" style={{ padding: 14 }}>Aucun compte rendu saisi.</div>}
     </div>
     {(ct || it.interlocuteur || site || account) && <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
       {ct ? <button className="lnk" style={lnkStyle} onClick={() => nav(() => go("repertoire", ct.id))}><User size={14} /> {fullName(ct)}</button> : (it.interlocuteur ? <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, color: "var(--muted)" }}><User size={14} /> {it.interlocuteur}</span> : null)}
