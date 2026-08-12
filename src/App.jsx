@@ -3771,6 +3771,13 @@ ${ACCENT_CSS}
 .pu-root.dark .dup-warn{background:#3a2f12;color:#f8d68b;}
 .pu-root.dark .modal-h{background:var(--card);}
 .pu-root.dark .gtag{background:#3a1f1d;color:#ff8a7a;}
+.pu-root.dark .ctag{background:#25330f;color:#a9d977;}
+.pu-root.dark .msg-in .msg-bubble.msg-appel,.pu-root.dark .msg-out .msg-bubble.msg-appel{background:#1f2b16;border-color:rgba(124,179,66,.32);}
+/* Appels importés du journal du téléphone : le vert de SMS Backup & Restore, l'application qui
+   produit le fichier — même repère visuel que la puce Gmail pour les courriels. */
+.ctag{font-size:10px;font-weight:700;color:#4d7c1f;background:#eef7e3;padding:1px 6px;border-radius:6px;}
+.msg-bubble.msg-appel{background:#f2f9e9;border-color:rgba(124,179,66,.4);}
+.msg-in .msg-bubble.msg-appel,.msg-out .msg-bubble.msg-appel{background:#f2f9e9;}
 .srctag{font-size:9.5px;font-weight:800;letter-spacing:.03em;color:var(--green);background:rgba(43,182,115,.14);border:1px solid rgba(43,182,115,.35);padding:1px 6px;border-radius:6px;text-transform:uppercase;}
 .pu-root.dark .msg-in .msg-bubble{background:#1a2336;}
 .pu-root.dark .msg-out .msg-bubble{background:#1d2945;}
@@ -6005,6 +6012,11 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
       const links = await aiFindLinksHoraires(q, usage, needHoraires, { nom: s.label, enseigne: acc && acc.enseigne, ville, cp: s.cp || (acc && acc.cp), marque: true });
       const horaires = links.horaires || "";
       const patch = {}; const got = [];
+      // Raison sociale : le SIRET suffit à la retrouver au registre officiel, gratuitement et sans IA.
+      // Inutile de la deviner tant que ce numéro est là.
+      if (!String(s.raisonSociale || "").trim() && (s.siret || s.siren)) {
+        try { const reg = await lookupSirene(s.siret || s.siren, (acc && acc.ville) || ""); if (reg && reg.raisonSociale) { patch.raisonSociale = reg.raisonSociale; got.push("raison sociale"); } } catch (e) { /* registre indisponible : on continue */ }
+      }
       if (links.site && !s.site) { patch.site = links.site; got.push("site web"); }
       if (links.facebook && !s.facebook) { patch.facebook = links.facebook; got.push("Facebook"); }
       if (links.instagram && !s.instagram) { patch.instagram = links.instagram; got.push("Instagram"); }
@@ -6069,7 +6081,7 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
           )}
           {horMsg && <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 6 }}>{horMsg}</div>}
           {s.site && <div style={{ fontSize: 13, marginTop: 6, display: "inline-flex", alignItems: "center", gap: 6 }}><Globe size={14} style={{ color: "var(--muted)" }} /><a className="lnk" href={ensureHttp(s.site)} target="_blank" rel="noreferrer" title="Site internet de l'établissement">{cleanDomain(s.site) || s.site}</a></div>}
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9, alignItems: "center" }}>{s.typeSurface && <Badge color="#3F60AA">{s.typeSurface}</Badge>}{s.siret && <span className="tnum" style={{ fontSize: 12, color: "var(--muted)" }}>SIRET <IdLink value={s.siret} exact /></span>}{(() => {
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9, alignItems: "center" }}>{s.typeSurface && <Badge color="#3F60AA">{s.typeSurface}</Badge>}{(s.raisonSociale || (acc && acc.raisonSociale)) ? <span style={{ fontSize: 12, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 5 }} title={s.raisonSociale ? "Société qui exploite ce point de vente" : "Société du groupe, faute de raison sociale propre à cet établissement"}><Landmark size={12} />{s.raisonSociale || acc.raisonSociale}</span> : (s.siret ? <span style={{ fontSize: 12, color: "var(--muted)", opacity: .8, display: "inline-flex", alignItems: "center", gap: 5 }} title="Raison sociale non renseignée — « Recherche IA » la retrouve à partir du SIRET"><Landmark size={12} />Raison sociale à renseigner</span> : null)}{s.siret && <span className="tnum" style={{ fontSize: 12, color: "var(--muted)" }}>SIRET <IdLink value={s.siret} exact /></span>}{(() => {
             // Le SIREN identifie la société, le SIRET l'établissement : les neuf premiers chiffres du
             // SIRET SONT le SIREN. On l'affiche à part plutôt que de le laisser compter à la main.
             const d9 = String(s.siret || "").replace(/\D/g, "").slice(0, 9);
@@ -9109,7 +9121,7 @@ function Carte({ data, persist, go, focus }) {
         </div></div>}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: "clamp(460px, 74vh, 900px)", minWidth: 0 }}>
-        <div className="card" style={{ flexShrink: 0, overflowY: "auto", maxHeight: "56%" }}>{!s ? <div className="empty">Cliquez un point sur la carte pour voir sa fiche.</div> : (<><div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ flexShrink: 0 }}><svg width="22" height="22" viewBox="-12 -16 24 26"><path d={shapePath(tmeta.shape)} fill={siteColor(s, sAcc)} stroke="#fff" strokeWidth={1.5} /></svg></span><h3 className="pu-display" style={{ margin: 0, fontSize: 17 }}>{s.label}</h3></div>
+        <div className="card" style={{ flexShrink: 0, overflowY: "auto", maxHeight: "56%" }}>{!s ? <div className="empty">Cliquez un point sur la carte pour voir sa fiche.</div> : (<><div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ flexShrink: 0 }}><svg width="22" height="22" viewBox="-12 -16 24 26"><path d={shapePath(tmeta.shape)} fill={siteColor(s, sAcc)} stroke="#fff" strokeWidth={1.5} /></svg></span><h3 className="pu-display" style={{ margin: 0, fontSize: 17 }}><span className="lnk" onClick={() => go("accounts", null, s.id)} title={"Ouvrir la fiche de " + (s.label || "cet établissement")} style={{ cursor: "pointer" }}>{s.label}</span></h3><button className="iconbtn" onClick={() => go("accounts", null, s.id)} title="Ouvrir la fiche" style={{ width: 28, height: 28, marginLeft: "auto", flexShrink: 0 }}><ChevronRight size={16} /></button></div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "10px 0" }}><Badge color={siteColor(s, sAcc)}>{tmeta.label}</Badge>{s.typeSurface && <Badge color="#3F60AA">{s.typeSurface}</Badge>}{sAcc && <Badge color={enseigneColor(sAcc)}>{sAcc.enseigne}</Badge>}</div>
           <KV icon={<MapPin size={13} />} k="Adresse" v={s.adresse ? <IdLink kind="maps" value={siteQuery(s, "")}>{s.adresse}</IdLink> : ""} />{s.raisonSociale && <KV icon={<Landmark size={13} />} k="Raison sociale" v={s.raisonSociale} />}{s.siret && <KV icon={<Building2 size={13} />} k="SIRET" v={<IdLink value={s.siret} exact />} />}{s.telFixe && <KV icon={<Phone size={13} />} k="Tél. magasin" v={s.telFixe} />}{s.email && <KV icon={<Mail size={13} />} k="E-mail" v={<a href={"mailto:" + s.email} style={{ color: "inherit" }}>{s.email}</a>} />}{s.horaires && <KV icon={<Clock size={13} />} k="Horaires" v={s.horaires} />}<KV icon={<Navigation size={13} />} k="Coord." v={s.lat ? s.lat.toFixed(4) + ", " + s.lng.toFixed(4) : ""} />
           {(() => { const martelet = sites.find((x) => x.type === "entrepot"); if (!martelet || !s.lat || !martelet.lat || s.type === "entrepot" || s.type === "penup") return null; const dk = distanceKm(martelet.lat, martelet.lng, s.lat, s.lng); return dk == null ? null : <KV icon={<Truck size={13} />} k="Distance depuis l'entrepôt" v={num(dk) + " km à vol d'oiseau"} last />; })()}
@@ -14304,7 +14316,7 @@ function InteractionView({ interaction: it, data, go, onClose, onEdit }) {
     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
       <span className="badge" style={{ background: badgeColor + "18", color: darkenHex(badgeColor) }}><BIc size={12} />{m.label}</span>
       {dm && !rejected && <span style={{ fontSize: 12, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 4 }}><DIc size={13} color={dm.color} />{dm.label}</span>}
-      {it.source === "gmail" && <span className="gtag">Gmail</span>}{it.sourced && <span className="srctag" title="Importé automatiquement depuis la boîte Gmail connectée (trace fidèle)">sourcé</span>}
+      {it.source === "gmail" && <span className="gtag">Gmail</span>}{it.source === "journal-appels" && <span className="ctag" title="Importé du journal d'appels du téléphone (SMS Backup & Restore)">Journal d'appels</span>}{it.sourced && <span className="srctag" title={it.source === "journal-appels" ? "Importé automatiquement du journal d'appels du téléphone (trace fidèle)" : "Importé automatiquement depuis la boîte Gmail connectée (trace fidèle)"}>sourcé</span>}
       <span className="tnum" style={{ fontSize: 12, color: "var(--muted)", marginLeft: "auto", textTransform: "capitalize" }}>{dt}{it.heure ? " · " + it.heure : ""}</span>
     </div>
     {it.email && <div style={{ fontSize: 12.5, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 5, marginTop: -6 }}><Mail size={13} /> {it.email}</div>}
@@ -14334,11 +14346,11 @@ function InteractionThread({ interactions, data, onView, onEdit, onDelete, showC
     // séparé (redondant). Sinon : icône du type + flèche de sens (entrant vert / sortant bleu).
     const Ic = rejected ? PhoneOff : m.icon; const typeColor = rejected ? "var(--red)" : m.color;
     return (<div key={it.id} id={"int-" + it.id} className={cx("msg", inbound ? "msg-in" : "msg-out")}>
-      <div className="msg-bubble">
+      <div className={cx("msg-bubble", it.source === "journal-appels" && "msg-appel")}>
         <div className="msg-head">
           <span title={rejected ? "Appel sortant rejeté / sans réponse" : undefined} style={{ fontWeight: 700, color: typeColor, display: "inline-flex", alignItems: "center", gap: 4 }}><Ic size={12} />{m.label}</span>
           {!rejected && (inbound ? <ArrowDownLeft size={12} color="var(--green)" /> : <ArrowUpRight size={12} color="var(--blue)" />)}
-          {it.source === "gmail" && <span className="gtag">Gmail</span>}{it.sourced && <span className="srctag" title="Importé automatiquement depuis la boîte Gmail connectée (trace fidèle)">sourcé</span>}
+          {it.source === "gmail" && <span className="gtag">Gmail</span>}{it.source === "journal-appels" && <span className="ctag" title="Importé du journal d'appels du téléphone (SMS Backup & Restore)">Journal d'appels</span>}{it.sourced && <span className="srctag" title={it.source === "journal-appels" ? "Importé automatiquement du journal d'appels du téléphone (trace fidèle)" : "Importé automatiquement depuis la boîte Gmail connectée (trace fidèle)"}>sourcé</span>}
           <span className="tnum" style={{ color: "var(--muted)" }}>{it.date}{it.heure ? " · " + it.heure : ""}</span>
           {(ct || it.interlocuteur) && <span style={{ color: "var(--muted)" }}>· {ct ? fullName(ct) : it.interlocuteur}</span>}
           {it.email && <span className="crow-email" style={{ color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 3, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={it.email}><Mail size={11} style={{ flexShrink: 0 }} />{it.email}</span>}
