@@ -319,6 +319,32 @@ const STAGES = [
 // chargement (voir normalize) et l'historique stageLog conserve la trace telle quelle.
 const STAGE_ORDER = ["prospect", "contact", "rdv", "referencement"];
 const DEAL_STATUS = { brouillon: { label: "Brouillon", color: "#9aa6bd" }, envoye: { label: "Envoyé", color: "#5b8def" }, accepte: { label: "Accepté / Signé", color: "#2bb673" }, expediee: { label: "En cours de livraison", color: "#F8B133" }, refuse: { label: "Refusé", color: "#FF5A45" }, livre: { label: "Livré", color: "#3F60AA" }, paye: { label: "Livré et payé", color: "#128C6E" } };
+// Délais de paiement proposés sur un devis, une commande ou une facture. Les plafonds légaux entre
+// professionnels (art. L441-10 du code de commerce) sont 60 jours date de facture, ou 45 jours fin
+// de mois : rien au-delà n'est proposé ici.
+const PAIEMENT_DEFAUT = "30j";
+const PAIEMENT_TERMES = [
+  { id: "comptant", label: "Paiement comptant", court: "comptant", jours: 0 },
+  { id: "livraison", label: "Paiement à la livraison", court: "à la livraison", jours: 0 },
+  { id: "reception", label: "Paiement à réception de facture", court: "à réception", jours: 0 },
+  { id: "acompte30", label: "Acompte de 30 % à la commande, solde à la livraison", court: "acompte 30 %", jours: 0 },
+  { id: "15j", label: "Paiement à 15 jours date de facturation", court: "15 j", jours: 15 },
+  { id: "30j", label: "Paiement à 30 jours date de facturation", court: "30 j", jours: 30 },
+  { id: "30jfm", label: "Paiement à 30 jours fin de mois", court: "30 j fdm", jours: 30, fdm: true },
+  { id: "45j", label: "Paiement à 45 jours date de facturation", court: "45 j", jours: 45 },
+  { id: "45jfm", label: "Paiement à 45 jours fin de mois", court: "45 j fdm", jours: 45, fdm: true },
+  { id: "60j", label: "Paiement à 60 jours date de facturation", court: "60 j", jours: 60 },
+];
+const paiementTerme = (id) => PAIEMENT_TERMES.find((t) => t.id === id) || null;
+// Échéance d'une facture : date + N jours, reportée en fin de mois pour les termes « fin de mois ».
+function echeancePaiement(dateStr, id) {
+  const t = paiementTerme(id); if (!t || !dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return "";
+  const d = new Date(dateStr + "T00:00:00"); if (isNaN(d)) return "";
+  if (!t.jours) return "";
+  d.setDate(d.getDate() + t.jours);
+  if (t.fdm) d.setDate(new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate());
+  return isoLocal(d);
+}
 // « Livré » et « Livré et payé » sont deux fins de course : la marchandise est partie dans les deux
 // cas, seul l'encaissement les sépare. Tout ce qui distingue « en cours » de « terminé » doit donc
 // traiter les deux ensemble, sans quoi un document payé retomberait dans le pipeline ouvert.
@@ -5838,7 +5864,7 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
   const uploadFile = async (file) => { if (!file) return; const isImage = /^image\//.test(file.type || ""); if (!isImage && file.size > 4 * 1024 * 1024) { alert("Fichier trop volumineux (max 4 Mo). Le stockage local n'accepte que des fichiers légers."); return; } const st = await fileToStorable(file); const name = isImage ? file.name.replace(/\.(png|heic|heif|webp|bmp|tiff?)$/i, ".jpg") : file.name; persist((p) => ({ ...p, attachments: { ...p.attachments, [attKey]: [...(p.attachments[attKey] || []), { id: "f_" + Date.now(), name, type: st.type, size: st.size, dataUrl: st.dataUrl, addedAt: new Date().toISOString().slice(0, 10) }] } })); };
   const delFile = (fid) => persist((p) => ({ ...p, attachments: { ...p.attachments, [attKey]: (p.attachments[attKey] || []).filter((x) => x.id !== fid) } }));
   const downloadFile = (f) => { const a2 = document.createElement("a"); a2.href = f.dataUrl; a2.download = f.name; document.body.appendChild(a2); a2.click(); document.body.removeChild(a2); };
-  const newDeal = (type) => ({ id: uid("d_"), accountId: s.accountId, siteId: s.id, type, date: TODAY(), statut: "brouillon", ref: nextRef(type, data.deals), note: "", tva: (data.settings && data.settings.tva) || 20, prestoStatus: "", prestoRef: "", prestoDate: "", converti: false, lines: [] });
+  const newDeal = (type) => ({ id: uid("d_"), accountId: s.accountId, siteId: s.id, type, date: TODAY(), statut: "brouillon", paiement: PAIEMENT_DEFAUT, ref: nextRef(type, data.deals), note: "", tva: (data.settings && data.settings.tva) || 20, prestoStatus: "", prestoRef: "", prestoDate: "", converti: false, lines: [] });
   const diffLiv = s.adresseLivraison && s.livraisonIdentique === false;
   return (<div className="fade">
     <button className="back" onClick={onBack}><ChevronLeft size={16} /> Retour aux groupes & établissements</button>
@@ -7629,8 +7655,8 @@ async function aiQualifyCommandePdf(base64, products) {
   const { lines, ignore, header } = mapAiCommande(data, products);
   return { lines, ignore, header, usage: data.usage || null };
 }
-function ImportCommande({ accounts, products, onCreate, onUsage }) {
-  const [text, setText] = useState(""); const [accountId, setAccountId] = useState(accounts[0]?.id || ""); const [parsed, setParsed] = useState(null); const fileRef = useRef(null); const [fileName, setFileName] = useState(""); const [aiBusy, setAiBusy] = useState(false); const [aiErr, setAiErr] = useState("");
+function ImportCommande({ accounts, sites, products, onCreate, onUsage }) {
+  const [text, setText] = useState(""); const [accountId, setAccountId] = useState(accounts[0]?.id || ""); const [siteId, setSiteId] = useState(""); const [parsed, setParsed] = useState(null); const fileRef = useRef(null); const [fileName, setFileName] = useState(""); const [aiBusy, setAiBusy] = useState(false); const [aiErr, setAiErr] = useState("");
   const analyse = (src) => setParsed(parseCommande(src != null ? src : text, products));
   // Dictée vocale (fr-FR) de la commande sur le terrain : le texte dicté alimente la zone de saisie,
   // qu'on passe ensuite à l'IA de qualification pour obtenir les lignes mappées au catalogue.
@@ -7670,7 +7696,7 @@ function ImportCommande({ accounts, products, onCreate, onUsage }) {
       {fileName && <span style={{ fontSize: 12, color: "var(--muted)" }}>{fileName}</span>}
       {aiBusy && <span style={{ fontSize: 12, color: "var(--blue)", display: "inline-flex", alignItems: "center", gap: 6 }}><Sparkles size={13} className="spin" /> Lecture du document en cours…</span>}
     </div>
-    <div className="fld"><label>Rattacher à l'enseigne</label><SearchSelect value={accountId} onChange={setAccountId} options={accountOptionList(accounts)} placeholder="Taper les premières lettres de l'enseigne…" emptyLabel="Aucune enseigne ne correspond" /></div>
+    <div className="fld"><label>Rattacher à l'établissement</label><EtabPicker accounts={accounts} sites={sites} accountId={accountId} siteId={siteId} onChange={(a, s) => { setAccountId(a); setSiteId(s); }} allowNone={false} /><span style={{ fontSize: 11, color: "var(--muted)" }}>Choisissez le magasin qui commande, pas seulement le groupe : ce sont son nom et son adresse qui figureront sur le devis (à défaut, le siège du groupe serait imprimé).</span></div>
     {aiErr && <div className="dup-warn" style={{ marginBottom: 10 }}><AlertTriangle size={15} /> {aiErr}</div>}
     {!parsed && <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}><button className="btn btn-p" onClick={() => runAI()} disabled={!text.trim() || aiBusy} title="L'IA lit le texte ou le mail, propose les lignes de commande, et vous vérifiez avant de créer le brouillon"><Sparkles size={15} className={aiBusy ? "spin" : ""} /> {aiBusy ? "Lecture en cours…" : "Importer la commande"}</button></div>}
     {parsed && <>
@@ -7680,7 +7706,7 @@ function ImportCommande({ accounts, products, onCreate, onUsage }) {
       {verifyCount > 0 && <div style={{ fontSize: 12, color: "var(--orange)", fontWeight: 700, marginBottom: 8 }}>⚠ {verifyCount} ligne(s) à vérifier (en orange) : quantité déduite ou produit approché.</div>}
       {parsed.unknown.length > 0 && <div className="dup-warn" style={{ marginBottom: 10, alignItems: "flex-start" }}><AlertTriangle size={15} /> <div>Non reconnu, ignoré :<ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>{parsed.unknown.map((u, i) => <li key={i} style={{ fontSize: 12 }}>{u.text} <span style={{ color: "var(--muted)" }}>— {u.reason}</span></li>)}</ul></div></div>}
       <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>Le brouillon est créé au prix de cession HT (PVC ÷ coefficient norme). Vérifiez les quantités et ajustez si besoin avant d'émettre.</div>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><button className="btn btn-g" onClick={() => setParsed(null)}>Modifier le texte</button><button className="btn btn-p" onClick={() => onCreate({ accountId, lines: parsed.lines, note })} disabled={!parsed.lines.length || !accountId}><Plus size={15} /> Créer le brouillon de devis</button></div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><button className="btn btn-g" onClick={() => setParsed(null)}>Modifier le texte</button><button className="btn btn-p" onClick={() => onCreate({ accountId, siteId, lines: parsed.lines, note })} disabled={!parsed.lines.length || !accountId}><Plus size={15} /> Créer le brouillon de devis</button></div>
     </>}
   </>);
 }
@@ -7719,8 +7745,8 @@ function Deals({ data, persist, go, focus }) {
     if (nq) { const acc = accOf(d.accountId); const hay = normStr((d.ref || "") + " " + (d.type || "") + " " + (acc ? acc.enseigne : "") + " " + (d.note || "") + " " + (d.lines || []).map((l) => l.designation).join(" ")); if (!hay.includes(nq)) return false; }
     return true;
   }).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  const newDeal = (type) => ({ id: uid("d_"), accountId: accounts[0]?.id || "", type, date: TODAY(), statut: "brouillon", ref: nextRef(type, deals), note: "", tva: settings.tva || 20, prestoStatus: "", prestoRef: "", prestoDate: "", converti: false, lines: [] });
-  const importToDraft = ({ accountId, lines, note }) => { const d = { id: uid("d_"), accountId, type: "Devis", date: TODAY(), statut: "brouillon", ref: nextRef("Devis", deals), note: note || "Commande importée.", tva: settings.tva || 20, prestoStatus: "", prestoRef: "", prestoDate: "", converti: false, lines: lines.map((l) => L(l.code, l.designation, l.qte, l.pu)) }; save(d); setImp(false); setEdit(d); };
+  const newDeal = (type) => ({ id: uid("d_"), accountId: accounts[0]?.id || "", type, date: TODAY(), statut: "brouillon", paiement: PAIEMENT_DEFAUT, ref: nextRef(type, deals), note: "", tva: settings.tva || 20, prestoStatus: "", prestoRef: "", prestoDate: "", converti: false, lines: [] });
+  const importToDraft = ({ accountId, siteId, lines, note }) => { const d = { id: uid("d_"), accountId, siteId: siteId || "", type: "Devis", date: TODAY(), statut: "brouillon", paiement: PAIEMENT_DEFAUT, ref: nextRef("Devis", deals), note: note || "Commande importée.", tva: settings.tva || 20, prestoStatus: "", prestoRef: "", prestoDate: "", converti: false, lines: lines.map((l) => L(l.code, l.designation, l.qte, l.pu)) }; save(d); setImp(false); setEdit(d); };
   const totalFiltered = list.reduce((s, d) => s + (d.montant || 0), 0);
   const visibleIds = list.map((d) => d.id);
   const selCount = visibleIds.filter((id) => sel.has(id)).length;
@@ -7762,7 +7788,7 @@ function Deals({ data, persist, go, focus }) {
       })()}
     </tbody></table></div></div>
     {edit && <Modal title={edit.ref + " — " + edit.type} onClose={() => setEdit(null)} xl><DealForm deal={edit} accounts={accounts} products={products} sites={data.sites} onSave={(d) => { save(d); setEdit(null); }} onPreview={(d) => { save(d); setEdit(null); setPreview({ ...d, montant: dealMontant(d.lines), qte: dealQte(d.lines) }); }} /></Modal>}
-    {imp && <Modal title="Importer une commande" onClose={() => setImp(false)} wide><ImportCommande accounts={accounts} products={products} onCreate={importToDraft} onUsage={(u) => persist((d) => ({ ...d, claudeUsage: addUsage(d.claudeUsage, u) }))} /></Modal>}
+    {imp && <Modal title="Importer une commande" onClose={() => setImp(false)} wide><ImportCommande accounts={accounts} sites={data.sites || []} products={products} onCreate={importToDraft} onUsage={(u) => persist((d) => ({ ...d, claudeUsage: addUsage(d.claudeUsage, u) }))} /></Modal>}
     {preview && <DevisPreview deal={preview} account={dealAccount(data, preview)} settings={settings} products={products} data={data} onClose={() => setPreview(null)} />}
   </div>);
 }
@@ -7839,6 +7865,7 @@ function DealForm({ deal, accounts, products, sites, onSave, onPreview }) {
       <SuiviColis numero={f.suivi} />
     </div>}
     {f.type === "Facture" && <div className="fld"><label>Date de paiement (laisser vide si non réglée)</label><input type="date" value={f.datePaiement || ""} onChange={(e) => up("datePaiement", e.target.value)} /><span style={{ fontSize: 11, color: "var(--muted)" }}>Renseigner la date d'encaissement alimente l'indicateur de délai de paiement (DSO) dans l'onglet Performance.</span></div>}
+    <div className="fld"><label>Délai de paiement</label><select value={f.paiement || ""} onChange={(e) => up("paiement", e.target.value)}><option value="">— non précisé —</option>{PAIEMENT_TERMES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}</select><span style={{ fontSize: 11, color: "var(--muted)" }}>{(() => { const ech = echeancePaiement(f.date, f.paiement); if (ech) return "Imprimé sur le document. Échéance calculée pour la date du " + f.date + " : " + ech + "."; if (f.paiement) return "Imprimé sur le document, sous les conditions de règlement."; return "Sans délai précisé, aucune condition de règlement n'est imprimée sur le document."; })()}</span></div>
     {f.type === "Commande" && <div className="fld"><label>Destination de livraison (point de vente)</label><select value={f.livraisonSiteId || ""} onChange={(e) => up("livraisonSiteId", e.target.value)}><option value="">— aucune (pas de tracé sur la carte) —</option>{destSites.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select><span style={{ fontSize: 11, color: "var(--muted)" }}>Si renseignée et le statut « En cours de livraison », un tracé entrepôt → établissement apparaît sur la carte.</span></div>}
     {effLivraison(acc) && <div style={{ fontSize: 12, color: "var(--muted)" }}><MapPin size={12} style={{ verticalAlign: -2 }} /> Livraison : {effLivraison(acc)}</div>}
     <div className="fld"><label>Zone de livraison (détermine le franco)</label><select value={zone} onChange={(e) => up("zoneLivraison", e.target.value)}>{FRANCO_ZONE_ORDER.map((k) => <option key={k} value={k}>{FRANCO_ZONES[k].label} — franco {FRANCO_ZONES[k].seuil} € HT, sinon {FRANCO_ZONES[k].part} € HT</option>)}</select><span style={{ fontSize: 11, color: "var(--muted)" }}>{detectedZone && detectedZone === zone ? "Détectée automatiquement d'après l'adresse de livraison." : detectedZone ? ("Détection auto : " + FRANCO_ZONES[detectedZone].label + " (vous avez forcé une autre zone).") : "Renseignez une adresse de livraison avec code postal pour la détection automatique."}</span></div>
@@ -7872,20 +7899,27 @@ function DevisPreview({ deal, account, settings, products = [], data = {}, onClo
     return () => { document.body.classList.remove("doc-print"); document.title = prevTitle; };
   }, []);
   const findSite = (id) => id ? (data.sites || []).find((s) => s.id === id) : null;
+  // Établissements du compte. Quand le document n'en désigne aucun, on n'en déduit un que si le
+  // compte n'en compte qu'UN SEUL : sur un groupe multi-magasins, prendre le premier venu revenait
+  // à imprimer le nom et l'adresse d'un magasin qui n'a rien commandé.
+  const accSites = account ? (data.sites || []).filter((s) => s.accountId === account.id && !s.archived) : [];
+  const soleSite = accSites.length === 1 ? accSites[0] : null;
   // Adresse de LIVRAISON pour le franco ET l'estimation transport : établissement du document
   // (site / livraison) en priorité — on expédie au magasin, pas au siège du groupe — sinon l'adresse du compte.
-  const livSite = findSite(deal.livraisonSiteId) || findSite(deal.siteId) || (account && (data.sites || []).find((s) => s.accountId === account.id && s.adresse)) || null;
+  const livSite = findSite(deal.livraisonSiteId) || findSite(deal.siteId) || (soleSite && soleSite.adresse ? soleSite : null);
   const livAdr = (livSite && livSite.adresse) || (account && (account.adresseLivraison || account.adressePostale)) || "";
   const zone = deal.zoneLivraison || detectFrancoZone(livAdr) || "metropole"; const zc = francoZone(zone);
   const ht = dealMontant(deal.lines); const htBrut = (deal.lines || []).reduce((s, l) => s + (l.qte || 0) * (l.pu || 0), 0); const port = (deal.type === "Avoir" || deal.portOffert) ? 0 : fraisPortHT(htBrut, zone); const baseHt = ht + port; const tva = baseHt * (deal.tva || 0) / 100; const ttc = baseHt + tva;
   const titre = deal.type === "Facture" ? "FACTURE" : deal.type === "Commande" ? "BON DE COMMANDE" : deal.type === "Avoir" ? "AVOIR" : "DEVIS";
   // Coordonnées du magasin pour l'encart « Client » : établissement rattaché en priorité, sinon contact
   // principal du compte, sinon le compte. La note interne du devis n'est jamais imprimée.
-  // Établissement de référence : celui du document (siteId / livraison), sinon un établissement du
-  // compte qui porte une adresse ou des coordonnées — utile quand le compte n'a pas d'adresse propre.
-  const site = findSite(deal.siteId) || findSite(deal.livraisonSiteId) || (account && (data.sites || []).find((s) => s.accountId === account.id && (s.adresse || s.telFixe || s.email))) || null;
+  // Établissement de référence : celui du document (siteId / livraison), sinon l'unique
+  // établissement du compte s'il n'y en a qu'un (cf. soleSite).
+  const site = findSite(deal.siteId) || findSite(deal.livraisonSiteId) || soleSite;
   const princ = (data.contacts || []).find((c) => c.accountId === (account && account.id) && c.principal) || (data.contacts || []).find((c) => c.accountId === (account && account.id));
-  const clientAdresse = (account && (account.adressePostale || account.adresseLivraison)) || (site && site.adresse) || "";
+  // L'adresse du MAGASIN prime sur celle du compte : sur un groupe, l'adresse du compte est le
+  // siège social, qui n'a rien à faire sur un devis destiné à un point de vente.
+  const clientAdresse = (site && site.adresse) || (account && (account.adressePostale || account.adresseLivraison)) || "";
   const clientTel = (site && site.telFixe) || (princ && (princ.mobile || princ.fixe)) || "";
   const clientMail = (site && site.email) || (princ && princ.email) || (account && account.email) || "";
   return createPortal(<div className="ov print-doc-overlay" onClick={onClose}><div className="doc" onClick={(e) => e.stopPropagation()}>
@@ -7921,6 +7955,7 @@ function DevisPreview({ deal, account, settings, products = [], data = {}, onClo
       </div>}
       <div style={{ marginTop: 26, fontSize: 10.5, color: "#6b7589", borderTop: "1px solid #eef1f7", paddingTop: 10, lineHeight: 1.7 }}>
         {titre === "DEVIS" && <div>Devis valable 30 jours.</div>}
+        {(() => { const t = paiementTerme(deal.paiement); if (!t) return null; const ech = titre === "FACTURE" ? echeancePaiement(deal.date, deal.paiement) : ""; return (<div><strong>Conditions de règlement</strong> — {t.label}{ech ? ", soit une échéance au " + ech : ""}. Pénalités de retard : trois fois le taux d'intérêt légal ; indemnité forfaitaire pour frais de recouvrement de 40 € (art. L441-10 et D441-5 du code de commerce). Pas d'escompte pour paiement anticipé.</div>); })()}
         <div><strong>Livraison {zc.label}</strong> — franco de port dès {zc.seuil} € HT de commande ; en deçà, participation forfaitaire de {zc.part} € HT aux frais de port.</div>
         <div>Franco de port : France métropolitaine {FRANCO_ZONES.metropole.seuil} € HT (particip. {FRANCO_ZONES.metropole.part} € HT) · Monaco {FRANCO_ZONES.monaco.seuil} € HT (particip. {FRANCO_ZONES.monaco.part} € HT) · Corse {FRANCO_ZONES.corse.seuil} € HT (particip. {FRANCO_ZONES.corse.part} € HT).</div>
         <div>PEN'UP 3D, SAS au capital de 1 000 €. Président : P'TIT BUNCH SARL, représentée par M. Dimitri DESSEAUX. RCS Montauban 978 651 891.</div>
