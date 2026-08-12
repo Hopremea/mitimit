@@ -1822,6 +1822,14 @@ function motifDirigeantExclu(r) {
 
 const eur = (n) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(Number(n) || 0);
 const eur2 = (n) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n) || 0);
+// Durée en clair : au-delà de 60 minutes on bascule en heures (« 7 h 23 »), en deçà on garde les
+// minutes (« 43 min »). Un trajet annoncé « ~443 min » ne parle à personne.
+const fmtMinutes = (min) => {
+  const v = Math.round(Number(min) || 0);
+  if (v < 60) return v + " min";
+  const h = Math.floor(v / 60), m = v % 60;
+  return m ? h + " h " + String(m).padStart(2, "0") : h + " h";
+};
 
 // Distance Haversine entre deux points (lat/lng) en km
 function distanceKm(lat1, lng1, lat2, lng2) {
@@ -3778,6 +3786,20 @@ body.doc-print .print-doc-overlay{position:static!important;inset:auto!important
 body.doc-print .print-doc-overlay .doc{position:static!important;max-height:none!important;overflow:visible!important;box-shadow:none!important;border-radius:0!important;width:100%!important;}
 body.doc-print .print-doc-overlay .devis-doc{position:static!important;width:auto!important;padding:12mm 14mm!important;}
 body.doc-print .no-print{display:none!important;}
+/* Sauts de page soignés : un encadré, une ligne de tableau ou un bloc de mentions ne doit jamais
+   être coupé en deux. S'il ne tient pas sur la page en cours, il repart entier sur la suivante.
+   (Un bloc plus haut qu'une page reste découpé : les navigateurs ignorent alors la consigne.) */
+.doc-bloc,.print-eviter-coupure{break-inside:avoid!important;page-break-inside:avoid!important;}
+.devis-doc table{break-inside:auto;page-break-inside:auto;}
+.devis-doc thead{display:table-header-group;}  /* l'en-tête des colonnes se répète sur chaque page */
+.devis-doc tfoot{display:table-footer-group;}
+.devis-doc tr,.devis-doc td,.devis-doc th{break-inside:avoid!important;page-break-inside:avoid!important;}
+.devis-doc h1,.devis-doc h2,.devis-doc h3,.devis-doc h4,.devis-doc h5,.print-area h1,.print-area h2,.print-area h3,.print-area h4,.print-area h5{break-after:avoid;page-break-after:avoid;}
+.devis-doc p,.devis-doc li,.print-area p,.print-area li{orphans:3;widows:3;}
+.devis-doc img,.print-area img,.devis-doc svg,.print-area svg{break-inside:avoid;page-break-inside:avoid;max-width:100%;}
+/* Écrans de rapport imprimés : cartes, tuiles d'indicateur, lignes de liste et graphiques entiers. */
+.print-area .card,.print-area .kpi,.print-area .hrow,.print-area .crow,.print-area .deal-card,.print-area .acc-card,.print-area .col,.print-area table tr{break-inside:avoid;page-break-inside:avoid;}
+.print-area thead{display:table-header-group;}
 /* Cas 2 — impression d'un écran de rapport (aucun document ouvert). */
 body:not(.doc-print) *{visibility:hidden!important;}
 body:not(.doc-print) .print-area,body:not(.doc-print) .print-area *{visibility:visible!important;}
@@ -5657,7 +5679,7 @@ function Accounts({ data, persist, go, focus }) {
     {data.claudeBatch && data.claudeBatch.id && data.claudeBatch.kind === "sites" && (() => { const b = data.claudeBatch; const depuis = Math.max(0, Math.round((Date.now() - new Date(b.at).getTime()) / 60000)); return (
       <div className="card" style={{ borderLeft: "4px solid var(--blue)", marginBottom: 12, fontSize: 12.5, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <Sparkles size={15} className="spin" style={{ color: "var(--blue)", flexShrink: 0 }} />
-        <span style={{ flex: 1, minWidth: 220 }}><strong>{b.count} établissement(s)</strong> en cours d'enrichissement par l'IA en lot (50 % moins cher) — lancé il y a {depuis < 1 ? "moins d'une minute" : depuis + " min"}. Les résultats s'appliqueront automatiquement, même si vous fermez l'application.</span>
+        <span style={{ flex: 1, minWidth: 220 }}><strong>{b.count} établissement(s)</strong> en cours d'enrichissement par l'IA en lot (50 % moins cher) — lancé il y a {depuis < 1 ? "moins d'une minute" : fmtMinutes(depuis)}. Les résultats s'appliqueront automatiquement, même si vous fermez l'application.</span>
         <button className="btn btn-g btn-s" onClick={() => appConfirm("Abandonner le lot d'enrichissement en cours ? Les fiches déjà complétées par les sources gratuites sont conservées ; les résultats IA de ce lot seront perdus.", { title: "Abandonner le lot ?", confirmLabel: "Abandonner" }).then((ok) => { if (!ok) return; batchCall("cancel", { id: b.id }).catch(() => {}); persist((d) => ({ ...d, claudeBatch: null, claudeBatchMsg: { ok: false, kind: "sites", t: "Lot d'enrichissement abandonné." } })); })}>Abandonner</button>
       </div>); })()}
     {data.claudeBatchMsg && data.claudeBatchMsg.kind === "sites" && <div className="card" style={{ borderLeft: "4px solid " + (data.claudeBatchMsg.ok ? "var(--green)" : "var(--red)"), marginBottom: 12, fontSize: 12.5, display: "flex", alignItems: "center", gap: 10 }}><span style={{ flex: 1 }}>{data.claudeBatchMsg.t}</span><button className="btn btn-g btn-s" onClick={() => persist((d) => ({ ...d, claudeBatchMsg: null }))}>Fermer</button></div>}
@@ -5776,7 +5798,7 @@ function SiteDetail({ site, data, persist, go, onBack, onGoAccount }) {
               // chiffré au réel plutôt qu'au barème.
               let cout = "";
               try { const pl = await prixGazole(cpToDepartement(s.cp || (acc && acc.cp))); if (pl) cout = ` · carburant ~${((rt.km * 2 * 6.5 / 100) * pl).toFixed(2)} € aller-retour (gazole ${pl} €/L)`; } catch (e) {}
-              resume = `Check-in à ${rt.km} km par la route (~${rt.minutes} min) de l'établissement${cout}.`;
+              resume = `Check-in à ${rt.km} km par la route (~${fmtMinutes(rt.minutes)}) de l'établissement${cout}.`;
             } else resume = `Check-in à ~${d.toFixed(1)} km à vol d'oiseau de l'établissement (vérifier le bon point de vente).`;
           }
         }
@@ -7926,25 +7948,35 @@ function DevisPreview({ deal, account, settings, products = [], data = {}, onClo
   // Établissement de référence : celui du document (siteId / livraison), sinon l'unique
   // établissement du compte s'il n'y en a qu'un (cf. soleSite).
   const site = findSite(deal.siteId) || findSite(deal.livraisonSiteId) || soleSite;
-  const princ = (data.contacts || []).find((c) => c.accountId === (account && account.id) && c.principal) || (data.contacts || []).find((c) => c.accountId === (account && account.id));
+  // Contact imprimé. Priorité au contact de l'ÉTABLISSEMENT du document ; à défaut, un interlocuteur
+  // du groupe, c'est-à-dire un contact du compte rattaché à AUCUN établissement. Jamais le contact
+  // d'un AUTRE magasin : sur un groupe, le « contact principal du compte » pouvait être le
+  // responsable d'un troisième point de vente, dont le téléphone et le courriel se retrouvaient
+  // imprimés sur un devis qui ne le concernait pas.
+  const contactsCompte = (data.contacts || []).filter((c) => c.accountId === (account && account.id));
+  const contactsSite = site ? (data.contacts || []).filter((c) => contactInSite(c, site.id)) : [];
+  const contactsGroupe = contactsCompte.filter((c) => !c.siteId && !(Array.isArray(c.siteIds) && c.siteIds.length));
+  const choisirContact = (list) => list.find((c) => c.principal) || list[0] || null;
+  const princ = site ? (choisirContact(contactsSite) || choisirContact(contactsGroupe)) : choisirContact(contactsCompte);
   // L'adresse du MAGASIN prime sur celle du compte : sur un groupe, l'adresse du compte est le
   // siège social, qui n'a rien à faire sur un devis destiné à un point de vente.
   const clientAdresse = (site && site.adresse) || (account && (account.adressePostale || account.adresseLivraison)) || "";
   const clientTel = (site && site.telFixe) || (princ && (princ.mobile || princ.fixe)) || "";
-  const clientMail = (site && site.email) || (princ && princ.email) || (account && account.email) || "";
+  // Le courriel du COMPTE est celui du groupe : on ne le sert qu'en l'absence d'établissement désigné.
+  const clientMail = (site && site.email) || (princ && princ.email) || (!site && account && account.email) || "";
   return createPortal(<div className="ov print-doc-overlay" onClick={onClose}><div className="doc" onClick={(e) => e.stopPropagation()}>
     <div className="no-print" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: "1px solid var(--line)", position: "sticky", top: 0, background: "#fff", zIndex: 3 }}><strong>{titre} {ref}</strong><div style={{ display: "flex", gap: 8 }}><button className="btn btn-p btn-s" onClick={() => window.print()}><Printer size={15} /> Imprimer / PDF</button><button className="iconbtn" onClick={onClose}><X size={16} /></button></div></div>
     <div className="devis-doc">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22 }}>
+      <div className="doc-bloc" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22 }}>
         <div style={{ maxWidth: 260 }}>{typeof LOGO_DATA_URI !== "undefined" && LOGO_DATA_URI ? <img src={LOGO_DATA_URI} alt="Pen'Up 3D" style={{ height: 54, marginBottom: 8 }} /> : <div style={{ fontFamily: "'Bricolage Grotesque',sans-serif", fontSize: 22, fontWeight: 800, color: "#3F60AA" }}>PEN'UP 3D</div>}
           <div style={{ fontSize: 11, color: "#6b7589", lineHeight: 1.5 }}>PEN'UP 3D, SAS<br />20 Place Prax Paris, 82000 Montauban<br />SIRET 978 651 891 00019<br />{settings.myEmail} · 06 95 50 37 68</div></div>
         <div style={{ textAlign: "right" }}><div style={{ fontFamily: "'Bricolage Grotesque',sans-serif", fontSize: 26, fontWeight: 800, color: "#3F60AA" }}>{titre}</div><div style={{ fontSize: 12, marginTop: 4 }}><strong>{ref}</strong></div><div style={{ fontSize: 12, color: "#6b7589" }}>Date : {deal.date}</div></div>
       </div>
-      <div style={{ background: "#f4f6fb", borderRadius: 10, padding: 14, marginBottom: 18 }}><div style={{ fontSize: 10, textTransform: "uppercase", color: "#6b7589", fontWeight: 700, marginBottom: 4 }}>Client</div><div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}><div style={{ fontWeight: 700, fontSize: 15 }}>{(site && site.label) || account?.enseigne || account?.raisonSociale || (princ && fullName(princ)) || "—"}</div>{(docCode || account?.code) && <span style={{ fontSize: 11.5, fontWeight: 700, color: "#6b7589", letterSpacing: ".03em" }}>Code client {docCode || account.code}</span>}</div>{(account?.siren || account?.formeJuridique) && <div style={{ fontSize: 11.5, color: "#6b7589", marginTop: 2 }}>{[account.formeJuridique, account.siren && ("SIREN " + account.siren)].filter(Boolean).join(" · ")}</div>}{clientAdresse && <div style={{ fontSize: 12, color: "#6b7589", marginTop: 2 }}>{clientAdresse}</div>}{(clientTel || clientMail) && <div style={{ fontSize: 12, color: "#6b7589", marginTop: 2 }}>{[clientTel, clientMail].filter(Boolean).join(" · ")}</div>}</div>
+      <div className="doc-bloc" style={{ background: "#f4f6fb", borderRadius: 10, padding: 14, marginBottom: 18 }}><div style={{ fontSize: 10, textTransform: "uppercase", color: "#6b7589", fontWeight: 700, marginBottom: 4 }}>Client</div><div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}><div style={{ fontWeight: 700, fontSize: 15 }}>{(site && site.label) || account?.enseigne || account?.raisonSociale || (princ && fullName(princ)) || "—"}</div>{(docCode || account?.code) && <span style={{ fontSize: 11.5, fontWeight: 700, color: "#6b7589", letterSpacing: ".03em" }}>Code client {docCode || account.code}</span>}</div>{(account?.siren || account?.formeJuridique) && <div style={{ fontSize: 11.5, color: "#6b7589", marginTop: 2 }}>{[account.formeJuridique, account.siren && ("SIREN " + account.siren)].filter(Boolean).join(" · ")}</div>}{clientAdresse && <div style={{ fontSize: 12, color: "#6b7589", marginTop: 2 }}>{clientAdresse}</div>}{(clientTel || clientMail) && <div style={{ fontSize: 12, color: "#6b7589", marginTop: 2 }}>{[clientTel, clientMail].filter(Boolean).join(" · ")}</div>}</div>
       <table><thead><tr><th>Désignation</th><th style={{ textAlign: "right" }}>Qté</th><th style={{ textAlign: "right" }}>PU HT</th><th style={{ textAlign: "right" }}>Total HT</th></tr></thead><tbody>{deal.lines.map((l) => (<tr key={l.id}><td>{l.designation || l.code}</td><td style={{ textAlign: "right" }} className="tnum">{num(l.qte)}</td><td style={{ textAlign: "right", color: l.offert ? "#2bb673" : "inherit", fontWeight: l.offert ? 600 : "inherit" }} className="tnum">{l.offert ? "Offert" : eur2(l.pu)}</td><td style={{ textAlign: "right", fontWeight: 600, color: l.offert ? "#2bb673" : "inherit" }} className="tnum">{l.offert ? "Offert" : eur2((l.qte || 0) * (l.pu || 0))}</td></tr>))}</tbody></table>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}><div style={{ width: 280 }}><div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", fontSize: 13 }}><span style={{ color: "#6b7589" }}>Total marchandise HT</span><strong className="tnum">{eur2(ht)}</strong></div><div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", fontSize: 13 }}><span style={{ color: "#6b7589" }}>{port > 0 ? "Participation frais de port HT" : (deal.portOffert ? "Livraison offerte" : "Frais de port")}</span><strong className="tnum" style={{ color: port > 0 ? "#a06a06" : "#2bb673" }}>{port > 0 ? eur2(port) : (deal.portOffert ? "Offert" : "Franco (offert)")}</strong></div><div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", fontSize: 13 }}><span style={{ color: "#6b7589" }}>TVA {deal.tva}%</span><strong className="tnum">{eur2(tva)}</strong></div><div style={{ display: "flex", justifyContent: "space-between", padding: "9px 12px", marginTop: 4, background: "#3F60AA", color: "#fff", borderRadius: 9, fontSize: 15 }}><span>Total TTC</span><strong className="tnum">{eur2(ttc)}</strong></div></div></div>
+      <div className="doc-bloc" style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}><div style={{ width: 280 }}><div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", fontSize: 13 }}><span style={{ color: "#6b7589" }}>Total marchandise HT</span><strong className="tnum">{eur2(ht)}</strong></div><div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", fontSize: 13 }}><span style={{ color: "#6b7589" }}>{port > 0 ? "Participation frais de port HT" : (deal.portOffert ? "Livraison offerte" : "Frais de port")}</span><strong className="tnum" style={{ color: port > 0 ? "#a06a06" : "#2bb673" }}>{port > 0 ? eur2(port) : (deal.portOffert ? "Offert" : "Franco (offert)")}</strong></div><div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", fontSize: 13 }}><span style={{ color: "#6b7589" }}>TVA {deal.tva}%</span><strong className="tnum">{eur2(tva)}</strong></div><div style={{ display: "flex", justifyContent: "space-between", padding: "9px 12px", marginTop: 4, background: "#3F60AA", color: "#fff", borderRadius: 9, fontSize: 15 }}><span>Total TTC</span><strong className="tnum">{eur2(ttc)}</strong></div></div></div>
       {(() => { const cp = ((livAdr || account?.adresseLivraison || account?.adressePostale || "").match(/\b(\d{5})\b/) || [])[1]; const dpt = cp ? cp.slice(0, 2) : ""; const wmap = {}; (products || []).forEach((p) => { wmap[p.code] = p; }); const kg = Math.round((deal.lines || []).reduce((s, l) => s + ((wmap[l.code] || {}).poidsG || 0) * (l.qte || 0), 0)) / 1000; const est = dpt && kg > 0 ? shippingCost(dpt, kg) : null; const estime = (deal.lines || []).some((l) => (wmap[l.code] || {}).poidsEstime); return (<div className="no-print" style={{ marginTop: 14, background: "#fff8ef", border: "1px dashed #e6b87a", borderRadius: 10, padding: "10px 13px", fontSize: 11.5, color: "#8a6326" }}><strong>Estimation interne (non imprimée) · coût transport Régis Martelet</strong><div style={{ marginTop: 3 }}>{est ? (dpt + " " + est.zone + " · " + kg + " kg · tranche " + est.trancheLabel + " → " + eur2(est.total) + " (base " + eur2(est.base) + " + gazole + contributions fixes ; hors saisonnier et Région Parisienne)" + (estime ? " · poids partiellement provisoires" : "")) : (!dpt ? "Renseignez une adresse de livraison avec code postal pour estimer le transport." : "Poids produits manquants pour estimer.")}</div><div style={{ marginTop: 3, color: "#a98b5e" }}>À comparer à la participation port facturée ci-dessus. Ce bloc n'apparaît pas à l'impression du devis.</div></div>); })()}
-      {titre === "FACTURE" && <div style={{ marginTop: 18, background: "#f4f6fb", borderRadius: 10, padding: 14 }}>
+      {titre === "FACTURE" && <div className="doc-bloc" style={{ marginTop: 18, background: "#f4f6fb", borderRadius: 10, padding: 14 }}>
         <div style={{ fontSize: 10, textTransform: "uppercase", color: "#6b7589", fontWeight: 700, marginBottom: 6 }}>Coordonnées bancaires</div>
         <div style={{ fontSize: 12, color: "#1E2533", lineHeight: 1.6 }}>
           <div><span style={{ color: "#6b7589" }}>Titulaire :</span> <strong>{BANK.titulaire}</strong> · {BANK.adresse}</div>
@@ -7953,8 +7985,8 @@ function DevisPreview({ deal, account, settings, products = [], data = {}, onClo
         </div>
         <div style={{ fontSize: 11.5, color: "#6b7589", marginTop: 7 }}>Merci d'indiquer la référence {ref} lors de votre virement.</div>
       </div>}
-      {deal.type === "Commande" && deal.signature && <div style={{ marginTop: 22, display: "flex", justifyContent: "flex-end" }}><div style={{ border: "1px solid #eef1f7", borderRadius: 8, padding: "10px 14px", minWidth: 240, textAlign: "center" }}><div style={{ fontSize: 11, color: "#6b7589", fontWeight: 700, marginBottom: 4 }}>Bon pour accord{deal.signataire ? " — " + deal.signataire : ""}{deal.signatureDate ? " · " + deal.signatureDate : ""}</div><img src={deal.signature} alt="Signature" style={{ maxWidth: 240, maxHeight: 90, display: "block", margin: "0 auto" }} /></div></div>}
-      {deal.type === "Devis" && <div style={{ marginTop: 22, display: "flex", justifyContent: "flex-end" }}>
+      {deal.type === "Commande" && deal.signature && <div className="doc-bloc" style={{ marginTop: 22, display: "flex", justifyContent: "flex-end" }}><div style={{ border: "1px solid #eef1f7", borderRadius: 8, padding: "10px 14px", minWidth: 240, textAlign: "center" }}><div style={{ fontSize: 11, color: "#6b7589", fontWeight: 700, marginBottom: 4 }}>Bon pour accord{deal.signataire ? " — " + deal.signataire : ""}{deal.signatureDate ? " · " + deal.signatureDate : ""}</div><img src={deal.signature} alt="Signature" style={{ maxWidth: 240, maxHeight: 90, display: "block", margin: "0 auto" }} /></div></div>}
+      {deal.type === "Devis" && <div className="doc-bloc" style={{ marginTop: 22, display: "flex", justifyContent: "flex-end" }}>
         <div style={{ border: "1px solid #d9deea", borderRadius: 8, padding: "12px 14px", width: 320 }}>
           <div style={{ fontSize: 12, fontWeight: 800, color: "#16203a", marginBottom: 9 }}>Bon pour accord</div>
           <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 11.5, color: "#16203a", lineHeight: 1.5 }}><span style={{ display: "inline-block", width: 14, height: 14, border: "1.6px solid #16203a", borderRadius: 3, flexShrink: 0, marginTop: 1 }} /><span>J'accepte ce devis (bon pour accord) et en autorise la mise en commande.</span></label>
@@ -7963,7 +7995,7 @@ function DevisPreview({ deal, account, settings, products = [], data = {}, onClo
           <div style={{ fontSize: 10, color: "#6b7589", borderTop: "1px dashed #d9deea", paddingTop: 6, lineHeight: 1.5 }}>À cocher et signer ici, <strong>ou</strong> à confirmer par simple réponse à notre e-mail avec la mention « bon pour accord ».</div>
         </div>
       </div>}
-      <div style={{ marginTop: 26, fontSize: 10.5, color: "#6b7589", borderTop: "1px solid #eef1f7", paddingTop: 10, lineHeight: 1.7 }}>
+      <div className="doc-bloc" style={{ marginTop: 26, fontSize: 10.5, color: "#6b7589", borderTop: "1px solid #eef1f7", paddingTop: 10, lineHeight: 1.7 }}>
         {titre === "DEVIS" && <div>Devis valable 30 jours.</div>}
         {(() => { const t = paiementTerme(deal.paiement); if (!t) return null; const ech = titre === "FACTURE" ? echeancePaiement(deal.date, deal.paiement) : ""; return (<div><strong>Conditions de règlement</strong> — {t.label}{ech ? ", soit une échéance au " + ech : ""}. Pénalités de retard : trois fois le taux d'intérêt légal ; indemnité forfaitaire pour frais de recouvrement de 40 € (art. L441-10 et D441-5 du code de commerce). Pas d'escompte pour paiement anticipé.</div>); })()}
         <div><strong>Livraison {zc.label}</strong> — franco de port dès {zc.seuil} € HT de commande ; en deçà, participation forfaitaire de {zc.part} € HT aux frais de port.</div>
@@ -10914,7 +10946,7 @@ function Prospection({ data, persist, go }) {
     {data.claudeBatch && data.claudeBatch.id && data.claudeBatch.kind !== "sites" && (() => { const b = data.claudeBatch; const depuis = Math.max(0, Math.round((Date.now() - new Date(b.at).getTime()) / 60000)); return (
       <div className="card" style={{ borderLeft: "4px solid var(--blue)", marginBottom: 12, fontSize: 12.5, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <Sparkles size={15} className="spin" style={{ color: "var(--blue)", flexShrink: 0 }} />
-        <span style={{ flex: 1, minWidth: 220 }}><strong>{b.count} fiche(s)</strong> en cours d'enrichissement par l'IA en lot (50 % moins cher) — lancé il y a {depuis < 1 ? "moins d'une minute" : depuis + " min"}. Les résultats s'appliqueront automatiquement, même si vous fermez l'application.</span>
+        <span style={{ flex: 1, minWidth: 220 }}><strong>{b.count} fiche(s)</strong> en cours d'enrichissement par l'IA en lot (50 % moins cher) — lancé il y a {depuis < 1 ? "moins d'une minute" : fmtMinutes(depuis)}. Les résultats s'appliqueront automatiquement, même si vous fermez l'application.</span>
         <button className="btn btn-g btn-s" onClick={() => appConfirm("Abandonner le lot d'enrichissement en cours ? Les fiches déjà complétées par les sources gratuites sont conservées ; les résultats IA de ce lot seront perdus.", { title: "Abandonner le lot ?", confirmLabel: "Abandonner" }).then((ok) => { if (!ok) return; batchCall("cancel", { id: b.id }).catch(() => {}); persist((d) => ({ ...d, claudeBatch: null, claudeBatchMsg: { ok: false, t: "Lot d'enrichissement abandonné." } })); })}>Abandonner</button>
       </div>); })()}
     {data.claudeBatchMsg && data.claudeBatchMsg.kind !== "sites" && <div className="card" style={{ borderLeft: "4px solid " + (data.claudeBatchMsg.ok ? "var(--green)" : "var(--red)"), marginBottom: 12, fontSize: 12.5, display: "flex", alignItems: "center", gap: 10 }}><span style={{ flex: 1 }}>{data.claudeBatchMsg.t}</span><button className="btn btn-g btn-s" onClick={() => persist((d) => ({ ...d, claudeBatchMsg: null }))}>Fermer</button></div>}
