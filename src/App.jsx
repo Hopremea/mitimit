@@ -7956,8 +7956,15 @@ function DevisPreview({ deal, account, settings, products = [], data = {}, onClo
   const contactsCompte = (data.contacts || []).filter((c) => c.accountId === (account && account.id));
   const contactsSite = site ? (data.contacts || []).filter((c) => contactInSite(c, site.id)) : [];
   const contactsGroupe = contactsCompte.filter((c) => !c.siteId && !(Array.isArray(c.siteIds) && c.siteIds.length));
-  const choisirContact = (list) => list.find((c) => c.principal) || list[0] || null;
-  const princ = site ? (choisirContact(contactsSite) || choisirContact(contactsGroupe)) : choisirContact(contactsCompte);
+  // Au sein d'un établissement, c'est le contact FAVORI DE L'ÉTABLISSEMENT (étoile ⭐) qui est
+  // retenu : `principalEtab` sur un groupe, `principal` sur un compte indépendant où la case porte
+  // ce même sens — la règle des étoiles affichées sur les fiches (cf. favStars). Le favori du GROUPE
+  // (🌟 `principal`) ne sert qu'en second, puis n'importe quel contact de l'établissement.
+  const estGroupe = !!(account && isGroupe(account));
+  const favoriEtab = (c) => !!(c.principalEtab || (!estGroupe && c.principal));
+  const choisirSite = (list) => list.find(favoriEtab) || list.find((c) => c.principal) || list[0] || null;
+  const choisirGroupe = (list) => list.find((c) => c.principal) || list[0] || null;
+  const princ = site ? (choisirSite(contactsSite) || choisirGroupe(contactsGroupe)) : choisirGroupe(contactsCompte);
   // L'adresse du MAGASIN prime sur celle du compte : sur un groupe, l'adresse du compte est le
   // siège social, qui n'a rien à faire sur un devis destiné à un point de vente.
   const clientAdresse = (site && site.adresse) || (account && (account.adressePostale || account.adresseLivraison)) || "";
