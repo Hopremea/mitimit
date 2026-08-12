@@ -5848,7 +5848,7 @@ function Accounts({ data, persist, go, focus }) {
     {data.claudeBatch && data.claudeBatch.id && data.claudeBatch.kind === "sites" && (() => { const b = data.claudeBatch; const depuis = Math.max(0, Math.round((Date.now() - new Date(b.at).getTime()) / 60000)); return (
       <div className="card" style={{ borderLeft: "4px solid var(--blue)", marginBottom: 12, fontSize: 12.5, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <Sparkles size={15} className="spin" style={{ color: "var(--blue)", flexShrink: 0 }} />
-        <span style={{ flex: 1, minWidth: 220 }}><strong>{b.count} établissement(s)</strong> en cours d'enrichissement par l'IA en lot (50 % moins cher) — lancé il y a {depuis < 1 ? "moins d'une minute" : fmtMinutes(depuis)}. Les résultats s'appliqueront automatiquement, même si vous fermez l'application.</span>
+        <span style={{ flex: 1, minWidth: 220 }}><strong>{b.faites != null ? b.faites + " / " + b.count + " établissement(s) traité(s)" : b.count + " établissement(s)"}</strong> — enrichissement par l'IA en lot (50 % moins cher), lancé il y a {depuis < 1 ? "moins d'une minute" : fmtMinutes(depuis)}. Les résultats s'appliqueront automatiquement, même si vous fermez l'application.</span>
         <button className="btn btn-g btn-s" onClick={() => appConfirm("Abandonner le lot d'enrichissement en cours ? Les fiches déjà complétées par les sources gratuites sont conservées ; les résultats IA de ce lot seront perdus.", { title: "Abandonner le lot ?", confirmLabel: "Abandonner" }).then((ok) => { if (!ok) return; batchCall("cancel", { id: b.id }).catch(() => {}); persist((d) => ({ ...d, claudeBatch: null, claudeBatchMsg: { ok: false, kind: "sites", t: "Lot d'enrichissement abandonné." } })); })}>Abandonner</button>
       </div>); })()}
     {data.claudeBatchMsg && data.claudeBatchMsg.kind === "sites" && <div className="card" style={{ borderLeft: "4px solid " + (data.claudeBatchMsg.ok ? "var(--green)" : "var(--red)"), marginBottom: 12, fontSize: 12.5, display: "flex", alignItems: "center", gap: 10 }}><span style={{ flex: 1 }}>{data.claudeBatchMsg.t}</span><button className="btn btn-g btn-s" onClick={() => persist((d) => ({ ...d, claudeBatchMsg: null }))}>Fermer</button></div>}
@@ -11268,7 +11268,7 @@ function Prospection({ data, persist, go }) {
     {data.claudeBatch && data.claudeBatch.id && data.claudeBatch.kind !== "sites" && (() => { const b = data.claudeBatch; const depuis = Math.max(0, Math.round((Date.now() - new Date(b.at).getTime()) / 60000)); return (
       <div className="card" style={{ borderLeft: "4px solid var(--blue)", marginBottom: 12, fontSize: 12.5, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <Sparkles size={15} className="spin" style={{ color: "var(--blue)", flexShrink: 0 }} />
-        <span style={{ flex: 1, minWidth: 220 }}><strong>{b.count} fiche(s)</strong> en cours d'enrichissement par l'IA en lot (50 % moins cher) — lancé il y a {depuis < 1 ? "moins d'une minute" : fmtMinutes(depuis)}. Les résultats s'appliqueront automatiquement, même si vous fermez l'application.</span>
+        <span style={{ flex: 1, minWidth: 220 }}><strong>{b.faites != null ? b.faites + " / " + b.count + " fiche(s) traitée(s)" : b.count + " fiche(s)"}</strong> — enrichissement par l'IA en lot (50 % moins cher), lancé il y a {depuis < 1 ? "moins d'une minute" : fmtMinutes(depuis)}. Les résultats s'appliqueront automatiquement, même si vous fermez l'application.</span>
         <button className="btn btn-g btn-s" onClick={() => appConfirm("Abandonner le lot d'enrichissement en cours ? Les fiches déjà complétées par les sources gratuites sont conservées ; les résultats IA de ce lot seront perdus.", { title: "Abandonner le lot ?", confirmLabel: "Abandonner" }).then((ok) => { if (!ok) return; batchCall("cancel", { id: b.id }).catch(() => {}); persist((d) => ({ ...d, claudeBatch: null, claudeBatchMsg: { ok: false, t: "Lot d'enrichissement abandonné." } })); })}>Abandonner</button>
       </div>); })()}
     {data.claudeBatchMsg && data.claudeBatchMsg.kind !== "sites" && <div className="card" style={{ borderLeft: "4px solid " + (data.claudeBatchMsg.ok ? "var(--green)" : "var(--red)"), marginBottom: 12, fontSize: 12.5, display: "flex", alignItems: "center", gap: 10 }}><span style={{ flex: 1 }}>{data.claudeBatchMsg.t}</span><button className="btn btn-g btn-s" onClick={() => persist((d) => ({ ...d, claudeBatchMsg: null }))}>Fermer</button></div>}
@@ -14740,7 +14740,21 @@ function ClaudeBatchWatcher({ batch, persist }) {
         if (/404|not_found|introuvable/i.test(String((e && e.message) || e))) { persist((d) => ({ ...d, claudeBatch: null, claudeBatchMsg: { ok: false, t: "Le lot d'enrichissement n'est plus disponible côté Anthropic — il a été abandonné." } })); }
         return;
       }
-      if (stop || !r || r.pending) return; // toujours en traitement : on repassera
+      if (stop || !r) return;
+      if (r.pending) {
+        // Le lot tourne encore. L'API dit combien de requêtes sont traitées : on le retient pour que
+        // la bannière montre une progression, au lieu d'afficher éternellement la taille du lot.
+        const c = r.request_counts || null;
+        if (c) {
+          const faites = (c.succeeded || 0) + (c.errored || 0) + (c.canceled || 0) + (c.expired || 0);
+          persist((d) => {
+            const b = d.claudeBatch;
+            if (!b || b.id !== id || b.faites === faites) return d; // rien de neuf : pas d'écriture
+            return { ...d, claudeBatch: { ...b, faites } };
+          }, { snapshot: false });
+        }
+        return;
+      }
       const outs = (batch && batch.outs) || {};
       let nOk = 0, nEchec = 0;
       // Lecture des pages magasin AVANT d'appliquer le lot : l'application se fait dans un réducteur
