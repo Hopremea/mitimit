@@ -911,6 +911,93 @@ function collectKnownAddresses(data) {
   return out;
 }
 // Adresses e-mail connues (contacts, sites, comptes) → entité associée, pour la synchro des courriels.
+// ===== Import d'un journal d'appels (Android / Samsung) =====
+// Format retenu : le fichier « calls-*.xml » produit par l'application SMS Backup & Restore, de fait
+// le standard sur Android. Les sauvegardes Smart Switch (.bk) sont chiffrées et illisibles ici.
+// Un export CSV générique (colonnes numéro / date / type / durée) est accepté en second recours.
+// Un numéro se compare sur ses 9 derniers chiffres : indicatif, espaces et préfixe international
+// varient d'un carnet à l'autre, mais la fin du numéro, non.
+const telCle = (s) => { const d = String(s || "").replace(/\D/g, ""); return d.length >= 9 ? d.slice(-9) : ""; };
+const CALL_TYPES = { 1: "entrant", 2: "sortant", 3: "manque", 4: "messagerie", 5: "rejete", 6: "bloque" };
+function parseCallLog(text) {
+  const out = [];
+  const brut = String(text || "");
+  const attr = (bloc, nom) => { const m = bloc.match(new RegExp(nom + '\\s*=\\s*"([^"]*)"')); return m ? m[1] : ""; };
+  const blocs = brut.match(/<call\b[^>]*\/?>/gi) || [];
+  blocs.forEach((b) => {
+    const numero = attr(b, "number");
+    const ms = Number(attr(b, "date"));
+    if (!numero || !ms || isNaN(ms)) return;
+    out.push({ numero, ms, duree: Number(attr(b, "duration")) || 0, type: CALL_TYPES[Number(attr(b, "type"))] || "entrant", nom: attr(b, "contact_name") });
+  });
+  if (out.length) return out;
+  // Repli CSV : on repère les colonnes par leur intitulé, l'ordre variant d'un export à l'autre.
+  const lignes = brut.split(/\r?\n/).filter((l) => l.trim());
+  if (lignes.length < 2) return out;
+  const sep = (lignes[0].match(/;/g) || []).length >= (lignes[0].match(/,/g) || []).length ? ";" : ",";
+  const cols = lignes[0].split(sep).map((c) => normSansAccents(c).replace(/[^a-z]/g, ""));
+  const idx = (...noms) => cols.findIndex((c) => noms.some((n) => c.includes(n)));
+  const iNum = idx("numero", "number", "tel", "phone"), iDate = idx("date", "heure", "time"), iType = idx("type", "sens", "direction"), iDur = idx("duree", "duration");
+  if (iNum < 0 || iDate < 0) return out;
+  lignes.slice(1).forEach((l) => {
+    const c = l.split(sep).map((x) => x.trim().replace(/^"|"$/g, ""));
+    const numero = c[iNum]; if (!numero) return;
+    const brute = c[iDate];
+    const ms = /^\d{10,}$/.test(brute) ? (brute.length > 12 ? Number(brute) : Number(brute) * 1000) : Date.parse(brute.replace(/(\d{2})\/(\d{2})\/(\d{4})/, "$3-$2-$1"));
+    if (!ms || isNaN(ms)) return;
+    const t = normSansAccents(c[iType] || "");
+    const type = /sortant|outgoing|emis|2/.test(t) ? "sortant" : /manque|missed|3/.test(t) ? "manque" : "entrant";
+    out.push({ numero, ms, duree: Number(String(c[iDur] || "").replace(/\D/g, "")) || 0, type, nom: "" });
+  });
+  return out;
+}
+// Numéros connus → fiche à laquelle rattacher l'appel. Même forme que gmailAddressMap.
+function callLogNumberMap(data) {
+  const map = {};
+  (data.contacts || []).forEach((c) => { [c.mobile, c.fixe].forEach((t) => { const k = telCle(t); if (k && !map[k]) map[k] = { contactId: c.id, accountId: c.accountId || "", siteId: c.siteId || "", label: fullName(c) }; }); });
+  (data.sites || []).forEach((s) => { const k = telCle(s.telFixe); if (k && !map[k]) map[k] = { contactId: "", accountId: s.accountId || "", siteId: s.id, label: s.label || "Établissement" }; });
+  (data.accounts || []).forEach((a) => { const k = telCle(a.telephone || a.tel); if (k && !map[k]) map[k] = { contactId: "", accountId: a.id, siteId: "", label: a.enseigne || "Groupe" }; });
+  return map;
+}
+const dureeAppel = (s) => { const v = Math.round(Number(s) || 0); if (v <= 0) return ""; return v < 60 ? v + " s" : fmtMinutes(Math.round(v / 60)); };
+// Journalise les appels dont le numéro correspond à une fiche. Idempotent via callId (numéro +
+// horodatage) : réimporter le même journal, ou un journal qui recouvre le précédent, n'ajoute rien.
+function callLogIngest(data, persist, calls) {
+  const map = callLogNumberMap(data);
+  const vus = new Set((data.interactions || []).filter((i) => i.callId).map((i) => i.callId));
+  const toAdd = []; let inconnus = 0; const numInconnus = new Set();
+  calls.forEach((c) => {
+    const k = telCle(c.numero);
+    const ent = k && map[k];
+    if (!ent) { inconnus++; if (k) numInconnus.add(c.numero); return; }
+    const callId = k + "@" + c.ms;
+    if (vus.has(callId)) return;
+    vus.add(callId);
+    const d = new Date(c.ms);
+    const sortant = c.type === "sortant";
+    const manque = c.type === "manque" || c.type === "rejete";
+    const dur = dureeAppel(c.duree);
+    toAdd.push({
+      id: "call_" + callId.replace(/\W/g, ""), callId,
+      accountId: ent.accountId || "", contactId: ent.contactId || "", siteId: ent.siteId || "",
+      type: "appel", direction: sortant ? "sortant" : "entrant",
+      date: isoLocal(d), heure: String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"),
+      sujet: manque ? (sortant ? "Appel sortant sans réponse" : "Appel manqué") : (sortant ? "Appel sortant" : "Appel entrant"),
+      resume: [manque ? "Appel non abouti." : (dur ? "Durée : " + dur + "." : ""), "Numéro : " + c.numero + ".", "Importé du journal d'appels du téléphone."].filter(Boolean).join(" "),
+      tel: c.numero, source: "journal-appels", sourced: true,
+    });
+  });
+  let ajoutes = 0;
+  if (toAdd.length) {
+    persist((p) => {
+      const deja = new Set((p.interactions || []).filter((i) => i.callId).map((i) => i.callId));
+      const frais = toAdd.filter((t) => !deja.has(t.callId));
+      ajoutes = frais.length;
+      return frais.length ? { ...p, interactions: [...(p.interactions || []), ...frais] } : p;
+    }, { snapshot: false });
+  }
+  return { ajoutes, inconnus, numInconnus: Array.from(numInconnus).slice(0, 8), total: calls.length };
+}
 function gmailAddressMap(data) {
   const map = {};
   (data.contacts || []).forEach((c) => { const e = (c.email || "").trim().toLowerCase(); if (e.includes("@") && !map[e]) map[e] = { contactId: c.id, accountId: c.accountId || "", siteId: c.siteId || "" }; });
@@ -12123,6 +12210,66 @@ function EtatLogiciel({ data }) {
     </div>
   </div>);
 }
+// Import du journal d'appels du téléphone : on lit le fichier, on annonce ce qui sera rattaché et à
+// qui, puis on importe. Rien n'est écrit avant que l'aperçu ait été montré.
+function JournalAppelsBlock({ data, persist }) {
+  const fileRef = useRef(null);
+  const [lu, setLu] = useState(null); const [msg, setMsg] = useState(null); const [busy, setBusy] = useState(false);
+  const connus = useMemo(() => Object.keys(callLogNumberMap(data)).length, [data]);
+  const apercu = useMemo(() => {
+    if (!lu) return null;
+    const map = callLogNumberMap(data);
+    const vus = new Set((data.interactions || []).filter((i) => i.callId).map((i) => i.callId));
+    let reconnus = 0, deja = 0, inconnus = 0; const fiches = new Set();
+    lu.forEach((c) => {
+      const k = telCle(c.numero); const ent = k && map[k];
+      if (!ent) { inconnus++; return; }
+      reconnus++; fiches.add(ent.label);
+      if (vus.has(k + "@" + c.ms)) deja++;
+    });
+    const dates = lu.map((c) => c.ms).sort((a, b) => a - b);
+    return { reconnus, deja, inconnus, nouveaux: reconnus - deja, fiches: Array.from(fiches), du: isoLocal(new Date(dates[0])), au: isoLocal(new Date(dates[dates.length - 1])) };
+  }, [lu, data]);
+  const charger = (file) => {
+    const rd = new FileReader();
+    rd.onload = () => {
+      const c = parseCallLog(rd.result);
+      if (!c.length) { setLu(null); setMsg({ ko: true, t: "Aucun appel reconnu dans ce fichier. Attendu : le calls-….xml de SMS Backup & Restore, ou un CSV avec au moins une colonne numéro et une colonne date." }); return; }
+      setLu(c); setMsg(null);
+    };
+    rd.onerror = () => { setLu(null); setMsg({ ko: true, t: "Lecture du fichier impossible." }); };
+    rd.readAsText(file);
+  };
+  const importer = () => {
+    setBusy(true);
+    try {
+      const r = callLogIngest(data, persist, lu);
+      setMsg({ ko: false, t: r.ajoutes ? (r.ajoutes + " appel(s) ajouté(s) au fil des échanges.") : "Rien à ajouter : ces appels sont déjà journalisés." });
+      setLu(null);
+    } catch (e) { setMsg({ ko: true, t: "Échec : " + String((e && e.message) || e) }); }
+    finally { setBusy(false); }
+  };
+  return (<div className="card">
+    <div className="sec-h"><h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><Phone size={16} style={{ color: "#0EA5A4" }} /> Journal d'appels du téléphone</h3><span>{connus} numéro(s) référencé(s)</span></div>
+    <p style={{ color: "var(--muted)", fontSize: 12.5, marginTop: -4, lineHeight: 1.55 }}>
+      Comme pour les courriels : seuls les appels avec un numéro déjà présent dans une fiche sont journalisés, les autres sont ignorés. Un appel est reconnu à son numéro et à son horodatage, donc réimporter le même journal — ou un journal qui recouvre le précédent — n'ajoute aucun doublon.
+    </p>
+    <div style={{ fontSize: 11.5, color: "var(--muted)", background: "var(--bg)", borderRadius: 9, padding: "8px 10px", lineHeight: 1.6, marginBottom: 10 }}>
+      <strong>Sur le téléphone</strong> : installez <em>SMS Backup &amp; Restore</em> (gratuit), Sauvegarder → décochez les messages, ne gardez que <em>Journaux d'appels</em> → enregistrez, puis récupérez le fichier <code>calls-….xml</code>. Les sauvegardes Smart Switch (.bk) sont chiffrées et inexploitables.
+    </div>
+    <input ref={fileRef} type="file" accept=".xml,.csv,text/xml,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) charger(f); e.target.value = ""; }} />
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <button className="btn btn-g" onClick={() => fileRef.current && fileRef.current.click()}><Upload size={15} /> Choisir un journal d'appels (.xml ou .csv)</button>
+      {apercu && <button className="btn btn-p" onClick={importer} disabled={busy || !apercu.nouveaux}><Phone size={15} /> {busy ? "Import…" : "Importer " + apercu.nouveaux + " appel(s)"}</button>}
+    </div>
+    {apercu && <div style={{ marginTop: 10, fontSize: 12.5, lineHeight: 1.7 }}>
+      <div><strong>{lu.length} appel(s)</strong> dans le fichier, du {apercu.du} au {apercu.au}.</div>
+      <div><strong style={{ color: "var(--green)" }}>{apercu.nouveaux} à journaliser</strong>{apercu.deja > 0 && <span style={{ color: "var(--muted)" }}> · {apercu.deja} déjà présent(s)</span>}{apercu.inconnus > 0 && <span style={{ color: "var(--muted)" }}> · {apercu.inconnus} sur des numéros inconnus, ignorés</span>}</div>
+      {apercu.fiches.length > 0 && <div style={{ color: "var(--muted)" }}>Fiches concernées : {apercu.fiches.slice(0, 6).join(", ")}{apercu.fiches.length > 6 ? " et " + (apercu.fiches.length - 6) + " autre(s)" : ""}.</div>}
+    </div>}
+    {msg && <div style={{ fontSize: 12.5, fontWeight: 600, marginTop: 10, color: msg.ko ? "var(--red)" : "var(--green)" }}>{msg.t}</div>}
+  </div>);
+}
 function Connexions({ data, persist, autoBackup }) {
   const { settings, products } = data; const [email, setEmail] = useState(settings.myEmail); const [msg, setMsg] = useState(null); const [emailMsg, setEmailMsg] = useState("");
   const saveEmail = () => { persist((p) => ({ ...p, settings: { ...p.settings, myEmail: email.trim() } })); setEmailMsg("Adresse enregistrée."); setTimeout(() => setEmailMsg(""), 1800); };
@@ -12234,6 +12381,9 @@ function Connexions({ data, persist, autoBackup }) {
       </div>
       {gmTest.msg && <div style={{ fontSize: 12.5, fontWeight: 600, marginTop: 10, color: gmTest.msg.startsWith("❌") ? "var(--red)" : "var(--green)" }}>{gmTest.msg}</div>}
     </div>
+
+    <Section note="journal du téléphone, rattaché aux fiches par le numéro">Appels</Section>
+    <JournalAppelsBlock data={data} persist={persist} />
 
     <Section note="ce qui est connecté côté serveur (Vercel) — valeurs jamais affichées">État des connexions & variables</Section>
     <div className="card">
