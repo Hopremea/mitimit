@@ -5572,6 +5572,11 @@ function ArchiveModal({ account, existing, onUsage, onArchive, onClose, noun = "
 }
 function Accounts({ data, persist, go, focus }) {
   const { accounts, contacts } = data; const [detailId, setDetailId] = useState(null); const [edit, setEdit] = useState(null); const [addC, setAddC] = useState(null); const [openSite, setOpenSite] = useState(null); const [q, setQ] = useState(""); const [sortPdv, setSortPdv] = useState("nom"); const [dirPdv, setDirPdv] = useState("asc"); const [archQ, setArchQ] = useState(""); const [archSort, setArchSort] = useState("date"); const [archDir, setArchDir] = useState("desc"); const [siteAdd, setSiteAdd] = useState(null); const [siteDetailId, setSiteDetailId] = useState(null); const [logosOpen, setLogosOpen] = useState(false); const [enrichEtabOpen, setEnrichEtabOpen] = useState(false); const [enrichEtabMsg, setEnrichEtabMsg] = useState(null); const [dupOpen, setDupOpen] = useState(false); const [view, setView] = useState("actifs"); const [archiveEdit, setArchiveEdit] = useState(null);
+  // Piles d'établissements dépliées (cf. la grille plus bas). Ce hook doit rester AVANT les
+  // retours anticipés des vues « fiche compte » et « fiche établissement » : un hook sauté
+  // change le nombre de hooks entre deux rendus, et React refuse net.
+  const [pilesOuvertes, setPilesOuvertes] = useState(() => new Set());
+  const basculerPile = (id) => setPilesOuvertes((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   useEffect(() => { if (focus && focus.site) { setSiteDetailId(focus.site); setDetailId(null); } else if (focus && focus.id) { setDetailId(focus.id); setSiteDetailId(null); } }, [focus && focus.n]);
   // Enrichissement IA des établissements : même moteur et même déroulé que la Prospection
   // (sources gratuites d'abord, appliquées au fil de l'eau ; le reste part en lot IA).
@@ -5688,8 +5693,6 @@ function Accounts({ data, persist, go, focus }) {
   // Empilement par groupe : les établissements d'une même enseigne sont rangés en pile, les uns
   // derrière les autres, et se déploient d'un clic. Une enseigne à 300 magasins ne noie plus la
   // grille. Une recherche en cours déploie tout : on cherche un magasin précis, pas une pile.
-  const [pilesOuvertes, setPilesOuvertes] = useState(() => new Set());
-  const basculerPile = (id) => setPilesOuvertes((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const entrees = (() => {
     const out = []; const pos = new Map();
     visibleRows.forEach((r) => {
