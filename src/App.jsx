@@ -290,6 +290,16 @@ async function lireCacheLocal() {
   try { const raw = localStorage.getItem(KEY); if (raw) return JSON.parse(raw); } catch (e) { }
   return null;
 }
+// Base commune PERSISTÉE : dernière version serveur acquittée par cet appareil. Sans elle, un
+// rechargement qui trouve le serveur plus avancé que son curseur ne peut que choisir — garder le
+// serveur et perdre la fin de session locale jamais poussée, ou garder le local et perdre le travail
+// de l'autre appareil. Avec elle, les deux se fusionnent comme lors d'un conflit d'écriture.
+const BASE_KEY = KEY + ":base";
+const lireBaseLocale = async () => { try { return (await idbLire(BASE_KEY)) || null; } catch (e) { return null; } };
+// Cache local mis de côté faute de base commune : jamais jeté en silence, restaurable depuis
+// « Historique & corbeille ».
+const ECARTE_KEY = KEY + ":ecarte";
+const lireEcarte = async () => { try { return (await idbLire(ECARTE_KEY)) || null; } catch (e) { return null; } };
 // ===== Corbeille (30 jours) =====
 // Toute fiche supprimée passe par data.trash au lieu de disparaître : récupérable pendant 30 jours
 // depuis « Historique & corbeille ». La capture est automatique et centrale (différence avant/après
@@ -14681,6 +14691,30 @@ function SauvegardesModal({ data, persist, exportAll, onClose }) {
       setMsg("Version du " + s.jour + " restaurée.");
     } catch (e) { setMsg("Échec : " + String((e && e.message) || e)); } finally { setBusy(false); }
   };
+  // Version locale mise de côté par le chargement faute de base commune : elle contient du travail
+  // qui n'avait jamais atteint le serveur. On la propose au lieu de la jeter.
+  const [ecarte, setEcarte] = useState(null);
+  useEffect(() => { lireEcarte().then((e) => setEcarte(e && e.data ? e : null)).catch(() => { }); }, []);
+  const oublierEcarte = async () => { try { await idbEcrire(ECARTE_KEY, null); } catch (e) { } setEcarte(null); };
+  const restaurerEcarte = async () => {
+    if (!ecarte) return;
+    const d = ecarte.data; const nA = (d.accounts || []).length; const nI = (d.interactions || []).length;
+    const ok = await appConfirm("Revenir à la version locale mise de côté (" + nA + " comptes, " + nI + " échanges) ?\n\nElle remplacera les données actuelles sur tous les appareils. Une sauvegarde JSON de l'état actuel est téléchargée d'abord.", { title: "Restaurer la version mise de côté", confirmLabel: "Restaurer" });
+    if (!ok) return;
+    exportAll();
+    persist(() => normalize(d));
+    await oublierEcarte();
+    setMsg("Version locale mise de côté restaurée.");
+  };
+  const telechargerEcarte = () => {
+    if (!ecarte) return;
+    try {
+      const blob = new Blob([JSON.stringify(ecarte.data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob); const a = document.createElement("a");
+      a.href = url; a.download = "penup3d-version-locale-ecartee-" + String(ecarte.at || "").slice(0, 10) + ".json";
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) { setMsg("Téléchargement impossible : " + String((e && e.message) || e)); }
+  };
   const corbeille = (data.trash || []).slice().sort((a, b) => (b.at || "").localeCompare(a.at || ""));
   const restaurerFiche = (t) => persist((p) => {
     const list = Array.isArray(p[t.kind]) ? p[t.kind] : [];
@@ -14691,6 +14725,15 @@ function SauvegardesModal({ data, persist, exportAll, onClose }) {
   const frDate = (iso) => { try { return new Date(iso).toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "short" }); } catch (e) { return iso; } };
   return (<Modal title="Historique & corbeille" onClose={onClose} wide>
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {ecarte && <div style={{ border: "1px solid var(--orange)", background: "rgba(248,177,51,.10)", borderRadius: 11, padding: 12 }}>
+        <div style={{ fontWeight: 800, fontSize: 13.5, display: "inline-flex", alignItems: "center", gap: 7, marginBottom: 4 }}><AlertTriangle size={15} color="var(--orange)" /> Version locale mise de côté</div>
+        <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.55, marginBottom: 9 }}>Cet appareil détenait, le {frDate(ecarte.at)}, des données jamais parvenues au serveur, sans point de comparaison permettant de les fusionner sans risque. Elles n'ont pas été jetées : {(ecarte.data.accounts || []).length} comptes, {(ecarte.data.interactions || []).length} échanges, {(ecarte.data.deals || []).length} documents. Téléchargez-les pour comparer, ou restaurez-les si c'est bien la bonne version.</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="btn btn-g btn-s" onClick={telechargerEcarte}><Download size={14} /> Télécharger (JSON)</button>
+          <button className="btn btn-p btn-s" onClick={restaurerEcarte} disabled={busy}><ArchiveRestore size={13} /> Restaurer cette version</button>
+          <button className="btn btn-ghost btn-s" onClick={oublierEcarte}>Écarter définitivement</button>
+        </div>
+      </div>}
       <div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
           <div style={{ fontWeight: 800, fontSize: 13.5, display: "inline-flex", alignItems: "center", gap: 7 }}><Clock size={15} /> Instantanés quotidiens (serveur)</div>
@@ -14758,6 +14801,9 @@ export default function App() {
   const pendingWrite = useRef(false); // une écriture locale est en attente : ne pas l'écraser avec une version distante.
   const latestRef = useRef(null);     // dernier état persisté EN MÉMOIRE : source fiable pour les flush, même si le localStorage a débordé (photos volumineuses).
   const baseRef = useRef(null);       // dernière version ACQUITTÉE par le serveur : base commune des fusions à trois versions.
+  // La base est aussi écrite sur le disque : elle doit survivre au rechargement, sinon un appareil
+  // qui redémarre derrière un autre n'a plus de quoi fusionner (cf. BASE_KEY).
+  const poserBase = (state) => { baseRef.current = state; try { idbEcrire(BASE_KEY, state).catch(() => { }); } catch (e) { } };
   // Le curseur persisté certifie que le cache localStorage est au moins aussi récent que la version
   // serveur correspondante. Si la DERNIÈRE écriture du cache a échoué (quota dépassé, photos
   // volumineuses), cette garantie tombe : on retire alors le curseur au lieu de l'écrire, sinon un
@@ -14797,20 +14843,45 @@ export default function App() {
           if (!error && row && row.data) {
             const serveur = normalize(row.data);
             const curseur = lireCurseurSync();
-            if (current && curseur && row.updated_at === curseur && !jsonEgal(current, serveur)) {
+            const localEnAvance = current && !jsonEgal(current, serveur);
+            if (localEnAvance && curseur && row.updated_at === curseur) {
               // Fin de session locale jamais poussée : le serveur n'a rien reçu d'autre entre-temps
               // (curseur intact) → on repousse notre cache au lieu de le perdre.
-              baseRef.current = serveur; latestRef.current = current; poserCurseur(row.updated_at);
-              try { const ts = new Date().toISOString(); await supabase.from("cockpit_state").upsert({ id: "shared", data: current, updated_at: ts }, { onConflict: "id" }); poserCurseur(ts); baseRef.current = current; } catch (e) { }
+              poserBase(serveur); latestRef.current = current; poserCurseur(row.updated_at);
+              try { const ts = new Date().toISOString(); await supabase.from("cockpit_state").upsert({ id: "shared", data: current, updated_at: ts }, { onConflict: "id" }); poserCurseur(ts); poserBase(current); } catch (e) { }
+            } else if (localEnAvance) {
+              // Le serveur a AVANCÉ depuis notre dernier accusé (un autre appareil a écrit) et notre
+              // cache contient du travail jamais poussé — typiquement une fin de session fermée avant
+              // l'envoi. Adopter le serveur perdrait ce travail, le repousser perdrait celui de
+              // l'autre appareil : on fusionne les deux, exactement comme lors d'un conflit d'écriture.
+              const base = await lireBaseLocale();
+              if (base) {
+                const fusion = normalize(fusionEtats(normalize(base), current, serveur));
+                current = fusion; latestRef.current = fusion;
+                if (!cancelled) { setData(fusion); ecrireCache(fusion); }
+                if (jsonEgal(fusion, serveur)) { poserCurseur(row.updated_at || null); poserBase(serveur); }
+                else {
+                  try { const ts = new Date().toISOString(); await supabase.from("cockpit_state").upsert({ id: "shared", data: fusion, updated_at: ts }, { onConflict: "id" }); poserCurseur(ts); poserBase(fusion); }
+                  catch (e) { pendingWrite.current = true; poserCurseur(row.updated_at || null); poserBase(serveur); }
+                }
+              } else {
+                // Aucune base commune (premier chargement après cette version, cache vidé…) : fusionner
+                // à l'aveugle ressusciterait les fiches supprimées ailleurs. On adopte donc le serveur,
+                // mais le cache local est MIS DE CÔTÉ au lieu d'être jeté : il reste récupérable depuis
+                // « Historique & corbeille ».
+                try { await idbEcrire(ECARTE_KEY, { at: new Date().toISOString(), data: current }); } catch (e) { }
+                current = serveur; poserCurseur(row.updated_at || null); poserBase(serveur); latestRef.current = serveur;
+                if (!cancelled) { setData(current); ecrireCache(current); }
+              }
             } else {
               const aAssainir = donneesAAssainir(row.data);
-              current = serveur; poserCurseur(row.updated_at || null); baseRef.current = serveur; latestRef.current = serveur;
+              current = serveur; poserCurseur(row.updated_at || null); poserBase(serveur); latestRef.current = serveur;
               if (!cancelled) { setData(current); ecrireCache(current); }
               // La base contient encore des valeurs que l'assainissement retire (fonction sans personne,
               // marqueur « vide », dirigeant exclu…) : on réécrit la version propre UNE fois. Au chargement
               // suivant la condition est fausse, donc aucune écriture répétée.
               if (aAssainir && !cancelled) {
-                try { const ts = new Date().toISOString(); await supabase.from("cockpit_state").upsert({ id: "shared", data: current, updated_at: ts }, { onConflict: "id" }); poserCurseur(ts); baseRef.current = current; } catch (e) { }
+                try { const ts = new Date().toISOString(); await supabase.from("cockpit_state").upsert({ id: "shared", data: current, updated_at: ts }, { onConflict: "id" }); poserCurseur(ts); poserBase(current); } catch (e) { }
               }
             }
           }
@@ -14825,7 +14896,7 @@ export default function App() {
         const restored = normalize(JSON.parse(JSON.stringify(RESTORE_DATA)));
         if (!cancelled) { setData(restored); ecrireCache(restored); }
         latestRef.current = restored;
-        if (supabaseEnabled && supabase) { try { const ts = new Date().toISOString(); await supabase.from("cockpit_state").upsert({ id: "shared", data: restored, updated_at: ts }, { onConflict: "id" }); poserCurseur(ts); baseRef.current = restored; } catch (e) { } }
+        if (supabaseEnabled && supabase) { try { const ts = new Date().toISOString(); await supabase.from("cockpit_state").upsert({ id: "shared", data: restored, updated_at: ts }, { onConflict: "id" }); poserCurseur(ts); poserBase(restored); } catch (e) { } }
       }
       if (!cancelled) setLoading(false);
     })();
@@ -14841,7 +14912,7 @@ export default function App() {
     if (depuis) {
       const { data: rows, error } = await supabase.from("cockpit_state").update({ data: payload, updated_at: ts }).eq("id", "shared").eq("updated_at", depuis).select("updated_at");
       if (error) throw error;
-      if (rows && rows.length) { poserCurseur(ts); baseRef.current = payload; return payload; }
+      if (rows && rows.length) { poserCurseur(ts); poserBase(payload); return payload; }
       // Conflit : le serveur a reçu une autre version depuis notre dernier accusé.
       const { data: row, error: e2 } = await supabase.from("cockpit_state").select("data, updated_at").eq("id", "shared").maybeSingle();
       if (e2) throw e2;
@@ -14849,12 +14920,12 @@ export default function App() {
       const fusion = distant ? normalize(fusionEtats(baseRef.current, payload, distant)) : payload;
       const ts2 = new Date().toISOString();
       await supabase.from("cockpit_state").upsert({ id: "shared", data: fusion, updated_at: ts2 }, { onConflict: "id" });
-      poserCurseur(ts2); baseRef.current = fusion; latestRef.current = fusion;
+      poserCurseur(ts2); poserBase(fusion); latestRef.current = fusion;
       setData(fusion); ecrireCache(fusion);
       return fusion;
     }
     await supabase.from("cockpit_state").upsert({ id: "shared", data: payload, updated_at: ts }, { onConflict: "id" });
-    poserCurseur(ts); baseRef.current = payload; return payload;
+    poserCurseur(ts); poserBase(payload); return payload;
   }, []);
   // Reprise automatique : une écriture serveur échouée (réseau coupé, tunnel…) est retentée toute
   // seule avec un délai croissant (5 s → 15 s → 45 s → 90 s max), et immédiatement au retour du
@@ -14939,7 +15010,7 @@ export default function App() {
             ? supabase.from("cockpit_state").update({ data: payload, updated_at: ts }).eq("id", "shared").eq("updated_at", depuis).select("updated_at")
             : supabase.from("cockpit_state").upsert({ id: "shared", data: payload, updated_at: ts }, { onConflict: "id" });
           q.then(({ data: rows, error }) => {
-            if (!error && (!depuis || (rows && rows.length))) { poserCurseur(ts); baseRef.current = payload; pendingWrite.current = false; }
+            if (!error && (!depuis || (rows && rows.length))) { poserCurseur(ts); poserBase(payload); pendingWrite.current = false; }
             else if (!error && depuis) { pousserServeur(payload).then(() => { pendingWrite.current = false; }).catch(() => { }); } // conflit et onglet encore vivant : fusion immédiate
           }, () => { }); // échec réseau : le drapeau reste levé, la reprise automatique ou le prochain chargement s'en chargera
         }
@@ -14968,7 +15039,7 @@ export default function App() {
           // Une saisie locale attend d'être poussée : on ne l'écrase pas, l'écriture protégée fusionnera.
           if (pendingWrite.current || saveTimer.current) return;
           const fresh = normalize(row.data);
-          poserCurseur(row.updated_at); baseRef.current = fresh; latestRef.current = fresh;
+          poserCurseur(row.updated_at); poserBase(fresh); latestRef.current = fresh;
           setData(fresh); ecrireCache(fresh);
           setSyncState("remote"); setTimeout(() => setSyncState((s) => s === "remote" ? "saved" : s), 2600);
         }
@@ -15117,7 +15188,7 @@ export default function App() {
         if (pendingWrite.current) return; // une saisie locale non encore poussée a priorité : l'écriture protégée fusionnera
         if (row.updated_at) poserCurseur(row.updated_at);
         const merged = normalize(row.data);
-        baseRef.current = merged; latestRef.current = merged;
+        poserBase(merged); latestRef.current = merged;
         setData(merged);
         ecrireCache(merged);
         setSyncState("remote"); setTimeout(() => setSyncState((s) => s === "remote" ? "saved" : s), 2600);
