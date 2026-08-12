@@ -3602,17 +3602,14 @@ ${ACCENT_CSS}
 .deal-card .deal-meta{color:var(--muted);font-size:11px;display:flex;align-items:center;gap:6px;}
 .deal-card .deal-amount{font-weight:700;font-size:13px;color:var(--ink);}
 
-/* Pile d'établissements : deux cartes décalées derrière la tuile donnent l'épaisseur du paquet.
-   Dessinées à l'ombre portée plutôt qu'avec des éléments fantômes — l'ombre épouse exactement la
-   taille et l'arrondi de la tuile, sans dépendre d'un empilement de plans. Le décalage (9 px) reste
-   sous l'écart de la grille (10 px) : une pile ne mord jamais sur sa voisine. */
-.tile.pile{background:var(--card);-webkit-backdrop-filter:none;backdrop-filter:none;
-  box-shadow:4px 4px 0 -1px var(--card),4px 4px 0 0 var(--line),9px 9px 0 -1px var(--card),9px 9px 0 0 var(--line),0 4px 16px rgba(20,32,58,.07);}
-.tile.pile:hover{box-shadow:6px 6px 0 -1px var(--card),6px 6px 0 0 var(--line),13px 13px 0 -1px var(--card),13px 13px 0 0 var(--line),0 8px 22px rgba(20,32,58,.12);}
+/* On ne touche NI au fond NI au filtre de la tuile : sur un thème coloré, une tuile est un panneau
+   translucide posé sur le fond, et son texte est BLANC. Un fond opaque rendait ce texte illisible.
+   Les feuilles du dessous reprennent donc la teinte translucide de la tuile elle-même. */
+.tile.pile{box-shadow:4px 4px 0 -1px rgba(255,255,255,.52),4px 4px 0 0 var(--line),9px 9px 0 -1px rgba(255,255,255,.38),9px 9px 0 0 var(--line),inset 0 1px 0 rgba(255,255,255,.6),0 4px 16px rgba(20,32,58,.07);}
+.tile.pile:hover{box-shadow:6px 6px 0 -1px rgba(255,255,255,.52),6px 6px 0 0 var(--line),13px 13px 0 -1px rgba(255,255,255,.38),13px 13px 0 0 var(--line),inset 0 1px 0 rgba(255,255,255,.6),0 8px 22px rgba(20,32,58,.12);}
 /* En thème sombre, « .pu-root.dark .tile » est plus spécifique et écraserait ces ombres. */
-.pu-root.dark .tile.pile{background:var(--card);-webkit-backdrop-filter:none;backdrop-filter:none;
-  box-shadow:4px 4px 0 -1px var(--card),4px 4px 0 0 var(--line),9px 9px 0 -1px var(--card),9px 9px 0 0 var(--line),0 4px 16px rgba(0,0,0,.35);}
-.pu-root.dark .tile.pile:hover{box-shadow:6px 6px 0 -1px var(--card),6px 6px 0 0 var(--line),13px 13px 0 -1px var(--card),13px 13px 0 0 var(--line),0 8px 22px rgba(0,0,0,.45);}
+.pu-root.dark .tile.pile{box-shadow:4px 4px 0 -1px rgba(38,50,74,.8),4px 4px 0 0 var(--line),9px 9px 0 -1px rgba(38,50,74,.6),9px 9px 0 0 var(--line),0 4px 16px rgba(0,0,0,.35);}
+.pu-root.dark .tile.pile:hover{box-shadow:6px 6px 0 -1px rgba(38,50,74,.8),6px 6px 0 0 var(--line),13px 13px 0 -1px rgba(38,50,74,.6),13px 13px 0 0 var(--line),0 8px 22px rgba(0,0,0,.45);}
 
 /* Calendrier */
 .cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;}
