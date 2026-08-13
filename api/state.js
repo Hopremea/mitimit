@@ -1,5 +1,6 @@
 import { verifyToken } from "@clerk/backend";
 import { createClient } from "@supabase/supabase-js";
+import bonCommandeHandler from "../lib/bonCommande.js";
 
 // Relais serveur pour l'état partagé (table cockpit_state, ligne « shared »).
 // Lecture/écriture via la clé SERVICE ROLE (jamais exposée au navigateur), protégé par Clerk.
@@ -14,6 +15,13 @@ import { createClient } from "@supabase/supabase-js";
 // GET  /api/state            -> { data, updated_at } | null
 // POST /api/state { data }   -> { ok: true }   (upsert de la ligne « shared »)
 export default async function handler(req, res) {
+  // Bon de commande en ligne : même relais, même clé service role, logique dans lib/bonCommande.js.
+  // Ce détour évite un treizième fichier dans api/ — au-delà de douze, le plan Hobby refuse le
+  // déploiement entier. La page publique garde son URL lisible /commande (réécriture vercel.json),
+  // et ce branchement précède la vérification Clerk : le dépôt par le client est nécessairement
+  // public, les autres usages du bon de commande vérifient le jeton eux-mêmes.
+  if (req.query && req.query.bdc) return bonCommandeHandler(req, res);
+
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const svc = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !svc) { res.status(500).json({ error: "Supabase service role non configuré côté serveur (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY)." }); return; }
