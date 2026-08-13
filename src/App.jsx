@@ -5277,11 +5277,96 @@ function KpiTile({ label, value, note, color, state, big }) {
     {note && <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 5, lineHeight: 1.45 }}>{note}</div>}
   </div>);
 }
+// ===== Rapprochement bancaire : encaissements ↔ devis, commandes et factures =====
+// Le client paie un montant TTC, sans jamais rappeler la référence du document. Le rapprochement se
+// fait donc sur ce que la banque montre vraiment : le MONTANT crédité et le NOM du donneur d'ordre.
+//
+// Rien n'est décidé à notre place. Un encaissement reconnu est SIGNALÉ, avec son motif et son écart ;
+// c'est un clic qui solde le document. Un rapprochement faux coûte plus cher qu'un rapprochement
+// manqué : une facture marquée payée à tort ne se relance plus.
+
+// Totaux plausibles d'un document, dans l'ordre où un client peut les régler. Reprend le calcul de
+// l'aperçu (DevisPreview) : marchandise HT, participation au port selon la zone, puis TVA.
+function totauxDocument(data, d) {
+  const ht = dealMontant(d.lines);
+  if (!(ht > 0)) return [];
+  const htBrut = (d.lines || []).reduce((s, l) => s + (l.qte || 0) * (l.pu || 0), 0);
+  const site = (data.sites || []).find((s) => s.id === (d.livraisonSiteId || d.siteId));
+  const acc = (data.accounts || []).find((a) => a.id === d.accountId);
+  const adr = (site && site.adresse) || (acc && (acc.adresseLivraison || acc.adressePostale)) || "";
+  const zone = d.zoneLivraison || detectFrancoZone(adr) || "metropole";
+  const port = (d.type === "Avoir" || d.portOffert) ? 0 : fraisPortHT(htBrut, zone);
+  const tva = (d.tva || 0) / 100;
+  return [
+    { valeur: (ht + port) * (1 + tva), label: "TTC" },
+    { valeur: ht * (1 + tva), label: "TTC hors port" },
+    { valeur: ht + port, label: "HT" },
+    { valeur: ht, label: "HT hors port" },
+  ];
+}
+// Documents encore en attente de règlement. Un devis refusé, déjà transformé en commande ou déjà
+// soldé n'attend plus rien : le proposer ne ferait que du bruit.
+function documentsAPayer(data) {
+  return (data.deals || []).filter((d) => d && ["Devis", "Commande", "Facture"].includes(d.type)
+    && d.statut !== "refuse" && d.statut !== "paye" && !(d.type === "Devis" && d.converti) && (d.montant || 0) > 0);
+}
+// Nom bancaire ↔ nom du client. Le donneur d'ordre est rarement l'enseigne à la lettre (« SOCULTUR »
+// pour Cultura, « SARL L'ATELIER » pour L'Atelier) : on compare donc par inclusion, dans les deux
+// sens, sur des noms assez longs pour que la rencontre ne soit pas fortuite.
+function nomsClientDocument(data, d) {
+  const acc = (data.accounts || []).find((a) => a.id === d.accountId);
+  const site = (data.sites || []).find((s) => s.id === (d.siteId || d.livraisonSiteId));
+  return [acc && acc.enseigne, acc && acc.raisonSociale, site && site.label]
+    .map((n) => normStr(n)).filter((n) => n && n.length >= 4);
+}
+const nomsProches = (tiers, noms) => { const t = normStr(tiers); return !!t && t.length >= 4 && noms.some((n) => t.includes(n) || n.includes(t)); };
+
+// Rapproche les encaissements du mois affiché avec les documents en attente.
+// Trois degrés, jamais confondus :
+//   sûr      — le montant tombe juste ET le nom correspond
+//   probable — le montant tombe juste, le nom ne dit rien (virement d'une holding, d'un comptable…)
+//   partiel  — le nom correspond, le montant non : acompte, solde, ou règlement groupé
+function rapprocherPaiements(data, transactions) {
+  const docs = documentsAPayer(data);
+  if (!docs.length) return [];
+  const prets = docs.map((d) => ({ d, totaux: totauxDocument(data, d), noms: nomsClientDocument(data, d) }));
+  const sorties = [];
+  (transactions || []).filter((t) => t && t.montant > 0 && t.statut !== "declined").forEach((t) => {
+    // Un document déjà soldé par CETTE transaction reste affiché, mais comme un fait acquis.
+    const deja = (data.deals || []).find((d) => d.paiementTx && d.paiementTx === t.id);
+    if (deja) { sorties.push({ tx: t, doc: deja, degre: "solde", motif: "Déjà rapproché", ecart: 0 }); return; }
+    let best = null;
+    prets.forEach(({ d, totaux, noms }) => {
+      const nom = nomsProches(t.tiers, noms) || nomsProches(t.libelle, noms);
+      let exact = null;
+      totaux.forEach((x) => { const e = Math.abs(x.valeur - t.montant); if (e <= 0.05 && (!exact || e < exact.ecart)) exact = { ecart: e, label: x.label }; });
+      let cand = null;
+      if (exact) cand = { d, degre: nom ? "sur" : "probable", motif: (nom ? "Montant " + exact.label + " et nom concordants" : "Montant " + exact.label + " au centime"), ecart: exact.ecart };
+      else if (nom) {
+        const ttc = totaux[0] ? totaux[0].valeur : 0;
+        cand = { d, degre: "partiel", motif: "Nom concordant, montant différent (" + eur2(t.montant) + " reçus sur " + eur2(ttc) + " attendus)", ecart: Math.abs(ttc - t.montant) };
+      }
+      if (!cand) return;
+      const rang = { sur: 0, probable: 1, partiel: 2 };
+      if (!best || rang[cand.degre] < rang[best.degre] || (rang[cand.degre] === rang[best.degre] && cand.ecart < best.ecart)) best = cand;
+    });
+    if (best) sorties.push({ tx: t, doc: best.d, degre: best.degre, motif: best.motif, ecart: best.ecart });
+  });
+  const rang = { sur: 0, probable: 1, partiel: 2, solde: 3 };
+  return sorties.sort((a, b) => (rang[a.degre] - rang[b.degre]) || (b.tx.montant - a.tx.montant));
+}
+const RAPPRO_META = {
+  sur: { label: "Paiement identifié", color: "#2bb673" },
+  probable: { label: "Paiement probable", color: "#5b8def" },
+  partiel: { label: "Paiement partiel ?", color: "#F8B133" },
+  solde: { label: "Déjà rapproché", color: "#9aa6bd" },
+};
+
 // ============== BANQUE (Qonto, lecture seule) ==============
 // Rien n'est enregistré : les transactions sont lues à la demande et restent en mémoire. La banque
 // est la source de vérité, la recopier dans la base ne ferait que créer une seconde version à
 // maintenir — et exposerait des données bancaires dans une base partagée qui n'en a pas besoin.
-function Banque() {
+function Banque({ data = {}, persist, go }) {
   const [comptes, setComptes] = useState(null); const [orga, setOrga] = useState(null);
   const [compte, setCompte] = useState("");
   const [tx, setTx] = useState(null); const [meta, setMeta] = useState(null);
@@ -5289,6 +5374,8 @@ function Banque() {
   const moisCourant = new Date().toISOString().slice(0, 7);
   const [mois, setMois] = useState(moisCourant);
   const [q, setQ] = useState("");
+  const [sens, setSens] = useState("tous");                       // tous | entrees | sorties | rappro
+  const [tri, setTri] = useState({ col: "date", dir: "desc" });   // colonne + sens de tri
 
   // Connexion : /organization sert à la fois de test d'identifiants et de liste des comptes.
   const charger = async () => {
@@ -5320,11 +5407,44 @@ function Banque() {
   useEffect(() => { if (compte) chargerTx(); }, [compte, mois]);
 
   const cpt = (comptes || []).find((c) => c.id === compte) || null;
+
+  // Rapprochement des encaissements avec les documents en attente de règlement.
+  const rappro = useMemo(() => rapprocherPaiements(data, tx || []), [data.deals, data.accounts, data.sites, tx]);
+  const rapproParTx = useMemo(() => { const m = {}; rappro.forEach((r) => { m[r.tx.id] = r; }); return m; }, [rappro]);
+  const aTraiter = rappro.filter((r) => r.degre !== "solde");
+
+  // Recherche : libellé, tiers, référence — et le MONTANT, saisi comme on le lit sur un relevé
+  // (« 2974,24 », « 2974.24 » ou « 2974 »). Retrouver un virement par sa somme est le geste naturel
+  // quand on cherche à quel document il correspond.
+  const nq = normStr(q);
+  const qMontant = q.trim().replace(/\s/g, "").replace(",", ".");
   const liste = (tx || []).filter((t) => {
+    if (sens === "entrees" && !(t.montant > 0)) return false;
+    if (sens === "sorties" && !(t.montant < 0)) return false;
+    if (sens === "rappro" && !rapproParTx[t.id]) return false;
     if (!q.trim()) return true;
-    const h = normStr((t.libelle || "") + " " + (t.tiers || "") + " " + (t.reference || ""));
-    return h.includes(normStr(q));
+    const h = normStr((t.libelle || "") + " " + (t.tiers || "") + " " + (t.reference || "") + " " + (t.operation || ""));
+    if (h.includes(nq)) return true;
+    return /^[\d.]+$/.test(qMontant) && Math.abs(t.montant).toFixed(2).includes(qMontant);
   });
+  // Tri : la date par défaut, mais un relevé se lit aussi par montant (les plus gros mouvements
+  // d'abord) ou par tiers (regrouper ce qui vient du même client).
+  const trier = (col) => setTri((s) => s.col === col ? { col, dir: s.dir === "asc" ? "desc" : "asc" } : { col, dir: col === "date" || col === "montant" ? "desc" : "asc" });
+  const cle = { date: (t) => t.date || "", tiers: (t) => normStr(t.tiers || t.libelle), libelle: (t) => normStr(t.libelle), type: (t) => normStr(t.operation), montant: (t) => t.montant || 0 };
+  liste.sort((a, b) => {
+    const f = cle[tri.col] || cle.date; const x = f(a), y = f(b);
+    const c = typeof x === "number" ? x - y : String(x).localeCompare(String(y));
+    return tri.dir === "asc" ? c : -c;
+  });
+  const Th = ({ col, children, right }) => (
+    <th onClick={() => trier(col)} title="Trier sur cette colonne"
+      style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", textAlign: right ? "right" : undefined, color: tri.col === col ? "var(--blue)" : undefined }}>
+      {children}<span style={{ opacity: tri.col === col ? 1 : .25, marginLeft: 4 }}>{tri.col === col ? (tri.dir === "asc" ? "▲" : "▼") : "▾"}</span>
+    </th>
+  );
+  // Solder un document depuis la banque : la date de paiement est celle du relevé, et la référence de
+  // la transaction est conservée — c'est elle qui empêche un second rapprochement sur le même virement.
+  const solder = (r) => { if (!persist) return; persist((p) => ({ ...p, deals: (p.deals || []).map((d) => d.id === r.doc.id ? { ...d, statut: "paye", datePaiement: r.tx.date, paiementTx: r.tx.id } : d) })); };
   const entrees = liste.filter((t) => t.montant > 0).reduce((s, t) => s + t.montant, 0);
   const sorties = liste.filter((t) => t.montant < 0).reduce((s, t) => s + t.montant, 0);
   // Douze derniers mois : au-delà, on saisit la date à la main plutôt que de dérouler une liste sans fin.
@@ -5359,9 +5479,18 @@ function Banque() {
         <select value={mois} onChange={(e) => setMois(e.target.value)}>{moisOptions.map((m) => <option key={m} value={m}>{moisLabel(m)}</option>)}</select>
       </div>
       <div className="fld" style={{ minWidth: 200, marginBottom: 0, flex: 1 }}><label>Rechercher</label>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Libellé, tiers, référence…" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Libellé, tiers, référence ou montant…" />
       </div>
       <button className="btn btn-g btn-s" onClick={() => { charger(); chargerTx(); }} disabled={busy}><RefreshCw size={14} className={busy ? "spin" : ""} /> Actualiser</button>
+    </div>
+
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
+      <FilterGroup label="Mouvements" color="#3F60AA">
+        {[["tous", "Tous"], ["entrees", "Entrées"], ["sorties", "Sorties"], ["rappro", "Rapprochés"]].map(([k, l]) => k === "tous"
+          ? <AllChip key={k} active={sens === "tous"} onClick={() => setSens("tous")}>Tous</AllChip>
+          : <button key={k} className={cx("chip", sens === k && "on")} onClick={() => setSens(k)} style={sens === k ? { background: "#3F60AA", borderColor: "#3F60AA", color: "#fff" } : {}}>{l}{k === "rappro" && rappro.length ? " (" + rappro.length + ")" : ""}</button>)}
+      </FilterGroup>
+      {(q || sens !== "tous") && <button className="btn btn-ghost btn-s" onClick={() => { setQ(""); setSens("tous"); }}><X size={13} /> Effacer</button>}
     </div>
 
     {err && <div className="card" style={{ borderLeft: "4px solid var(--red)", marginBottom: 14, fontSize: 12.5, color: "var(--red)", fontWeight: 600 }}>{err}</div>}
@@ -5373,20 +5502,42 @@ function Banque() {
       <KpiTile label="Solde du mois" value={eur2(entrees + sorties)} state={tx ? "ok" : "todo"} color={entrees + sorties >= 0 ? "var(--green)" : "var(--red)"} note={liste.length + " transaction(s)"} />
     </div>
 
+    {aTraiter.length > 0 && (<div className="card" style={{ marginBottom: 14, borderLeft: "4px solid var(--green, #2bb673)" }}>
+      <div className="sec-h">
+        <h3 className="pu-display" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><Landmark size={16} style={{ color: "#2bb673" }} />Paiements reçus à rapprocher <span style={{ color: "var(--muted)", fontWeight: 600, fontSize: 12.5 }}>({aTraiter.length})</span></h3>
+        <span>encaissements du mois qui correspondent à un document en attente</span>
+      </div>
+      <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Date</th><th>Donneur d'ordre</th><th style={{ textAlign: "right" }}>Reçu</th><th>Document</th><th>Motif du rapprochement</th><th></th></tr></thead><tbody>
+        {aTraiter.map((r) => { const m = RAPPRO_META[r.degre]; const acc = (data.accounts || []).find((a) => a.id === r.doc.accountId); return (<tr key={r.tx.id} className="hrow">
+          <td className="tnum" style={{ whiteSpace: "nowrap" }}>{r.tx.date}</td>
+          <td style={{ fontWeight: 700 }}>{r.tx.tiers || r.tx.libelle || "—"}</td>
+          <td className="tnum" style={{ textAlign: "right", fontWeight: 800, color: "var(--green, #2bb673)", whiteSpace: "nowrap" }}>+{eur2(r.tx.montant)}</td>
+          <td><span className="lnk" onClick={() => go && go("deals", r.doc.id)} style={{ fontWeight: 700 }}>{r.doc.ref || r.doc.type}</span>
+            <div style={{ fontSize: 11, color: "var(--muted)" }}>{r.doc.type} · {acc ? acc.enseigne : "—"} · {eur2(r.doc.montant)} HT</div></td>
+          <td><Badge color={m.color}>{m.label}</Badge><div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{r.motif}</div></td>
+          <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+            <button className="btn btn-g btn-s" onClick={() => appConfirm("Marquer « " + (r.doc.ref || r.doc.type) + " » comme payé, à la date du virement (" + r.tx.date + ") ? Le document passera au statut « Livré et payé » et ne sera plus relancé.", { title: "Solder ce document ?", confirmLabel: "Marquer payé" }).then((ok) => { if (ok) solder(r); })} title="Passer le document au statut « Livré et payé », à la date du virement"><Check size={14} /> Marquer payé</button>
+          </td>
+        </tr>); })}
+      </tbody></table></div>
+      <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 10, lineHeight: 1.55 }}>Le rapprochement est une <strong>proposition</strong> : le montant crédité et le nom du donneur d'ordre sont les seuls indices que donne la banque. Vérifiez avant de solder — une facture marquée payée à tort ne se relance plus. Un virement déjà rapproché n'est plus proposé.</div>
+    </div>)}
+
     <div className="card">
       <div className="sec-h"><h3 className="pu-display">Transactions</h3><span>{meta && meta.total > liste.length ? liste.length + " affichée(s) sur " + meta.total : liste.length + " transaction(s)"}</span></div>
       {!tx ? <div className="empty">{busy ? "Lecture du compte…" : "Choisissez un compte."}</div>
-        : liste.length === 0 ? <div className="empty">Aucune transaction sur {moisLabel(mois)}{q ? " pour cette recherche" : ""}.</div>
-        : <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Date</th><th>Tiers</th><th>Libellé</th><th>Type</th><th style={{ textAlign: "right" }}>Montant</th></tr></thead><tbody>
-          {liste.map((t) => (<tr key={t.id} className="hrow">
+        : liste.length === 0 ? <div className="empty">Aucune transaction sur {moisLabel(mois)}{q || sens !== "tous" ? " pour cette recherche" : ""}.</div>
+        : <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><Th col="date">Date</Th><Th col="tiers">Tiers</Th><Th col="libelle">Libellé</Th><Th col="type">Type</Th><Th col="montant" right>Montant</Th></tr></thead><tbody>
+          {liste.map((t) => { const r = rapproParTx[t.id]; return (<tr key={t.id} className="hrow">
             <td className="tnum" style={{ whiteSpace: "nowrap" }}>{t.date}</td>
             <td style={{ fontWeight: 700 }}>{t.tiers || "—"}</td>
-            <td style={{ color: "var(--muted)" }}>{t.libelle}{t.reference ? " · " + t.reference : ""}</td>
+            <td style={{ color: "var(--muted)" }}>{t.libelle}{t.reference ? " · " + t.reference : ""}
+              {r && <div style={{ marginTop: 3 }}><Badge color={RAPPRO_META[r.degre].color}>{RAPPRO_META[r.degre].label} · {r.doc.ref || r.doc.type}</Badge></div>}</td>
             {/* Badge dérive ses teintes du hexadécimal (concaténation d'alpha + assombrissement) : une
                 variable CSS y produirait une couleur invalide. */}
             <td>{t.statut === "pending" ? <Badge color="#F8B133">En attente</Badge> : t.statut === "declined" ? <Badge color="#FF5A45">Refusée</Badge> : <span style={{ fontSize: 11.5, color: "var(--muted)" }}>{t.operation || "—"}</span>}</td>
             <td className="tnum" style={{ textAlign: "right", fontWeight: 800, whiteSpace: "nowrap", color: t.montant >= 0 ? "var(--green)" : "var(--ink)" }}>{t.montant >= 0 ? "+" : ""}{eur2(t.montant)}</td>
-          </tr>))}
+          </tr>); })}
         </tbody></table></div>}
       {meta && meta.pages > 1 && <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 10 }}>Page {meta.page} sur {meta.pages} — seules les 100 transactions les plus récentes du mois sont affichées.</div>}
     </div>
@@ -16144,7 +16295,7 @@ export default function App() {
       {tab === "reassort" && <Reassort key={"reassort-" + navKey} data={data} persist={persist} />}
       {tab === "sav" && <Sav key={"sav-" + navKey} data={data} persist={persist} />}
       {tab === "pointage" && <RH key={"pointage-" + navKey} data={data} persist={persist} go={go} />}
-      {tab === "banque" && <Banque key={"banque-" + navKey} />}
+      {tab === "banque" && <Banque key={"banque-" + navKey} data={data} persist={persist} go={go} />}
       {tab === "calc" && <Calculateur data={data} persist={persist} />}
       {tab === "conn" && <Connexions key={"conn-" + navKey} data={data} persist={persist} autoBackup={autoBackup} />}
       </div>
