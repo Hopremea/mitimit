@@ -3155,9 +3155,13 @@ function dealDocCode(data, d) {
   const acc = dealAccount(data, d);
   return acc && acc.code ? acc.code : "";
 }
+// Estimation du stock restant en rayon chez un client. Ne comptent que les marchandises RÉELLEMENT
+// ARRIVÉES au magasin : un document accepté, envoyé ou en cours de livraison n'a rien mis en rayon,
+// et le client ne peut pas être en rupture de ce qu'il n'a pas encore reçu. On part donc des seuls
+// documents livrés (livré, livré et payé) — cf. DEAL_LIVRE.
 function pdvForecast(data) {
   const map = {};
-  (data.deals || []).filter(isCaSigne).forEach((d) => { (d.lines || []).forEach((l) => { const k = d.accountId + "|" + l.code; if (!map[k]) map[k] = { accountId: d.accountId, code: l.code, designation: l.designation, qte: 0, last: "" }; map[k].qte += l.qte || 0; if ((d.date || "") > map[k].last) map[k].last = d.date; }); });
+  (data.deals || []).filter((d) => isCaSigne(d) && DEAL_LIVRE(d.statut)).forEach((d) => { (d.lines || []).forEach((l) => { const k = d.accountId + "|" + l.code; if (!map[k]) map[k] = { accountId: d.accountId, code: l.code, designation: l.designation, qte: 0, last: "" }; map[k].qte += l.qte || 0; if ((d.date || "") > map[k].last) map[k].last = d.date; }); });
   const today = new Date();
   return Object.values(map).map((m) => { const rotKey = m.accountId + ":" + m.code; const rot = (data.rotations && data.rotations[rotKey] != null) ? data.rotations[rotKey] : Math.max(1, Math.round(m.qte / 2)); const monthsElapsed = m.last ? Math.max(0, (today - new Date(m.last)) / (1000 * 60 * 60 * 24 * 30.44)) : 0; const stockEst = Math.max(0, m.qte - rot * monthsElapsed); const daysLeft = rot > 0 ? Math.round(stockEst / (rot / 30.44)) : null; return { ...m, rotKey, rot, stockEst: Math.round(stockEst), daysLeft }; });
 }
