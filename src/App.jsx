@@ -5354,6 +5354,30 @@ function rapprocherPaiements(data, transactions) {
   const rang = { sur: 0, probable: 1, partiel: 2, solde: 3 };
   return sorties.sort((a, b) => (rang[a.degre] - rang[b.degre]) || (b.tx.montant - a.tx.montant));
 }
+// ===== Reconnaissance du tiers d'une transaction =====
+// Le relevé ne parle que de libellés bancaires : « SOCULTUR », « CARREFOUR CITY 1234 ». Rapprocher
+// ces lignes des fiches connues fait apparaître, d'un coup d'œil, ce qui relève d'un client — un
+// encaissement comme un débit — au milieu des frais courants (Google, essence, restaurant).
+//
+// C'est plus large que le rapprochement des paiements, qui exige en plus un montant correspondant à
+// un document en attente : ici, seul le NOM compte.
+function indexTiersConnus(data) {
+  const idx = [];
+  const pousser = (nom, accountId, label) => { const k = normStr(nom); if (k && k.length >= 5) idx.push({ k, accountId, label }); };
+  (data.accounts || []).filter((a) => !a.archived).forEach((a) => { pousser(a.enseigne, a.id, a.enseigne || a.raisonSociale); pousser(a.raisonSociale, a.id, a.enseigne || a.raisonSociale); });
+  (data.sites || []).filter((s) => !s.archived).forEach((s) => pousser(s.label, s.accountId, s.label));
+  return idx;
+}
+// Le nom le PLUS LONG l'emporte : « Cultura Montauban » prime sur « Cultura », et désigne donc le
+// point de vente plutôt que le groupe. Un seuil de 5 caractères évite qu'un nom court ne se retrouve
+// par hasard dans un libellé bancaire.
+function tiersConnu(idx, t) {
+  const h = normStr((t.tiers || "") + " " + (t.libelle || ""));
+  if (h.length < 5) return null;
+  let best = null;
+  idx.forEach((e) => { if (h.includes(e.k) && (!best || e.k.length > best.k.length)) best = e; });
+  return best;
+}
 const RAPPRO_META = {
   sur: { label: "Paiement identifié", color: "#2bb673" },
   probable: { label: "Paiement probable", color: "#5b8def" },
@@ -5412,6 +5436,12 @@ function Banque({ data = {}, persist, go }) {
   const rapproParTx = useMemo(() => { const m = {}; rappro.forEach((r) => { m[r.tx.id] = r; }); return m; }, [rappro]);
   const aTraiter = rappro.filter((r) => r.degre !== "solde");
 
+  // Tiers reconnus : toute transaction dont le libellé désigne un établissement du fichier, qu'elle
+  // soit au crédit ou au débit.
+  const idxTiers = useMemo(() => indexTiersConnus(data), [data.accounts, data.sites]);
+  const connuParTx = useMemo(() => { const m = {}; (tx || []).forEach((t) => { const c = tiersConnu(idxTiers, t); if (c) m[t.id] = c; }); return m; }, [idxTiers, tx]);
+  const nbConnus = Object.keys(connuParTx).length;
+
   // Recherche : libellé, tiers, référence — et le MONTANT, saisi comme on le lit sur un relevé
   // (« 2974,24 », « 2974.24 » ou « 2974 »). Retrouver un virement par sa somme est le geste naturel
   // quand on cherche à quel document il correspond.
@@ -5421,6 +5451,7 @@ function Banque({ data = {}, persist, go }) {
     if (sens === "entrees" && !(t.montant > 0)) return false;
     if (sens === "sorties" && !(t.montant < 0)) return false;
     if (sens === "rappro" && !rapproParTx[t.id]) return false;
+    if (sens === "connus" && !connuParTx[t.id]) return false;
     if (!q.trim()) return true;
     const h = normStr((t.libelle || "") + " " + (t.tiers || "") + " " + (t.reference || "") + " " + (t.operation || ""));
     if (h.includes(nq)) return true;
@@ -5485,9 +5516,9 @@ function Banque({ data = {}, persist, go }) {
 
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
       <FilterGroup label="Mouvements" color="#3F60AA">
-        {[["tous", "Tous"], ["entrees", "Entrées"], ["sorties", "Sorties"], ["rappro", "Rapprochés"]].map(([k, l]) => k === "tous"
+        {[["tous", "Tous"], ["entrees", "Entrées"], ["sorties", "Sorties"], ["connus", "Établissements connus"], ["rappro", "Rapprochés"]].map(([k, l]) => k === "tous"
           ? <AllChip key={k} active={sens === "tous"} onClick={() => setSens("tous")}>Tous</AllChip>
-          : <button key={k} className={cx("chip", sens === k && "on")} onClick={() => setSens(k)} style={sens === k ? { background: "#3F60AA", borderColor: "#3F60AA", color: "#fff" } : {}}>{l}{k === "rappro" && rappro.length ? " (" + rappro.length + ")" : ""}</button>)}
+          : <button key={k} className={cx("chip", sens === k && "on")} onClick={() => setSens(k)} style={sens === k ? { background: "#3F60AA", borderColor: "#3F60AA", color: "#fff" } : {}}>{l}{k === "rappro" && rappro.length ? " (" + rappro.length + ")" : ""}{k === "connus" && nbConnus ? " (" + nbConnus + ")" : ""}</button>)}
       </FilterGroup>
       {(q || sens !== "tous") && <button className="btn btn-ghost btn-s" onClick={() => { setQ(""); setSens("tous"); }}><X size={13} /> Effacer</button>}
     </div>
@@ -5527,9 +5558,14 @@ function Banque({ data = {}, persist, go }) {
       {!tx ? <div className="empty">{busy ? "Lecture du compte…" : "Choisissez un compte."}</div>
         : liste.length === 0 ? <div className="empty">Aucune transaction sur {moisLabel(mois)}{q || sens !== "tous" ? " pour cette recherche" : ""}.</div>
         : <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><Th col="date">Date</Th><Th col="tiers">Tiers</Th><Th col="libelle">Libellé</Th><Th col="type">Type</Th><Th col="montant" right>Montant</Th></tr></thead><tbody>
-          {liste.map((t) => { const r = rapproParTx[t.id]; return (<tr key={t.id} className="hrow">
+          {liste.map((t) => { const r = rapproParTx[t.id]; const cn = connuParTx[t.id]; return (<tr key={t.id} className="hrow"
+            /* Une transaction rattachée à un établissement du fichier se repère à son filet bleu et
+               à son fond très légèrement teinté : le relevé se lit alors en deux temps, les lignes
+               clients d'abord, les frais courants ensuite. */
+            style={cn ? { background: "rgba(63,96,170,.045)", boxShadow: "inset 3px 0 0 var(--blue)" } : undefined}>
             <td className="tnum" style={{ whiteSpace: "nowrap" }}>{t.date}</td>
-            <td style={{ fontWeight: 700 }}>{t.tiers || "—"}</td>
+            <td style={{ fontWeight: 700 }}>{t.tiers || "—"}
+              {cn && <div style={{ marginTop: 3 }}><span className="lnk" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 700 }} onClick={() => go && go("accounts", cn.accountId)} title="Ouvrir la fiche de cet établissement"><Store size={12} /> {cn.label}</span></div>}</td>
             <td style={{ color: "var(--muted)" }}>{t.libelle}{t.reference ? " · " + t.reference : ""}
               {r && <div style={{ marginTop: 3 }}><Badge color={RAPPRO_META[r.degre].color}>{RAPPRO_META[r.degre].label} · {r.doc.ref || r.doc.type}</Badge></div>}</td>
             {/* Badge dérive ses teintes du hexadécimal (concaténation d'alpha + assombrissement) : une
