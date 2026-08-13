@@ -2986,7 +2986,14 @@ function findDuplicateContact(contacts, prenom, nom, email, excludeId) {
   return null;
 }
 // Composant générique pour grouper visuellement les filtres en boîtes colorées
-function FilterGroup({ label, color, children, style }) {
+function FilterGroup({ label, color, children, style, compact }) {
+  // Variante compacte : intitulé SUR LA MÊME LIGNE que les choix, séparé par un simple filet de
+  // couleur. Empilés dans un panneau replié, quatre critères tiennent alors dans la hauteur qu'un
+  // seul encart occupait — sans rien perdre du repère visuel qu'apporte la couleur.
+  if (compact) return (<div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", padding: "5px 0 5px 10px", borderLeft: "3px solid " + color, ...(style || {}) }}>
+    <span style={{ fontSize: 9.5, fontWeight: 800, color, textTransform: "uppercase", letterSpacing: ".07em", minWidth: 90 }}>{label}</span>
+    <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", flex: 1, minWidth: 0 }}>{children}</div>
+  </div>);
   // Surface opaque (carte) lisible sur tous les thèmes + intitulé en pastille pleine de la couleur du
   // groupe : chaque entête (Type / Région / Statut…) se distingue d'un coup d'œil, alors qu'un simple
   // fond blanc les rendait tous identiques et l'intitulé peu visible.
@@ -3572,6 +3579,12 @@ ${ACCENT_CSS}
 .drop{border:2px dashed var(--line);border-radius:15px;padding:22px;text-align:center;color:var(--muted);cursor:pointer;transition:.18s;}.drop:hover{border-color:var(--blue);background:var(--blue-l);color:var(--blue);}
 .empty{color:var(--muted);text-align:center;padding:30px;font-size:13px;}
 .chip{border:1px solid rgba(255,255,255,.6);background:rgba(255,255,255,.48);-webkit-backdrop-filter:blur(12px) saturate(155%);backdrop-filter:blur(12px) saturate(155%);box-shadow:inset 0 1px 0 rgba(255,255,255,.6);border-radius:20px;padding:7px 13px;font-size:12.5px;font-weight:600;color:var(--muted);cursor:pointer;transition:.15s;}.chip:hover{border-color:var(--blue);background:rgba(255,255,255,.64);}.chip.on{background:var(--blue);color:#fff;border-color:var(--blue);-webkit-backdrop-filter:none;backdrop-filter:none;}
+/* Panneau de filtres replié : les pastilles y sont resserrées. La règle est portée par le conteneur
+   plutôt que par une classe de plus sur chaque bouton — les filtres se déclarent au même endroit
+   partout dans l'application, seule leur densité change ici. */
+.filtres-compacts .chip{padding:4px 11px;font-size:11.5px;}
+.filtres-compacts .chip-all{padding:4px 10px;font-size:11.5px;}
+.filtres-compacts input[type=date]{padding:4px 7px;font-size:11.5px;}
 .chip-all{display:inline-flex;align-items:center;gap:5px;border:1px dashed var(--blue);background:var(--blue-l);border-radius:9px;padding:7px 12px;font-size:12.5px;font-weight:700;color:var(--ink);cursor:pointer;transition:.15s;}
 .chip-all:hover{border-color:var(--ink);}
 .chip-all.on{background:var(--blue);color:#fff;border:1px solid var(--blue);}
@@ -8055,6 +8068,9 @@ function ImportCommande({ accounts, sites, products, onCreate, onUsage }) {
 function Deals({ data, persist, go, focus }) {
   const { deals, accounts, products, settings } = data;
   const [filt, setFilt] = useState("tous"); const [edit, setEdit] = useState(null); const [preview, setPreview] = useState(null); const [imp, setImp] = useState(false); const [bdc, setBdc] = useState(false);
+  // Critères repliés par défaut : ils occupaient trois lignes en permanence pour un réglage
+  // qu'on ne touche qu'occasionnellement.
+  const [filtresOuverts, setFiltresOuverts] = useState(false);
   const [q, setQ] = useState(""); const [filtStatut, setFiltStatut] = useState("tous"); const [filtAcc, setFiltAcc] = useState("tous"); const [dateFrom, setDateFrom] = useState(""); const [dateTo, setDateTo] = useState(""); const [grp, setGrp] = useState("statut"); const [dir, setDir] = useState("asc");
   const [sel, setSel] = useState(() => new Set());
   useEffect(() => { if (focus && focus.id) { const d = data.deals.find((x) => x.id === focus.id); if (d) setPreview(d); } }, [focus && focus.n]);
@@ -8097,6 +8113,9 @@ function Deals({ data, persist, go, focus }) {
   const delSelection = () => { const ids = visibleIds.filter((id) => sel.has(id)); if (!ids.length) return; appConfirm("Supprimer " + ids.length + " document" + (ids.length > 1 ? "s" : "") + " (devis, commande ou facture) ?", { title: "Supprimer la sélection ?" }).then((ok) => { if (ok) { persist((p) => ({ ...p, deals: p.deals.filter((d) => !ids.includes(d.id)) })); setSel(new Set()); } }); };
   const resetFilters = () => { setFilt("tous"); setFiltStatut("tous"); setFiltAcc("tous"); setDateFrom(""); setDateTo(""); setQ(""); };
   const hasFilter = filt !== "tous" || filtStatut !== "tous" || filtAcc !== "tous" || dateFrom || dateTo || q;
+  // Nombre de critères actifs, hors recherche : c'est lui qui s'affiche sur le bouton « Filtres »,
+  // pour qu'un filtre replié ne reste jamais actif à l'insu de l'utilisateur.
+  const nbFiltres = (filt !== "tous" ? 1 : 0) + (filtStatut !== "tous" ? 1 : 0) + (filtAcc !== "tous" ? 1 : 0) + ((dateFrom || dateTo) ? 1 : 0);
   return (<div className="fade">
     <div className="card" style={{ marginBottom: 14, padding: 0, overflow: "hidden" }}>
       <div onClick={() => setPipeOpen((o) => !o)} style={{ cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 14px" }}>
@@ -8106,19 +8125,32 @@ function Deals({ data, persist, go, focus }) {
       {pipeOpen && <div style={{ padding: "0 12px 12px" }}><PipelineKanban data={data} persist={persist} go={go} embedded /></div>}
     </div>
     <CommandesEnLigne data={data} persist={persist} go={go} />
-    <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
-      <div style={{ position: "relative", flex: 1, minWidth: 200 }}><Search size={15} style={{ position: "absolute", left: 11, top: 11, color: "var(--muted)" }} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher par référence, groupe, établissement, produit, note…" style={{ width: "100%", padding: "9px 11px 9px 32px", border: "1px solid var(--line)", borderRadius: 11, fontFamily: "inherit", fontSize: 13.5 }} /></div>
-      <GroupBar value={grp} onChange={setGrp} dir={dir} onToggleDir={() => setDir((d) => d === "asc" ? "desc" : "asc")} options={[{ id: "statut", label: "statut" }, { id: "enseigne", label: "groupe / établissement" }, { id: "type", label: "type" }, { id: "mois", label: "mois" }]} />
+    {/* Outils d'abord, sur leur propre ligne et alignés à droite : ce sont des ACTIONS, elles
+        n'ont rien à faire au milieu des filtres, qui ne font que restreindre la liste. */}
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", marginBottom: 10 }}>
       <div style={{ display: "flex", gap: 8 }}><button className="btn btn-ghost btn-s" onClick={() => downloadCSV(list.map((d) => { const acc = accOf(d.accountId); return { Reference: d.ref || "", Type: d.type, Date: d.date, Enseigne: acc ? acc.enseigne : "", Statut: (DEAL_STATUS[d.statut] || {}).label || d.statut, TVA_pct: d.tva, Montant_TTC_EUR: d.montant, Note: d.note || "" }; }), "deals-penup3d-" + new Date().toISOString().slice(0, 10) + ".csv")} title="Exporter en CSV"><FileDown size={14} /> CSV</button><button className="btn btn-g" onClick={() => setImp(true)} title="Coller une commande reçue et créer un brouillon de devis"><Upload size={16} /> Importer</button><button className="btn btn-g" onClick={() => setBdc(true)} title="Formulaire vierge à envoyer à un revendeur : il coche ses quantités, vous lui retournez un devis"><FileText size={16} /> Bon de commande</button>{/* Un seul bouton : le formulaire porte déjà un sélecteur « Type » (devis, bon de commande,
     facture, avoir). Deux boutons ouvraient la même fenêtre, au seul type initial près. */}
 <button className="btn btn-p" onClick={() => setEdit(newDeal("Devis"))} title="Devis, bon de commande, facture ou avoir : le type se choisit dans le formulaire"><Plus size={16} /> Nouveau document</button></div>
     </div>
-    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "stretch", marginBottom: 14 }}>
-      <FilterGroup label="Type" color="#3F60AA">{[["tous", "Tous"], ["devis", "Devis"], ["commande", "Commandes"], ["facture", "Factures"]].map(([k, l]) => k === "tous" ? <AllChip key={k} active={filt === "tous"} onClick={() => setFilt("tous")}>Tous</AllChip> : <button key={k} className={cx("chip", filt === k && "on")} onClick={() => setFilt(k)} style={filt === k ? { background: "#3F60AA", borderColor: "#3F60AA", color: "#fff" } : {}}>{l}</button>)}</FilterGroup>
-      <FilterGroup label="Statut" color="#F8B133"><AllChip active={filtStatut === "tous"} onClick={() => setFiltStatut("tous")}>Tous</AllChip>{Object.entries(DEAL_STATUS).map(([k, v]) => <button key={k} className={cx("chip", filtStatut === k && "on")} onClick={() => setFiltStatut(k)} style={filtStatut === k ? { background: v.color, borderColor: v.color, color: onColor(v.color) } : { borderLeft: `4px solid ${v.color}` }}>{v.label}</button>)}</FilterGroup>
-      <FilterGroup label="Groupe / établissement" color="#2bb673"><SearchSelect value={filtAcc} onChange={setFiltAcc} options={accountOptionList(accounts, [{ value: "tous", label: "Toutes" }])} placeholder="Toutes" style={{ minWidth: 160 }} inputStyle={{ border: "1px solid rgba(43,182,115,.4)", background: "#fff", borderRadius: 8, padding: "5px 26px 5px 9px", fontFamily: "inherit", fontSize: 12.5 }} /></FilterGroup>
-      <FilterGroup label="Période" color="#7c5cf0"><input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="Date à partir de" style={{ border: "1px solid rgba(124,92,240,.4)", background: "#fff", borderRadius: 8, padding: "5px 8px", fontFamily: "inherit", fontSize: 12 }} /><span style={{ fontSize: 12, color: "#7c5cf0", fontWeight: 700 }}>→</span><input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="Date jusqu'à" style={{ border: "1px solid rgba(124,92,240,.4)", background: "#fff", borderRadius: 8, padding: "5px 8px", fontFamily: "inherit", fontSize: 12 }} /></FilterGroup>
-      {hasFilter && <div style={{ display: "flex", alignItems: "center" }}><button className="btn btn-ghost btn-s" onClick={resetFilters} title="Réinitialiser tous les filtres"><X size={13} /> Effacer</button></div>}
+    {/* Puis une seule carte pour tout ce qui filtre : recherche, regroupement, et les critères
+        repliés par défaut. Dépliés en permanence, les quatre encarts occupaient trois lignes à eux
+        seuls et repoussaient le tableau sous la ligne de flottaison. */}
+    <div className="card" style={{ padding: 10, marginBottom: 12 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <div style={{ position: "relative", flex: 1, minWidth: 200 }}><Search size={15} style={{ position: "absolute", left: 11, top: 11, color: "var(--muted)" }} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher par référence, groupe, établissement, produit, note…" style={{ width: "100%", padding: "9px 11px 9px 32px", border: "1px solid var(--line)", borderRadius: 11, fontFamily: "inherit", fontSize: 13.5 }} /></div>
+      <GroupBar value={grp} onChange={setGrp} dir={dir} onToggleDir={() => setDir((d) => d === "asc" ? "desc" : "asc")} options={[{ id: "statut", label: "statut" }, { id: "enseigne", label: "groupe / établissement" }, { id: "type", label: "type" }, { id: "mois", label: "mois" }]} />
+        <button className={cx("btn", "btn-s", nbFiltres ? "btn-p" : "btn-g")} onClick={() => setFiltresOuverts((o) => !o)} title="Afficher ou masquer les critères de filtrage">
+          <FunnelIcon size={14} /> Filtres{nbFiltres ? " (" + nbFiltres + ")" : ""}
+          <ChevronRight size={15} style={{ transform: filtresOuverts ? "rotate(90deg)" : "none", transition: "transform .2s" }} />
+        </button>
+        {hasFilter && <button className="btn btn-ghost btn-s" onClick={resetFilters} title="Réinitialiser la recherche et tous les critères"><X size={13} /> Effacer</button>}
+      </div>
+      {filtresOuverts && <div className="filtres-compacts" style={{ marginTop: 9, paddingTop: 9, borderTop: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 2 }}>
+        <FilterGroup compact label="Type" color="#3F60AA">{[["tous", "Tous"], ["devis", "Devis"], ["commande", "Commandes"], ["facture", "Factures"]].map(([k, l]) => k === "tous" ? <AllChip key={k} active={filt === "tous"} onClick={() => setFilt("tous")}>Tous</AllChip> : <button key={k} className={cx("chip", filt === k && "on")} onClick={() => setFilt(k)} style={filt === k ? { background: "#3F60AA", borderColor: "#3F60AA", color: "#fff" } : {}}>{l}</button>)}</FilterGroup>
+        <FilterGroup compact label="Statut" color="#F8B133"><AllChip active={filtStatut === "tous"} onClick={() => setFiltStatut("tous")}>Tous</AllChip>{Object.entries(DEAL_STATUS).map(([k, v]) => <button key={k} className={cx("chip", filtStatut === k && "on")} onClick={() => setFiltStatut(k)} style={filtStatut === k ? { background: v.color, borderColor: v.color, color: onColor(v.color) } : { borderLeft: `4px solid ${v.color}` }}>{v.label}</button>)}</FilterGroup>
+        <FilterGroup compact label="Groupe / établissement" color="#2bb673"><SearchSelect value={filtAcc} onChange={setFiltAcc} options={accountOptionList(accounts, [{ value: "tous", label: "Toutes" }])} placeholder="Toutes" style={{ minWidth: 160 }} inputStyle={{ border: "1px solid rgba(43,182,115,.4)", background: "#fff", borderRadius: 8, padding: "5px 26px 5px 9px", fontFamily: "inherit", fontSize: 12.5 }} /></FilterGroup>
+        <FilterGroup compact label="Période" color="#7c5cf0"><input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="Date à partir de" style={{ border: "1px solid rgba(124,92,240,.4)", background: "#fff", borderRadius: 8, padding: "5px 8px", fontFamily: "inherit", fontSize: 12 }} /><span style={{ fontSize: 12, color: "#7c5cf0", fontWeight: 700 }}>→</span><input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="Date jusqu'à" style={{ border: "1px solid rgba(124,92,240,.4)", background: "#fff", borderRadius: 8, padding: "5px 8px", fontFamily: "inherit", fontSize: 12 }} /></FilterGroup>
+      </div>}
     </div>
     <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
       <div style={{ fontSize: 12, color: "var(--muted)" }}>{list.length} document{list.length > 1 ? "s" : ""} {hasFilter ? "filtré" + (list.length > 1 ? "s" : "") : ""}, total HT <strong style={{ color: "var(--ink)" }}>{eur(totalFiltered)}</strong></div>
