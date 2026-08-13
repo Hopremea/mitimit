@@ -8726,8 +8726,18 @@ overlay.addEventListener("click", function(e){ if(e.target===overlay) overlay.cl
 // La création du devis se fait côté application, jamais côté serveur : c'est l'application qui sait
 // fusionner l'état partagé sans écraser une session ouverte sur un autre appareil.
 const BON_COMMANDE_CHEMIN = "/commande";
+// Lien remis aux revendeurs. Le sous-domaine dédié ne laisse voir ni « mitimit », nom de l'outil
+// interne, ni chemin à retenir : l'adresse tient en un mot. Le lien technique (domaine de
+// l'application + /commande) reste valable et sert de repli tant que le sous-domaine n'est pas
+// branché — l'application VÉRIFIE lequel répond plutôt que de l'affirmer.
+const BON_COMMANDE_LIEN_COURT = "https://commande.penup3d.com";
 function bonCommandeLien() {
   try { const o = (typeof window !== "undefined" && window.location && window.location.origin) || ""; return o + BON_COMMANDE_CHEMIN; } catch (e) { return BON_COMMANDE_CHEMIN; }
+}
+// Le sous-domaine répond-il ? Une requête « no-cors » ne laisse pas lire la réponse, mais elle
+// échoue franchement quand le domaine n'existe pas encore : c'est tout ce qu'il faut savoir.
+async function bonCommandeLienCourtActif() {
+  try { await fetch(BON_COMMANDE_LIEN_COURT, { mode: "no-cors", cache: "no-store" }); return true; } catch (e) { return false; }
 }
 // Le relais du bon de commande est servi par /api/state, branche « bdc » : Vercel plafonne le dépôt
 // à douze fonctions serverless (un fichier de api/ = une fonction), et un treizième fichier faisait
@@ -8896,7 +8906,13 @@ function CommandesEnLigne({ data, persist, go }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [copie, setCopie] = useState(false);
-  const lien = bonCommandeLien();
+  // Deux adresses mènent au même formulaire : le lien court, à donner aux revendeurs, et le lien
+  // technique, toujours valable. Tant que le sous-domaine n'est pas branché, c'est le second qui est
+  // proposé — annoncer une adresse qui ne répond pas serait pire que de ne rien changer.
+  const lienTechnique = bonCommandeLien();
+  const [courtActif, setCourtActif] = useState(null);
+  useEffect(() => { let vif = true; bonCommandeLienCourtActif().then((ok) => { if (vif) setCourtActif(ok); }); return () => { vif = false; }; }, []);
+  const lien = courtActif ? BON_COMMANDE_LIEN_COURT : lienTechnique;
   const charger = async () => {
     setBusy(true);
     try { const r = await bonCommandeListe(true); setListe(r.commandes || []); setMsg(""); }
@@ -8962,6 +8978,12 @@ function CommandesEnLigne({ data, persist, go }) {
         <a className="btn btn-ghost btn-s" href={lien} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Ouvrir</a>
         <button className="btn btn-p btn-s" onClick={relever} disabled={busy}><RefreshCw size={14} className={busy ? "spin" : ""} /> Relever maintenant</button>
       </div>
+      {courtActif === false && <div style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.5, marginTop: -4, marginBottom: 10 }}>
+        Le sous-domaine <code>commande.penup3d.com</code> n'est pas encore branché : c'est l'adresse technique qui est proposée ci-dessus, et elle fonctionne parfaitement. Pour le lien court, ajoutez ce domaine dans Vercel (projet mitimit, Settings → Domains) puis créez l'enregistrement DNS qu'il indiquera. Cet encart basculera tout seul.
+      </div>}
+      {courtActif === true && <div style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.5, marginTop: -4, marginBottom: 10 }}>
+        Adresse technique, toujours valable : <code>{lienTechnique}</code>
+      </div>}
       {msg && <div style={{ fontSize: 12.5, fontWeight: 700, color: msg.startsWith("Aucune") ? "var(--muted)" : (/impossible|indisponible/.test(msg) ? "var(--red, #FF5A45)" : "var(--green, #2bb673)"), marginBottom: 10 }}>{msg}</div>}
       {liste === null ? <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Chargement…</div>
         : liste.length === 0 ? <div className="empty">Aucune commande reçue pour l'instant.</div>
