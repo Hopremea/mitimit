@@ -129,6 +129,45 @@ côté serveur (relais `/api/shopify`, protégé par Clerk) et n'est jamais expo
 Si les variables ne sont pas définies, la synchro est simplement désactivée et l'app continue
 de fonctionner normalement.
 
+## Bon de commande en ligne (lien client → devis brouillon)
+
+Un lien public, `https://<votre-domaine>/commande`, permet à un revendeur de composer sa commande
+lui-même. C'est le **seul** accès qu'il a : ni compte, ni connexion, ni accès à MITMIT. La page
+reprend les champs et les mentions du bon de commande imprimé (raison sociale, magasin/enseigne,
+contact, courriel, téléphone, SIRET, TVA intracom., adresses de livraison et de facturation,
+conformité CE/EN 71, franco de port par zone, conditions de paiement, renvoi aux CGV).
+
+Chaque commande envoyée devient **automatiquement un devis au statut « brouillon »** dans MITMIT :
+
+1. Le client valide sa sélection : elle est déposée côté serveur dans la table `bons_commande`.
+2. Dès que MITMIT est ouvert (au lancement, au retour sur l'onglet, puis toutes les deux minutes),
+   l'application relève les commandes en attente. Rien ne se perd si personne n'est connecté.
+3. Le devis est chiffré au **prix de cession du jour** (le prix envoyé par le navigateur n'est
+   jamais repris) et rattaché à l'établissement s'il est reconnu — par SIRET, par courriel d'un
+   contact connu, puis par nom exact. À défaut, une fiche (compte + point de vente + interlocuteur)
+   est créée pour l'occasion.
+4. Un échange entrant est tracé dans l'historique du compte, et un bandeau vert annonce les devis
+   créés. **Rien n'est envoyé au client sans votre relecture** : le devis reste « brouillon ».
+
+Le lien, le journal des commandes reçues et le bouton « Relever maintenant » se trouvent dans
+l'onglet **Devis & commandes**, encart « Commande en ligne ».
+
+Mise en place :
+
+1. Dans Supabase, SQL Editor, exécutez `supabase/migrations/0002_bons_commande.sql`.
+   La table est protégée par RLS **sans aucune policy** : la clé anon publique n'y accède pas.
+   Seul le relais serveur `/api/commande` (clé service role) la lit et l'écrit.
+2. Aucune variable supplémentaire n'est requise : le relais réutilise `SUPABASE_URL`,
+   `SUPABASE_SERVICE_ROLE_KEY` et `CLERK_SECRET_KEY` (cette dernière protégeant la relève et la
+   clôture — le dépôt par le client, lui, est nécessairement public).
+3. Facultatif : définissez `BON_COMMANDE_TOKEN` sur Vercel pour exiger un jeton dans le lien
+   (`/commande?k=<jeton>`). Sans cette variable, le lien seul fait office d'accès.
+
+La grille proposée au client est celle cochée dans **Stock → Bon de commande revendeur** : les
+références décochées n'y figurent pas. Les kits, les références non vendables et toute donnée
+interne (stock, poids, marges, ventes) ne sortent jamais du serveur. La page est en `noindex`, le
+formulaire comporte un piège à robots et les dépôts sont limités à 8 par quart d'heure et par IP.
+
 ## Limites connues et pistes (pour la suite avec Claude Code)
 
 - Bundle de 1,9 Mo (xlsx + recharts). Optimisable par code splitting (`import()` dynamique).
