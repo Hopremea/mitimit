@@ -159,9 +159,17 @@ Mise en place :
    Seul le relais serveur `/api/commande` (clé service role) la lit et l'écrit.
 2. Aucune variable supplémentaire n'est requise : le relais réutilise `SUPABASE_URL`,
    `SUPABASE_SERVICE_ROLE_KEY` et `CLERK_SECRET_KEY` (cette dernière protégeant la relève et la
-   clôture — le dépôt par le client, lui, est nécessairement public).
+   clôture — le dépôt par le client, lui, est nécessairement public). Ces trois variables doivent
+   exister sur Vercel en **Production** : sans les deux premières, `/commande` répond
+   « Formulaire momentanément indisponible ».
 3. Facultatif : définissez `BON_COMMANDE_TOKEN` sur Vercel pour exiger un jeton dans le lien
    (`/commande?k=<jeton>`). Sans cette variable, le lien seul fait office d'accès.
+
+Côté code, la logique vit dans `lib/bonCommande.js` et non dans un fichier `api/` : Vercel compte
+chaque fichier de `api/` comme une fonction serverless et le plan Hobby en autorise **12** par
+déploiement — un treizième fichier fait échouer le déploiement entier, production comprise. Le point
+d'entrée est donc la branche `?bdc=1` de `/api/state` (même relais, même clé service role) ; seule
+l'URL publique `/commande` reste lisible, par réécriture dans `vercel.json`.
 
 La grille proposée au client est celle cochée dans **Stock → Bon de commande revendeur** : les
 références décochées n'y figurent pas. Les kits, les références non vendables et toute donnée

@@ -8488,13 +8488,17 @@ const BON_COMMANDE_CHEMIN = "/commande";
 function bonCommandeLien() {
   try { const o = (typeof window !== "undefined" && window.location && window.location.origin) || ""; return o + BON_COMMANDE_CHEMIN; } catch (e) { return BON_COMMANDE_CHEMIN; }
 }
+// Le relais du bon de commande est servi par /api/state, branche « bdc » : Vercel plafonne le dépôt
+// à douze fonctions serverless (un fichier de api/ = une fonction), et un treizième fichier faisait
+// échouer le déploiement entier. Seule l'URL publique /commande reste lisible, par réécriture.
+const BON_COMMANDE_API = "/api/state?bdc=1";
 async function bonCommandeApi(suffixe, opts) {
   const headers = await claudeHeaders();
-  const res = await fetch("/api/commande" + (suffixe || ""), { ...(opts || {}), headers });
+  const res = await fetch(BON_COMMANDE_API + (suffixe || ""), { ...(opts || {}), headers });
   if (!res.ok) { let d = ""; try { const j = await res.json(); d = (j && j.error) || ""; } catch (e) {} throw new Error("HTTP " + res.status + (d ? " — " + d : "")); }
   return res.json();
 }
-const bonCommandeListe = (tous) => bonCommandeApi("?list=1" + (tous ? "&tous=1" : ""));
+const bonCommandeListe = (tous) => bonCommandeApi("&list=1" + (tous ? "&tous=1" : ""));
 const bonCommandeClore = (id, deal) => bonCommandeApi("", { method: "POST", body: JSON.stringify({ action: "traite", id, dealId: deal ? deal.id : "", dealRef: deal ? deal.ref : "" }) });
 
 // Rapprochement d'une commande reçue avec une fiche existante. Le client déclare ses coordonnées
