@@ -138,10 +138,15 @@ Le sous-domaine dédié ne laisse voir ni « mitimit », nom de l'outil interne,
 Pour le mettre en place : Vercel → projet **mitimit** → *Settings → Domains* → ajouter
 `commande.penup3d.com`, puis créer chez l'hébergeur du domaine l'enregistrement DNS que Vercel
 indique (un CNAME). La boutique Shopify sur `penup3d.com` et `www` n'est pas touchée : seul ce
-sous-domaine est créé. `vercel.json` réserve ce domaine au bon de commande — tout ce qui n'y est pas
-`/api` sert le formulaire — et `/commande` continue de fonctionner sur les autres domaines, pour que
-les liens déjà envoyés restent valables. L'encart de MITMIT vérifie lequel des deux répond et
-propose celui qui marche. C'est le **seul** accès qu'il a : ni compte, ni connexion, ni accès à MITMIT. La page
+sous-domaine est créé. L'encart de MITMIT vérifie lequel des deux liens répond et propose celui qui
+marche.
+
+Côté `vercel.json`, la première réécriture réserve ce domaine au bon de commande : tout ce qui n'y
+est pas `/api` sert le formulaire, d'où un lien sans chemin. Les réécritures s'appliquant dans
+l'ordre, elle doit rester **en tête** ; `/commande` vient ensuite et continue de fonctionner sur les
+autres domaines, pour que les liens déjà envoyés restent valables. À noter : `vercel.json` refuse
+toute clé hors schéma, y compris une fausse clé de commentaire (`"//rewrites"` fait échouer le
+déploiement) — d'où cette explication ici plutôt que dans le fichier. C'est le **seul** accès qu'il a : ni compte, ni connexion, ni accès à MITMIT. La page
 reprend les champs et les mentions du bon de commande imprimé (raison sociale, magasin/enseigne,
 contact, courriel, téléphone, SIRET, TVA intracom., adresses de livraison et de facturation,
 conformité CE/EN 71, franco de port par zone, conditions de paiement, renvoi aux CGV).
