@@ -7964,6 +7964,7 @@ function Deals({ data, persist, go, focus }) {
       </div>
       {pipeOpen && <div style={{ padding: "0 12px 12px" }}><PipelineKanban data={data} persist={persist} go={go} embedded /></div>}
     </div>
+    <CommandesEnLigne data={data} persist={persist} go={go} />
     <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
       <div style={{ position: "relative", flex: 1, minWidth: 200 }}><Search size={15} style={{ position: "absolute", left: 11, top: 11, color: "var(--muted)" }} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher par référence, groupe, établissement, produit, note…" style={{ width: "100%", padding: "9px 11px 9px 32px", border: "1px solid var(--line)", borderRadius: 11, fontFamily: "inherit", fontSize: 13.5 }} /></div>
       <GroupBar value={grp} onChange={setGrp} dir={dir} onToggleDir={() => setDir((d) => d === "asc" ? "desc" : "asc")} options={[{ id: "statut", label: "statut" }, { id: "enseigne", label: "groupe / établissement" }, { id: "type", label: "type" }, { id: "mois", label: "mois" }]} />
@@ -8299,6 +8300,7 @@ function BonCommandeModal({ data, persist, products, onClose }) {
   return (<>
     <Modal title="Bon de commande revendeur" onClose={onClose} wide>
       <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55, marginBottom: 12 }}>Formulaire vierge à envoyer à un revendeur : il remplit ses coordonnées et les quantités souhaitées, vous lui retournez un devis chiffré. Cochez ici les références à faire figurer dans la grille, puis imprimez ou enregistrez en PDF comme un devis.</div>
+      <div style={{ fontSize: 12.5, lineHeight: 1.55, marginBottom: 12, background: "var(--soft, #eef2fb)", borderRadius: 10, padding: "9px 12px" }}>Cette même sélection pilote le <strong>bon de commande en ligne</strong> (<code style={{ fontSize: 11.5 }}>{bonCommandeLien()}</code>) : le client y commande directement et un devis brouillon est créé sans ressaisie. Voir l'encart « Commande en ligne » de l'onglet Devis &amp; commandes.</div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
         <span style={{ fontSize: 12.5, fontWeight: 700 }}>{refs.length} référence{refs.length > 1 ? "s" : ""} sur {vend.length}</span>
         <span style={{ flex: 1 }} />
@@ -8472,6 +8474,232 @@ document.getElementById("closeBtn").addEventListener("click", function(){ overla
 overlay.addEventListener("click", function(e){ if(e.target===overlay) overlay.classList.remove("on"); });
 </script></body></html>`;
 }
+
+// ===== Bon de commande EN LIGNE (lien public remis aux clients) =====
+// Le client ouvre le lien /commande — c'est le SEUL accès qu'il a : ni compte, ni MITMIT, ni
+// données internes. Il remplit les mêmes champs et lit les mêmes mentions que le bon de commande
+// imprimé (BonCommandeDoc), puis envoie sa sélection. Elle est déposée côté serveur dans sa propre
+// table (bons_commande), et MITMIT la relève ici pour la transformer AUTOMATIQUEMENT en DEVIS
+// BROUILLON : rien n'est émis sans relecture, le devis reste au statut « brouillon ».
+//
+// La création du devis se fait côté application, jamais côté serveur : c'est l'application qui sait
+// fusionner l'état partagé sans écraser une session ouverte sur un autre appareil.
+const BON_COMMANDE_CHEMIN = "/commande";
+function bonCommandeLien() {
+  try { const o = (typeof window !== "undefined" && window.location && window.location.origin) || ""; return o + BON_COMMANDE_CHEMIN; } catch (e) { return BON_COMMANDE_CHEMIN; }
+}
+async function bonCommandeApi(suffixe, opts) {
+  const headers = await claudeHeaders();
+  const res = await fetch("/api/commande" + (suffixe || ""), { ...(opts || {}), headers });
+  if (!res.ok) { let d = ""; try { const j = await res.json(); d = (j && j.error) || ""; } catch (e) {} throw new Error("HTTP " + res.status + (d ? " — " + d : "")); }
+  return res.json();
+}
+const bonCommandeListe = (tous) => bonCommandeApi("?list=1" + (tous ? "&tous=1" : ""));
+const bonCommandeClore = (id, deal) => bonCommandeApi("", { method: "POST", body: JSON.stringify({ action: "traite", id, dealId: deal ? deal.id : "", dealRef: deal ? deal.ref : "" }) });
+
+// Rapprochement d'une commande reçue avec une fiche existante. Le client déclare ses coordonnées
+// librement : on cherche d'abord le SIRET (le plus sûr), puis le courriel d'un contact ou d'un
+// établissement connu, enfin le nom exact. Aucun rapprochement approximatif : dans le doute une
+// fiche est créée, car un doublon se fusionne (onglet Doublons) alors qu'un devis rattaché au
+// mauvais client se rattrape beaucoup plus mal.
+function rapprocherBonCommande(p, cl) {
+  const chiffres = (s) => String(s || "").replace(/\D/g, "");
+  const sites = p.sites || [], accounts = p.accounts || [], contacts = p.contacts || [];
+  const siret = chiffres(cl.siret);
+  if (siret.length >= 9) {
+    const site = sites.find((s) => !s.archived && chiffres(s.siret).length >= 9 && chiffres(s.siret) === siret);
+    if (site) return { accountId: site.accountId, siteId: site.id };
+    const siren = siret.slice(0, 9);
+    const acc = accounts.find((a) => !a.archived && chiffres(a.siren) === siren);
+    if (acc) return { accountId: acc.id, siteId: "" };
+  }
+  const mail = (cl.email || "").trim().toLowerCase();
+  if (mail) {
+    const ct = contacts.find((c) => (c.email || "").trim().toLowerCase() === mail);
+    if (ct) return { accountId: ct.accountId, siteId: ct.siteId || "" };
+    const site = sites.find((s) => !s.archived && (s.email || "").trim().toLowerCase() === mail);
+    if (site) return { accountId: site.accountId, siteId: site.id };
+  }
+  const noms = [cl.raisonSociale, cl.enseigne].map((n) => normStr(n)).filter((n) => n && n.length >= 4);
+  for (const n of noms) {
+    const site = sites.find((s) => !s.archived && normStr(s.label) === n);
+    if (site) return { accountId: site.accountId, siteId: site.id };
+    const acc = accounts.find((a) => !a.archived && (normStr(a.enseigne) === n || normStr(a.raisonSociale) === n));
+    if (acc) return { accountId: acc.id, siteId: "" };
+  }
+  return null;
+}
+// Note du devis : elle porte tout ce que le client a déclaré, y compris ce qui n'a pas de champ
+// dédié (référence de commande, date souhaitée, message). Le devis reste ainsi relisible sans avoir
+// à rouvrir la commande d'origine.
+function bonCommandeNote(bon) {
+  const cl = bon.client || {};
+  return [
+    "Commande reçue par le lien client (" + (bon.ref || "") + ").",
+    cl.raisonSociale && ("Client déclaré : " + cl.raisonSociale + (cl.enseigne ? " · " + cl.enseigne : "")),
+    cl.contact && ("Contact : " + cl.contact + (cl.email ? " · " + cl.email : "") + (cl.tel ? " · " + cl.tel : "")),
+    cl.siret && ("SIRET : " + cl.siret),
+    cl.tvaIntra && ("TVA intracom. : " + cl.tvaIntra),
+    cl.adresseLivraison && ("Livraison : " + cl.adresseLivraison),
+    cl.adresseFacturation && ("Facturation : " + cl.adresseFacturation),
+    cl.refClient && ("Référence client : " + cl.refClient),
+    cl.dateSouhaitee && ("Livraison souhaitée le " + cl.dateSouhaitee),
+    cl.message && ("Message : " + cl.message),
+  ].filter(Boolean).join(" · ");
+}
+// Transforme les commandes reçues en devis brouillons. Fonction PURE : elle reçoit l'état, en rend
+// une copie modifiée et la liste des devis créés — l'appelant décide quand persister.
+function appliquerBonsCommande(etat, bons) {
+  let p = { ...etat, accounts: [...(etat.accounts || [])], sites: [...(etat.sites || [])], contacts: [...(etat.contacts || [])], deals: [...(etat.deals || [])], interactions: [...(etat.interactions || [])] };
+  const crees = [];
+  (bons || []).forEach((bon) => {
+    const cl = bon.client || {};
+    const lignesSrc = Array.isArray(bon.lignes) ? bon.lignes.filter((l) => l && l.code && (+l.qte || 0) > 0) : [];
+    if (!lignesSrc.length) return;
+    // Prix repris du CATALOGUE en vigueur, pas de celui envoyé par le navigateur : le devis est
+    // toujours chiffré au prix de cession du jour.
+    const lines = lignesSrc.map((l) => {
+      const pr = (p.products || []).find((x) => x.code === l.code);
+      const pu = pr ? (pr.cessionHT != null ? pr.cessionHT : pr.pvc) : (+l.pu || 0);
+      return L(l.code, pr ? pr.designation : (l.designation || l.code), Math.max(1, Math.round(+l.qte || 1)), Number(pu) || 0);
+    });
+
+    let cible = rapprocherBonCommande(p, cl);
+    let contactId = "";
+    if (!cible) {
+      // Client inconnu : on lui ouvre une fiche établissement complète (compte + point de vente +
+      // interlocuteur), pour que le devis s'imprime avec le bon nom et la bonne adresse.
+      const loc = parseLocality(cl.adresseLivraison || "");
+      const nom = cl.raisonSociale || cl.enseigne || "Établissement";
+      const accId = uid("acc_");
+      const siteId = uid("s_");
+      p.accounts = [...p.accounts, {
+        id: accId, enseigne: cl.enseigne || nom, raisonSociale: cl.raisonSociale || "", kind: "établissement", stage: "prospect",
+        magasins: 1, nature: "DV", code: buildClientCode(p.accounts, "DV"), siren: String(cl.siret || "").replace(/\D/g, "").slice(0, 9), formeJuridique: "",
+        typeSurface: "", ville: loc.ville || "", lat: null, lng: null, pipeline: 0, prochaineAction: "Chiffrer et envoyer le devis",
+        dateAction: TODAY(), notes: "Fiche créée automatiquement à la réception d'un bon de commande en ligne (" + (bon.ref || "") + ").",
+        adressePostale: cl.adresseFacturation || cl.adresseLivraison || "", adresseLivraison: cl.adresseLivraison || "",
+        livraisonIdentique: !cl.adresseFacturation, site: "", facebook: "", instagram: "", archived: false, archiveReason: "",
+        archiveDate: "", archiveNote: "", tags: [], stageLog: [{ stage: "prospect", date: TODAY() }],
+      }];
+      p.sites = [...p.sites, {
+        id: siteId, accountId: accId, label: cl.enseigne || nom, type: "pdv", typeSurface: "", adresse: cl.adresseLivraison || "",
+        adresseLivraison: cl.adresseLivraison || "", livraisonIdentique: true, lat: null, lng: null,
+        siret: String(cl.siret || "").replace(/\D/g, ""), email: cl.email || "", telFixe: cl.tel || "",
+        notes: "Point de vente créé à la réception du bon de commande en ligne " + (bon.ref || "") + ".",
+        contactPrenom: "", contactNom: "", contactTel: cl.tel || "", contactMail: cl.email || "", contactId: "",
+      }];
+      if (cl.contact || cl.email) {
+        const morceaux = String(cl.contact || "").trim().split(/\s+/);
+        contactId = uid("c_");
+        p.contacts = [...p.contacts, {
+          id: contactId, accountId: accId, siteId, prenom: morceaux.length > 1 ? morceaux[0] : "", nom: morceaux.length > 1 ? morceaux.slice(1).join(" ") : (morceaux[0] || "Contact"),
+          fonction: "", role: "", email: cl.email || "", mobile: cl.tel || "", fixe: "", linkedin: "", ville: loc.ville || "",
+          departement: loc.departement || "", adresse: cl.adresseLivraison || "", principal: true, principalEtab: true,
+          notes: "Interlocuteur déclaré sur le bon de commande en ligne " + (bon.ref || "") + ".", createdAt: TODAY(),
+        }];
+      }
+      cible = { accountId: accId, siteId };
+    }
+
+    const deal = mkDeal({
+      id: uid("d_"), accountId: cible.accountId, siteId: cible.siteId || "", type: "Devis", date: TODAY(), statut: "brouillon",
+      paiement: PAIEMENT_DEFAUT, ref: nextRef("Devis", p.deals), note: bonCommandeNote(bon), tva: (p.settings && p.settings.tva) || 20,
+      zoneLivraison: detectFrancoZone(cl.adresseLivraison || "") || "", lines, bonCommandeId: bon.id, bonCommandeRef: bon.ref || "",
+    });
+    p.deals = [deal, ...p.deals];
+    // Trace dans l'historique du compte : la commande reçue est un échange entrant à part entière.
+    // Marquée « déjà analysée » pour ne pas relancer l'extraction d'événements par l'IA.
+    p.interactions = [...p.interactions, {
+      id: uid("i_"), accountId: cible.accountId, siteId: cible.siteId || "", contactId, type: "email", direction: "entrant",
+      date: TODAY(), sujet: "Bon de commande en ligne " + (bon.ref || ""),
+      resume: "Commande saisie par le client sur le lien public : " + lines.length + " référence(s), " + dealQte(lines) + " article(s). Devis brouillon " + deal.ref + " créé automatiquement.",
+      _eventsScanned: true,
+    }];
+    crees.push({ bon, deal });
+  });
+  return { etat: p, crees };
+}
+// Relève complète : lit les commandes en attente, les convertit, persiste, puis les clôt côté
+// serveur. Une commande dont la clôture échoue serait relue au tour suivant : on l'écarte via le
+// garde-fou « bonCommandeId » (une commande ne peut produire deux devis).
+// Verrou unique : la relève automatique (minuteur) et le bouton « Relever maintenant » partagent ce
+// drapeau. Sans lui, deux relèves simultanées liraient la même commande en attente et créeraient
+// deux devis pour une seule demande client.
+let bonCommandeReleveEnCours = false;
+async function releverBonsCommande(base, persist) {
+  if (bonCommandeReleveEnCours) return { crees: [], recues: 0, ignoree: true };
+  bonCommandeReleveEnCours = true;
+  try {
+    const { commandes } = await bonCommandeListe(false);
+    const dejaVues = new Set((base.deals || []).map((d) => d.bonCommandeId).filter(Boolean));
+    const nouvelles = (commandes || []).filter((c) => c && c.id && !dejaVues.has(c.id));
+    if (!nouvelles.length) return { crees: [], recues: (commandes || []).length };
+    const { etat, crees } = appliquerBonsCommande(base, nouvelles);
+    if (!crees.length) return { crees: [], recues: (commandes || []).length };
+    persist(etat);
+    for (const c of crees) { try { await bonCommandeClore(c.bon.id, c.deal); } catch (e) { /* réessai au prochain tour */ } }
+    return { crees, recues: (commandes || []).length };
+  } finally { bonCommandeReleveEnCours = false; }
+}
+// Encart de l'onglet « Devis & commandes » : le lien à donner aux clients, et le journal des
+// commandes reçues avec le devis brouillon qu'elles ont produit.
+function CommandesEnLigne({ data, persist, go }) {
+  const [ouvert, setOuvert] = useState(false);
+  const [liste, setListe] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [copie, setCopie] = useState(false);
+  const lien = bonCommandeLien();
+  const charger = async () => {
+    setBusy(true);
+    try { const r = await bonCommandeListe(true); setListe(r.commandes || []); setMsg(""); }
+    catch (e) { setListe([]); setMsg("Journal indisponible (" + (e.message || e) + "). Vérifiez que la table bons_commande existe dans Supabase."); }
+    finally { setBusy(false); }
+  };
+  useEffect(() => { if (ouvert && liste === null) charger(); }, [ouvert]);
+  const relever = async () => {
+    setBusy(true); setMsg("");
+    try {
+      const r = await releverBonsCommande(data, persist);
+      setMsg(r.crees.length ? (r.crees.length + " commande(s) transformée(s) en devis brouillon : " + r.crees.map((c) => c.deal.ref).join(", ") + ".") : "Aucune nouvelle commande en attente.");
+      await charger();
+    } catch (e) { setMsg("Relève impossible (" + (e.message || e) + ")."); }
+    finally { setBusy(false); }
+  };
+  const copier = () => { try { navigator.clipboard.writeText(lien); setCopie(true); setTimeout(() => setCopie(false), 2200); } catch (e) {} };
+  const enAttente = (liste || []).filter((c) => c.statut === "nouveau").length;
+  return (<div className="card" style={{ marginBottom: 14, padding: 0, overflow: "hidden" }}>
+    <div onClick={() => setOuvert((o) => !o)} style={{ cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "11px 14px" }}>
+      <h3 className="pu-display" style={{ margin: 0, fontSize: 15, display: "inline-flex", alignItems: "center", gap: 8 }}><Link2 size={15} />Commande en ligne <span style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 600 }}>· lien client → devis brouillon automatique</span>{enAttente > 0 && <Badge color="#F8B133">{enAttente} en attente</Badge>}</h3>
+      <ChevronRight size={18} style={{ transform: ouvert ? "rotate(90deg)" : "none", transition: "transform .2s", color: "var(--muted)" }} />
+    </div>
+    {ouvert && <div style={{ padding: "0 14px 14px" }}>
+      <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55, marginBottom: 10 }}>
+        Donnez ce lien à vos revendeurs : ils y trouvent la grille du catalogue, les mêmes champs et les mêmes mentions que le bon de commande imprimé, et n'ont accès à rien d'autre. Chaque commande envoyée devient ici un <strong>devis brouillon</strong>, chiffré au prix de cession du jour, rattaché à l'établissement s'il est reconnu (SIRET, courriel ou nom) — sinon une fiche est créée. Rien n'est envoyé au client sans votre relecture.
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
+        <input readOnly value={lien} onFocus={(e) => e.target.select()} style={{ flex: 1, minWidth: 220, padding: "9px 11px", border: "1px solid var(--line)", borderRadius: 10, fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5, background: "var(--soft, #eef2fb)" }} />
+        <button className="btn btn-g btn-s" onClick={copier}><Copy size={14} /> {copie ? "Copié" : "Copier le lien"}</button>
+        <a className="btn btn-ghost btn-s" href={lien} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Ouvrir</a>
+        <button className="btn btn-p btn-s" onClick={relever} disabled={busy}><RefreshCw size={14} className={busy ? "spin" : ""} /> Relever maintenant</button>
+      </div>
+      {msg && <div style={{ fontSize: 12.5, fontWeight: 700, color: msg.startsWith("Aucune") ? "var(--muted)" : (/impossible|indisponible/.test(msg) ? "var(--red, #FF5A45)" : "var(--green, #2bb673)"), marginBottom: 10 }}>{msg}</div>}
+      {liste === null ? <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Chargement…</div>
+        : liste.length === 0 ? <div className="empty">Aucune commande reçue pour l'instant.</div>
+          : <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Reçue le</th><th>Référence</th><th>Client déclaré</th><th style={{ textAlign: "right" }}>Total HT</th><th>Devis créé</th></tr></thead><tbody>
+            {liste.map((c) => { const cl = c.client || {}; return (<tr key={c.id}>
+              <td className="tnum">{(c.created_at || "").slice(0, 10)}</td>
+              <td style={{ fontWeight: 700 }}>{c.ref}</td>
+              <td>{cl.raisonSociale || cl.enseigne || "—"}<div style={{ fontSize: 11, color: "var(--muted)" }}>{[cl.contact, cl.email].filter(Boolean).join(" · ")}</div></td>
+              <td style={{ textAlign: "right", fontWeight: 700 }} className="tnum">{eur(c.total_ht)}</td>
+              <td>{c.deal_ref ? <span className="lnk" onClick={() => go && go("deals", c.deal_id)}>{c.deal_ref}</span> : <Badge color="#F8B133">En attente</Badge>}</td>
+            </tr>); })}
+          </tbody></table></div>}
+    </div>}
+  </div>);
+}
+
 // Identifiants Shopify : stockés LOCALEMENT (par appareil), jamais dans le blob synchronisé sur
 // Supabase — le jeton Admin est un secret. Le serveur (variables Vercel) reste prioritaire.
 // Fiches prospect signalées comme « fraîchement trouvées ». Marqueur d'AFFICHAGE, propre à l'appareil :
@@ -15505,6 +15733,34 @@ export default function App() {
       } catch (e) { }
     })();
   }, [loading]);
+  // Relève automatique des BONS DE COMMANDE EN LIGNE : chaque commande déposée par un client sur le
+  // lien public devient un DEVIS BROUILLON dès que MITMIT est ouvert (au lancement, au retour sur
+  // l'onglet, puis toutes les deux minutes). Les commandes attendent côté serveur tant que personne
+  // n'ouvre l'application : rien ne se perd. Le devis créé reste « brouillon » — il n'est jamais
+  // envoyé au client sans relecture.
+  const bonsRef = useRef({ running: false });
+  const [bonsCommandeNouveaux, setBonsCommandeNouveaux] = useState(0);
+  useEffect(() => {
+    if (loading) return;
+    let arrete = false;
+    const relever = async () => {
+      if (arrete || bonsRef.current.running) return;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      const base = latestRef.current;
+      if (!base || !Array.isArray(base.accounts)) return;
+      bonsRef.current.running = true;
+      try {
+        const { crees } = await releverBonsCommande(base, persist);
+        if (!arrete && crees.length) setBonsCommandeNouveaux((n) => n + crees.length);
+      } catch (e) { /* relais indisponible : nouvelle tentative au prochain tour */ }
+      finally { bonsRef.current.running = false; }
+    };
+    relever();
+    const iv = setInterval(relever, 120000);
+    window.addEventListener("focus", relever);
+    return () => { arrete = true; clearInterval(iv); window.removeEventListener("focus", relever); };
+  }, [loading, persist]);
+
   // Planification automatique des suites au calendrier depuis le résumé des échanges.
   // Chaque échange (nouveau OU ancien) qui possède un résumé non encore analysé est lu par
   // l'IA, qui en déduit les événements à planifier (visio datée, relance après envoi de doc…).
@@ -15855,6 +16111,15 @@ export default function App() {
         </div>
       )}
       <div className="print-area" style={coldStart ? { display: "none" } : undefined}>
+      {bonsCommandeNouveaux > 0 && (
+        <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", background: "#eafaf1", border: "1px solid #b8e6cd", borderLeft: "4px solid var(--green, #2bb673)", borderRadius: 12, padding: "11px 14px", marginBottom: 14 }}>
+          <FileText size={16} style={{ color: "#2bb673", flexShrink: 0 }} />
+          <span style={{ fontSize: 13, fontWeight: 700 }}>{bonsCommandeNouveaux} commande{bonsCommandeNouveaux > 1 ? "s" : ""} client reçue{bonsCommandeNouveaux > 1 ? "s" : ""} par le lien en ligne : {bonsCommandeNouveaux > 1 ? "autant de devis brouillons créés" : "un devis brouillon créé"}, à chiffrer et à envoyer.</span>
+          <span style={{ flex: 1 }} />
+          <button className="btn btn-g btn-s" onClick={() => { setBonsCommandeNouveaux(0); go("deals", null); }}>Voir les devis</button>
+          <button className="iconbtn" onClick={() => setBonsCommandeNouveaux(0)} title="Masquer"><X size={15} /></button>
+        </div>
+      )}
       {tab === "today" && <CommandCenter key={"today-" + navKey} data={data} persist={persist} go={go} />}
       {tab === "dash" && <Dashboard key={"dash-" + navKey} data={data} persist={persist} go={go} />}
       {tab === "performance" && <Performance key={"performance-" + navKey} data={data} go={go} />}
