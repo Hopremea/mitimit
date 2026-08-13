@@ -1,6 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "//rewrites": "Le sous-domaine commande.penup3d.com est ENTIÈREMENT dédié au bon de commande : tout ce qui n'est pas /api y sert le formulaire, si bien que le lien remis aux revendeurs se réduit à https://commande.penup3d.com — sans chemin à retenir ni « mitimit » visible. Cette règle vient en premier : les réécritures s'appliquent dans l'ordre. Sur les autres domaines, /commande continue de fonctionner, pour que les liens déjà envoyés restent valables.",
   "rewrites": [
+    { "source": "/((?!api/).*)", "has": [{ "type": "host", "value": "commande.penup3d.com" }], "destination": "/api/state?bdc=1" },
     { "source": "/commande", "destination": "/api/state?bdc=1" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
