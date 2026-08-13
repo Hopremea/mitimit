@@ -5396,6 +5396,11 @@ function Banque({ data = {}, persist, go }) {
   const [busy, setBusy] = useState(false); const [err, setErr] = useState(null);
   const moisCourant = new Date().toISOString().slice(0, 7);
   const [mois, setMois] = useState(moisCourant);
+  // Vue au mois (par défaut) ou à l'année : la seconde sert à retrouver un virement ancien, ou à
+  // lire une saison entière d'un coup.
+  const [periode, setPeriode] = useState("mois");
+  const [annee, setAnnee] = useState(String(new Date().getFullYear()));
+  const [progres, setProgres] = useState(null);
   const [q, setQ] = useState("");
   const [sens, setSens] = useState("tous");                       // tous | entrees | sorties | rappro
   const [tri, setTri] = useState({ col: "date", dir: "desc" });   // colonne + sens de tri
@@ -5412,22 +5417,37 @@ function Banque({ data = {}, persist, go }) {
   };
   useEffect(() => { charger(); }, []);
 
-  const bornes = (m) => {
-    if (!m) return {};
-    const [a, mm] = m.split("-").map(Number);
-    const fin = new Date(Date.UTC(a, mm, 0)).toISOString().slice(0, 10);
-    return { du: m + "-01", au: fin };
+  // Bornes de la période lue : un mois, ou une année entière.
+  const bornes = () => {
+    if (periode === "annee") return { du: annee + "-01-01", au: annee + "-12-31" };
+    if (!mois) return {};
+    const [a, mm] = mois.split("-").map(Number);
+    return { du: mois + "-01", au: new Date(Date.UTC(a, mm, 0)).toISOString().slice(0, 10) };
   };
+  // Qonto sert 100 transactions par page. On lisait la PREMIÈRE seulement : au-delà, les totaux du
+  // mois — entrées, sorties, solde — étaient calculés sur un extrait et donc faux, sans que rien ne
+  // le signale. Toutes les pages sont désormais lues, jusqu'à un plafond ; s'il est atteint, la
+  // troncature est annoncée noir sur blanc plutôt que devinée.
+  const MAX_PAGES = 25;
   const chargerTx = async () => {
     if (!compte) return;
-    setBusy(true); setErr(null);
+    setBusy(true); setErr(null); setProgres(null);
     try {
-      const d = await qontoApi("transactions", { compte, ...bornes(mois) });
-      setTx(d.transactions || []); setMeta({ page: d.page, pages: d.pages, total: d.total });
+      const b = bornes();
+      const d1 = await qontoApi("transactions", { compte, ...b, page: 1 });
+      let toutes = d1.transactions || [];
+      const pages = Math.min(d1.pages || 1, MAX_PAGES);
+      for (let pg = 2; pg <= pages; pg++) {
+        setProgres({ page: pg, pages });
+        const d = await qontoApi("transactions", { compte, ...b, page: pg });
+        toutes = toutes.concat(d.transactions || []);
+      }
+      setTx(toutes);
+      setMeta({ total: d1.total, pages: d1.pages || 1, lues: pages, tronque: (d1.pages || 1) > MAX_PAGES });
     } catch (e) { setErr((e && e.message) || String(e)); setTx([]); setMeta(null); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setProgres(null); }
   };
-  useEffect(() => { if (compte) chargerTx(); }, [compte, mois]);
+  useEffect(() => { if (compte) chargerTx(); }, [compte, mois, annee, periode]);
 
   const cpt = (comptes || []).find((c) => c.id === compte) || null;
 
@@ -5480,6 +5500,9 @@ function Banque({ data = {}, persist, go }) {
   // Douze derniers mois : au-delà, on saisit la date à la main plutôt que de dérouler une liste sans fin.
   const moisOptions = Array.from({ length: 12 }, (_, i) => { const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - i); return d.toISOString().slice(0, 7); });
   const moisLabel = (m) => { const [a, mm] = m.split("-"); return ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"][Number(mm) - 1] + " " + a; };
+  // Cinq exercices en arrière : au-delà, la banque elle-même n'archive plus grand-chose.
+  const anneeOptions = Array.from({ length: 5 }, (_, i) => String(new Date().getFullYear() - i));
+  const libellePeriode = periode === "annee" ? annee : moisLabel(mois);
 
   if (comptes && comptes.length === 0 && err) return (<div className="fade">
     <div className="card" style={{ borderLeft: "4px solid var(--red)" }}>
@@ -5505,8 +5528,13 @@ function Banque({ data = {}, persist, go }) {
           {(!comptes || !comptes.length) && <option value="">—</option>}
         </select>
       </div>
-      <div className="fld" style={{ minWidth: 170, marginBottom: 0 }}><label>Mois</label>
-        <select value={mois} onChange={(e) => setMois(e.target.value)}>{moisOptions.map((m) => <option key={m} value={m}>{moisLabel(m)}</option>)}</select>
+      <div className="fld" style={{ minWidth: 110, marginBottom: 0 }}><label>Vue</label>
+        <select value={periode} onChange={(e) => setPeriode(e.target.value)} title="Lire un mois, ou une année entière"><option value="mois">Par mois</option><option value="annee">Par année</option></select>
+      </div>
+      <div className="fld" style={{ minWidth: 170, marginBottom: 0 }}><label>{periode === "annee" ? "Année" : "Mois"}</label>
+        {periode === "annee"
+          ? <select value={annee} onChange={(e) => setAnnee(e.target.value)}>{anneeOptions.map((a) => <option key={a} value={a}>{a}</option>)}</select>
+          : <select value={mois} onChange={(e) => setMois(e.target.value)}>{moisOptions.map((m) => <option key={m} value={m}>{moisLabel(m)}</option>)}</select>}
       </div>
       <div className="fld" style={{ minWidth: 200, marginBottom: 0, flex: 1 }}><label>Rechercher</label>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Libellé, tiers, référence ou montant…" />
@@ -5527,9 +5555,9 @@ function Banque({ data = {}, persist, go }) {
 
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginBottom: 14 }}>
       <KpiTile label="Solde du compte" value={cpt ? eur2(cpt.solde) : "—"} state={cpt ? "ok" : "todo"} color="var(--blue)" note={orga ? orga.nom : ""} />
-      <KpiTile label={"Entrées · " + moisLabel(mois)} value={eur2(entrees)} state={tx ? "ok" : "todo"} color="var(--green)" />
-      <KpiTile label={"Sorties · " + moisLabel(mois)} value={eur2(sorties)} state={tx ? "ok" : "todo"} color="var(--red)" />
-      <KpiTile label="Solde du mois" value={eur2(entrees + sorties)} state={tx ? "ok" : "todo"} color={entrees + sorties >= 0 ? "var(--green)" : "var(--red)"} note={liste.length + " transaction(s)"} />
+      <KpiTile label={"Entrées · " + libellePeriode} value={eur2(entrees)} state={tx ? "ok" : "todo"} color="var(--green)" />
+      <KpiTile label={"Sorties · " + libellePeriode} value={eur2(sorties)} state={tx ? "ok" : "todo"} color="var(--red)" />
+      <KpiTile label={periode === "annee" ? "Solde de l'année" : "Solde du mois"} value={eur2(entrees + sorties)} state={tx ? "ok" : "todo"} color={entrees + sorties >= 0 ? "var(--green)" : "var(--red)"} note={liste.length + " transaction(s)"} />
     </div>
 
     {aTraiter.length > 0 && (<div className="card" style={{ marginBottom: 14, borderLeft: "4px solid var(--green, #2bb673)" }}>
@@ -5555,8 +5583,8 @@ function Banque({ data = {}, persist, go }) {
 
     <div className="card">
       <div className="sec-h"><h3 className="pu-display">Transactions</h3><span>{meta && meta.total > liste.length ? liste.length + " affichée(s) sur " + meta.total : liste.length + " transaction(s)"}</span></div>
-      {!tx ? <div className="empty">{busy ? "Lecture du compte…" : "Choisissez un compte."}</div>
-        : liste.length === 0 ? <div className="empty">Aucune transaction sur {moisLabel(mois)}{q || sens !== "tous" ? " pour cette recherche" : ""}.</div>
+      {!tx ? <div className="empty">{busy ? ("Lecture du compte…" + (progres ? " page " + progres.page + " sur " + progres.pages : "")) : "Choisissez un compte."}</div>
+        : liste.length === 0 ? <div className="empty">Aucune transaction sur {libellePeriode}{q || sens !== "tous" ? " pour cette recherche" : ""}.</div>
         : <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><Th col="date">Date</Th><Th col="tiers">Tiers</Th><Th col="libelle">Libellé</Th><Th col="type">Type</Th><Th col="montant" right>Montant</Th></tr></thead><tbody>
           {liste.map((t) => { const r = rapproParTx[t.id]; const cn = connuParTx[t.id]; return (<tr key={t.id} className="hrow"
             /* Une transaction rattachée à un établissement du fichier se repère à son filet bleu et
@@ -5574,7 +5602,8 @@ function Banque({ data = {}, persist, go }) {
             <td className="tnum" style={{ textAlign: "right", fontWeight: 800, whiteSpace: "nowrap", color: t.montant >= 0 ? "var(--green)" : "var(--ink)" }}>{t.montant >= 0 ? "+" : ""}{eur2(t.montant)}</td>
           </tr>); })}
         </tbody></table></div>}
-      {meta && meta.pages > 1 && <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 10 }}>Page {meta.page} sur {meta.pages} — seules les 100 transactions les plus récentes du mois sont affichées.</div>}
+      {meta && meta.tronque && <div style={{ fontSize: 11.5, color: "var(--red)", fontWeight: 700, marginTop: 10 }}>Période trop chargée : seules les {meta.lues * 100} transactions les plus récentes ont été lues, sur {meta.total}. Les totaux ci-dessus ne portent donc que sur cet extrait — resserrez la période pour un compte exact.</div>}
+      {meta && !meta.tronque && meta.pages > 1 && <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 10 }}>{meta.total} transaction(s) lues en {meta.pages} pages : la période entière est prise en compte dans les totaux.</div>}
     </div>
     <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 12, lineHeight: 1.5 }}>Lecture seule. Aucune transaction n'est enregistrée dans MITMIT : les données sont relues chez Qonto à chaque affichage, et les identifiants restent côté serveur.</div>
   </div>);
