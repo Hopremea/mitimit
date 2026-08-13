@@ -8675,6 +8675,7 @@ async function bonCommandeApi(suffixe, opts) {
 }
 const bonCommandeListe = (tous) => bonCommandeApi("&list=1" + (tous ? "&tous=1" : ""));
 const bonCommandeClore = (id, deal) => bonCommandeApi("", { method: "POST", body: JSON.stringify({ action: "traite", id, dealId: deal ? deal.id : "", dealRef: deal ? deal.ref : "" }) });
+const bonCommandeSupprimer = (id) => bonCommandeApi("", { method: "POST", body: JSON.stringify({ action: "supprimer", id }) });
 
 // Rapprochement d'une commande reçue avec une fiche existante. Le client déclare ses coordonnées
 // librement : on cherche d'abord le SIRET (le plus sûr), puis le courriel d'un contact ou d'un
@@ -8847,6 +8848,38 @@ function CommandesEnLigne({ data, persist, go }) {
     finally { setBusy(false); }
   };
   const copier = () => { try { navigator.clipboard.writeText(lien); setCopie(true); setTimeout(() => setCopie(false), 2200); } catch (e) {} };
+  // Effacer une commande reçue — une commande d'essai, une saisie erronée. Le devis qu'elle a
+  // produit part avec elle, ainsi que l'échange qui en gardait la trace ; l'un et l'autre passent
+  // par la corbeille, donc restent récupérables trente jours.
+  //
+  // Un devis déjà travaillé (envoyé, accepté, facturé) n'est PAS supprimé : il a une vie propre
+  // désormais, et l'effacer effacerait un engagement pris. Seule la ligne du journal disparaît, et
+  // le message le dit. Les fiches créées à la réception (compte, établissement, contact) restent
+  // elles aussi : elles peuvent déjà servir ailleurs, et se suppriment à la main si besoin.
+  const supprimer = async (c) => {
+    const deal = (data.deals || []).find((d) => d.bonCommandeId === c.id || (c.deal_id && d.id === c.deal_id));
+    const brouillon = deal && deal.statut === "brouillon";
+    const question = deal
+      ? (brouillon
+        ? "Supprimer la commande " + c.ref + " et le devis brouillon " + deal.ref + " qu'elle a créé ? Les deux partent à la corbeille, récupérables 30 jours."
+        : "Le devis " + deal.ref + " n'est plus un brouillon (" + ((DEAL_STATUS[deal.statut] || {}).label || deal.statut) + ") : il sera CONSERVÉ. Seule la commande " + c.ref + " disparaîtra du journal. Continuer ?")
+      : "Supprimer la commande " + c.ref + " du journal ?";
+    if (!(await appConfirm(question, { title: "Supprimer cette commande reçue ?", confirmLabel: "Supprimer" }))) return;
+    setBusy(true); setMsg("");
+    try {
+      await bonCommandeSupprimer(c.id);
+      if (deal && brouillon) {
+        persist((p) => ({
+          ...p,
+          deals: (p.deals || []).filter((d) => d.id !== deal.id),
+          interactions: (p.interactions || []).filter((i) => !(i.sujet && c.ref && i.sujet.indexOf(c.ref) >= 0)),
+        }));
+      }
+      setMsg(deal && brouillon ? ("Commande " + c.ref + " et devis " + deal.ref + " supprimés (corbeille).") : ("Commande " + c.ref + " retirée du journal."));
+      await charger();
+    } catch (e) { setMsg("Suppression impossible (" + (e.message || e) + ")."); }
+    finally { setBusy(false); }
+  };
   const enAttente = (liste || []).filter((c) => c.statut === "nouveau").length;
   return (<div className="card" style={{ marginBottom: 14, padding: 0, overflow: "hidden" }}>
     <div onClick={() => setOuvert((o) => !o)} style={{ cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "11px 14px" }}>
@@ -8866,13 +8899,14 @@ function CommandesEnLigne({ data, persist, go }) {
       {msg && <div style={{ fontSize: 12.5, fontWeight: 700, color: msg.startsWith("Aucune") ? "var(--muted)" : (/impossible|indisponible/.test(msg) ? "var(--red, #FF5A45)" : "var(--green, #2bb673)"), marginBottom: 10 }}>{msg}</div>}
       {liste === null ? <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Chargement…</div>
         : liste.length === 0 ? <div className="empty">Aucune commande reçue pour l'instant.</div>
-          : <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Reçue le</th><th>Référence</th><th>Client déclaré</th><th style={{ textAlign: "right" }}>Total HT</th><th>Devis créé</th></tr></thead><tbody>
+          : <div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Reçue le</th><th>Référence</th><th>Client déclaré</th><th style={{ textAlign: "right" }}>Total HT</th><th>Devis créé</th><th></th></tr></thead><tbody>
             {liste.map((c) => { const cl = c.client || {}; return (<tr key={c.id}>
               <td className="tnum">{(c.created_at || "").slice(0, 10)}</td>
               <td style={{ fontWeight: 700 }}>{c.ref}</td>
               <td>{cl.raisonSociale || cl.enseigne || "—"}<div style={{ fontSize: 11, color: "var(--muted)" }}>{[cl.contact, cl.email].filter(Boolean).join(" · ")}</div></td>
               <td style={{ textAlign: "right", fontWeight: 700 }} className="tnum">{eur(c.total_ht)}</td>
               <td>{c.deal_ref ? <span className="lnk" onClick={() => go && go("deals", c.deal_id)}>{c.deal_ref}</span> : <Badge color="#F8B133">En attente</Badge>}</td>
+              <td style={{ textAlign: "right" }}><button className="iconbtn" style={{ color: "var(--red)" }} title="Supprimer cette commande et le devis brouillon qu'elle a créé" onClick={() => supprimer(c)} disabled={busy}><Trash2 size={15} /></button></td>
             </tr>); })}
           </tbody></table></div>}
     </div>}

@@ -14,9 +14,42 @@
     <meta name="theme-color" content="#3F60AA" />
     <meta name="color-scheme" content="light dark" />
     <title>MITMIT · Cockpit PEN'UP 3D</title>
+    <!-- Écran d'attente du tout premier instant : il s'affiche AVANT que le programme ne démarre,
+         donc en HTML et CSS seuls — à ce moment-là, ni React ni la feuille de style de
+         l'application n'existent encore, et l'écran restait désespérément vide le temps de charger
+         le programme. React remplace le contenu de #root en s'installant : l'écran disparaît de
+         lui-même, sans une ligne de code pour l'enlever. -->
+    <style>
+      #demarrage{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;background:#fff8ea;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;}
+      #demarrage .bobines{width:120px;height:120px;animation:mit-tournoie 1.6s linear infinite;transform-origin:50% 50%;}
+      @keyframes mit-tournoie{to{transform:rotate(360deg);}}
+      #demarrage .nom{font-weight:800;font-size:17px;letter-spacing:.16em;color:#3F60AA;}
+      #demarrage .txt{font-size:12.5px;font-weight:600;color:#8b8578;margin-top:-12px;}
+      @media(prefers-color-scheme:dark){#demarrage{background:#14182a;}#demarrage .nom{color:#8ea6e0;}#demarrage .txt{color:#79809a;}}
+      @media(prefers-reduced-motion:reduce){#demarrage .bobines{animation:none;}}
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="demarrage" role="status" aria-label="Chargement du cockpit MITMIT">
+        <!-- Trois bobines Fil'Up entrelacées, aux couleurs du lot Nature. -->
+        <svg class="bobines" viewBox="0 0 130 130" aria-hidden="true">
+          <defs>
+            <g id="mit-bobine">
+              <circle r="26" fill="none" stroke-width="13" />
+              <circle r="26" fill="none" stroke-width="13" stroke-dasharray="2 5" stroke-opacity=".38" stroke="#fff" />
+            </g>
+          </defs>
+          <g transform="translate(65 65)">
+            <use href="#mit-bobine" x="27" stroke="#2BA8DC" />
+            <use href="#mit-bobine" x="0" stroke="#8B5A3C" />
+            <use href="#mit-bobine" x="-27" stroke="#3FA85F" />
+          </g>
+        </svg>
+        <div class="nom">MITMIT</div>
+        <div class="txt">Chargement du poste de pilotage…</div>
+      </div>
+    </div>
     <noscript style="display:block;max-width:460px;margin:14vh auto;padding:24px;font-family:system-ui,sans-serif;color:#16203a;text-align:center;line-height:1.55;">
       <strong>JavaScript est requis.</strong><br />Le cockpit MITMIT a besoin de JavaScript pour fonctionner. Activez-le dans votre navigateur, puis rechargez la page.
     </noscript>
