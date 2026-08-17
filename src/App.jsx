@@ -14,7 +14,7 @@ import {
   Clock, Hourglass, Flame, Trophy, Award, Coffee,
   GitBranch, Save, FileDown, ArrowDown, ArrowUp, Undo2,
   Globe, Facebook, Instagram, Menu, Home,
-  Landmark,
+  Landmark, SquareDashedMousePointer, Route,
   Filter as FunnelIcon, PieChart as PieIcon
 } from "lucide-react";
 import {
@@ -9271,7 +9271,22 @@ function Carte({ data, persist, go, focus }) {
   // globale siteQuery(s, enseigne), appelée plus bas pour le lien Google Maps de la fiche — l'ombre
   // faisait planter tout l'onglet (« siteQuery is not a function ») dès qu'un site était sélectionné.
   const [siteRecherche, setSiteRecherche] = useVue("carte", "siteRecherche", "");
+  // Liste latérale restreinte aux fiches sans coordonnées : elles n'apparaissent nulle part sur la
+  // carte, c'est le seul endroit d'où l'on peut les voir et les rattraper.
+  const [listeAGeo, setListeAGeo] = useVue("carte", "listeAGeo", false);
+  // Fond de carte : plan lisible (rues, noms de commerces) ou imagerie satellite.
+  const [fondPlan, setFondPlan] = useVue("carte", "fondPlan", false);
+  // Dernier cadrage : centre et zoom, restitués au retour sur l'onglet.
+  const [cadrage, setCadrage] = useVue("carte", "cadrage", null);
+  // Message fugace « Ctrl + molette pour zoomer », affiché quand on tourne la molette sans Ctrl.
+  const [molette, setMolette] = useState(false);
   const mapEl = useRef(null); const mapInst = useRef(null); const markersLayer = useRef(null); const routesLayer = useRef(null); const roadsLayer = useRef(null);
+  const satLayer = useRef(null); const labelsLayer = useRef(null); const planLayer = useRef(null);
+  // Sélection rectangulaire : couche du tracé, mode actif, et fiches retenues.
+  const zoneLayer = useRef(null);
+  const [zoneMode, setZoneMode] = useState(false); const [zone, setZone] = useVue("carte", "zone", null);
+  // Géolocalisation en lot des fiches sans coordonnées.
+  const [geoBusy, setGeoBusy] = useState(false); const [geoMsg, setGeoMsg] = useState(null);
   // Isochrone : polygone « à moins de N minutes » + fiches qu'il contient.
   const isoLayer = useRef(null);
   // Analyse de secteurs : départements colorés selon la part de clients facturés parmi les fiches
@@ -9284,10 +9299,25 @@ function Carte({ data, persist, go, focus }) {
   const [mapReady, setMapReady] = useState(false);
   const [LF, setLF] = useState(null);
   // Leaflet (≈ 150 Ko) est chargé à la demande, uniquement à l'ouverture de la carte :
-  // il n'alourdit donc pas le démarrage des autres onglets.
+  // il n'alourdit donc pas le démarrage des autres onglets. Le regroupement de marqueurs
+  // (markercluster) s'installe SUR Leaflet : il doit donc être importé après lui, jamais en
+  // parallèle, sinon il ne trouve pas la bibliothèque qu'il vient compléter.
   useEffect(() => {
     let on = true;
-    Promise.all([import("leaflet"), import("leaflet/dist/leaflet.css")]).then(([mod]) => { if (on) setLF(mod.default || mod); }).catch(() => { });
+    (async () => {
+      try {
+        const mod = await import("leaflet");
+        const L = mod.default || mod;
+        await import("leaflet/dist/leaflet.css");
+        try {
+          window.L = L; // markercluster s'accroche au L global quand il en trouve un
+          await import("leaflet.markercluster");
+          await import("leaflet.markercluster/dist/MarkerCluster.css");
+          await import("leaflet.markercluster/dist/MarkerCluster.Default.css");
+        } catch (e) { /* sans regroupement, la carte reste utilisable : un marqueur par fiche */ }
+        if (on) setLF(L);
+      } catch (e) { }
+    })();
     return () => { on = false; };
   }, []);
   // ===== Isochrone : « qui est à moins de N minutes d'ici ? » =====
@@ -9303,6 +9333,13 @@ function Carte({ data, persist, go, focus }) {
     return dedans;
   };
   const effacerIso = () => { try { isoLayer.current && isoLayer.current.clearLayers(); } catch (e) {} setIsoMsg(null); };
+  // Fiches d'une zone, mises en forme pour la liste et pour « en faire une tournée ». Les
+  // établissements internes (siège, entrepôt, usine) sont écartés : on ne se rend pas en visite
+  // commerciale chez soi.
+  const fichesDeZone = (garde) => ({
+    sites: liveSites.filter((x) => x.lat != null && x.lng != null && x.type !== "penup" && x.type !== "entrepot" && x.type !== "usine" && garde(x.lat, x.lng)),
+    prospects: (prospects || []).filter((x) => !x.archived && x.lat != null && x.lng != null && garde(x.lat, x.lng)),
+  });
   const lancerIso = async (lat, lng, depuis) => {
     if (!LF || !mapInst.current) return;
     setIsoBusy(true); setIsoMsg(null);
@@ -9316,12 +9353,27 @@ function Carte({ data, persist, go, focus }) {
       isoLayer.current.clearLayers();
       // GeoJSON est en [lng, lat] ; Leaflet attend [lat, lng].
       LF.polygon(anneau.map((c) => [c[1], c[0]]), { color: "#7c5cf0", weight: 2, fillColor: "#7c5cf0", fillOpacity: 0.12 }).addTo(isoLayer.current);
-      const dedansSites = (data.sites || []).filter((x) => x.lat != null && x.lng != null && pointDansPolygone(x.lat, x.lng, anneau));
-      const dedansProspects = (data.prospects || []).filter((x) => !x.archived && x.lat != null && x.lng != null && pointDansPolygone(x.lat, x.lng, anneau));
-      setIsoMsg({ ok: true, t: isoMin + " min autour de " + depuis + " : " + dedansSites.length + " établissement(s) et " + dedansProspects.length + " prospect(s) géolocalisé(s) dans la zone." });
+      const dans = fichesDeZone((la, ln) => pointDansPolygone(la, ln, anneau));
+      setIsoMsg({ ok: true, t: isoMin + " min en voiture autour de " + depuis + " :", ...dans });
     } catch (e) {
-      setIsoMsg({ ok: false, t: String((e && e.message) || e) });
+      // Sans clé OpenRouteService, le calcul routier est impossible. Plutôt que de laisser
+      // l'utilisateur sans rien, on retombe sur un cercle à vol d'oiseau — nettement moins juste
+      // (il ignore les routes et les reliefs), ce que le message dit franchement.
+      const msg = String((e && e.message) || e);
+      if (/ORS_API_KEY/i.test(msg)) { zoneCercle(lat, lng, depuis); return; }
+      setIsoMsg({ ok: false, t: msg });
     } finally { setIsoBusy(false); }
+  };
+  // Repli : cercle « à vol d'oiseau » dimensionné sur une moyenne de 55 km/h porte à porte.
+  const zoneCercle = (lat, lng, depuis) => {
+    const rayonKm = Math.round(isoMin * 55 / 60);
+    try {
+      isoLayer.current.clearLayers();
+      LF.circle([lat, lng], { radius: rayonKm * 1000, color: "#7c5cf0", weight: 2, dashArray: "5 4", fillColor: "#7c5cf0", fillOpacity: 0.08 }).addTo(isoLayer.current);
+    } catch (e) {}
+    const dans = fichesDeZone((la, ln) => { const d = distanceKm(lat, lng, la, ln); return d != null && d <= rayonKm; });
+    setIsoMsg({ ok: true, approx: true, t: "Environ " + rayonKm + " km à vol d'oiseau autour de " + depuis + " (zone routière indisponible : clé OpenRouteService absente) :", ...dans });
+    setIsoBusy(false);
   };
   // Isochrone depuis la position réelle de l'utilisateur (tournée improvisée).
   const isoDepuisMoi = () => {
@@ -9387,7 +9439,12 @@ function Carte({ data, persist, go, focus }) {
   // est actif. Ce sont des fiches encore non converties (pas de compte rattaché), qu'on géolocalise à la
   // demande depuis leur adresse pour les positionner à côté des établissements déjà enregistrés.
   const showProspects = filtStage.includes("prospect");
-  const activeProspects = useMemo(() => showProspects ? (prospects || []).filter((p) => !p.archived && !p.accountId && p.statut !== "converti" && (p.nom || p.enseigne || "").trim()) : [], [showProspects, prospects]);
+  // Le filtre « Rattachement » s'applique aussi aux prospects : leur nature commerciale dit à quel
+  // titre ils achètent — via une centrale (coopérative, chaîne, franchise) ou pour eux-mêmes. Le
+  // filtre « Type de surface », lui, ne peut pas les concerner : un prospect n'a pas encore été
+  // qualifié sur ce point, il n'a donc rien à comparer et reste affiché.
+  const prospectCat = (p) => (p.type === "cooperative" || p.type === "chaine" || p.type === "franchise") ? "groupe" : "independant";
+  const activeProspects = useMemo(() => showProspects ? (prospects || []).filter((p) => !p.archived && !p.accountId && p.statut !== "converti" && (p.nom || p.enseigne || "").trim() && (filtCat.length === 0 || filtCat.includes(prospectCat(p)))) : [], [showProspects, prospects, filtCat]);
   const prospPlaced = activeProspects.filter((p) => p.lat != null && p.lng != null);
   // Géocodage paresseux des prospects visibles sans coordonnées (BAN), séquentiel et mémorisé dans la
   // fiche pour ne le faire qu'une fois. On mémorise aussi les tentatives échouées le temps de la session.
@@ -9408,20 +9465,119 @@ function Carte({ data, persist, go, focus }) {
     })();
     return () => { cancelled = true; };
   }, [showProspects, activeProspects.length]);
-  // Mode tournée : ordonne les établissements visibles au plus proche voisin depuis l'entrepôt et ouvre l'itinéraire Google Maps.
-  const runTournee = () => {
-    const stops = shown.filter((s) => s.lat && s.lng && s.type !== "penup" && s.type !== "entrepot" && s.type !== "usine");
-    if (stops.length < 1) { alert("Aucun établissement géolocalisé dans la sélection à visiter. Ajustez les filtres ou géolocalisez les fiches."); return; }
-    const start = entrepot && entrepot.lat ? entrepot : stops[0];
-    let remaining = stops.slice(); const order = []; let cur = start;
-    while (remaining.length) { let bi = 0, bd = Infinity; remaining.forEach((s, i) => { const d = distanceKm(cur.lat, cur.lng, s.lat, s.lng); if (d != null && d < bd) { bd = d; bi = i; } }); cur = remaining[bi]; order.push(cur); remaining.splice(bi, 1); }
-    setTourneeOrder(order);
-    const limited = order.slice(0, 9);
-    const origin = (entrepot && entrepot.lat) ? `${entrepot.lat},${entrepot.lng}` : `${limited[0].lat},${limited[0].lng}`;
-    const dest = `${limited[limited.length - 1].lat},${limited[limited.length - 1].lng}`;
-    const way = limited.slice(0, limited.length - 1).map((s) => `${s.lat},${s.lng}`).join("|");
-    window.open(`https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}${way ? "&waypoints=" + encodeURIComponent(way) : ""}&travelmode=driving`, "_blank");
+  // Établissements sans coordonnées : ils n'existent nulle part sur la carte. Jusqu'ici l'en-tête
+  // les comptait sans offrir le moyen de les rattraper — un site n'était géocodé qu'à sa création.
+  const aGeolocaliser = liveSites.filter((s) => (s.lat == null || s.lng == null) && (s.adresse || "").trim());
+  const geolocaliserRestants = async () => {
+    if (!aGeolocaliser.length || geoBusy) return;
+    setGeoBusy(true); setGeoMsg({ ok: true, t: "Géolocalisation en cours (0 / " + aGeolocaliser.length + ")…" });
+    let trouves = 0, echecs = [];
+    for (let i = 0; i < aGeolocaliser.length; i++) {
+      const st = aGeolocaliser[i];
+      try {
+        const g = await geocodeAdresse(st.adresse);
+        if (g) { trouves++; persist((d) => ({ ...d, sites: (d.sites || []).map((x) => x.id === st.id ? { ...x, lat: g.lat, lng: g.lng } : x) })); }
+        else echecs.push(st.label || "sans nom");
+      } catch (e) { echecs.push(st.label || "sans nom"); }
+      setGeoMsg({ ok: true, t: "Géolocalisation en cours (" + (i + 1) + " / " + aGeolocaliser.length + ")…" });
+      // La Base Adresse Nationale est gratuite et sans clé : on espace les appels par courtoisie.
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    setGeoBusy(false);
+    setGeoMsg({ ok: echecs.length === 0, t: trouves + " établissement(s) placé(s) sur la carte." + (echecs.length ? " Adresse non reconnue pour " + echecs.length + " fiche(s) : " + echecs.slice(0, 4).join(", ") + (echecs.length > 4 ? "…" : "") + ". Corrigez l'adresse dans la fiche, puis relancez." : "") });
   };
+  // ===== Tournée =====
+  // Matrice des trajets réels entre tous les arrêts, en UN seul appel à OSRM (service « table »).
+  // Au-delà d'une soixantaine de points le serveur public refuse : on retombe alors sur les
+  // distances à vol d'oiseau, ce que l'affichage signale.
+  const matriceOSRM = async (pts) => {
+    if (pts.length < 2 || pts.length > 60) return null;
+    const coords = pts.map((p) => p.lng + "," + p.lat).join(";");
+    const r = await fetch("https://router.project-osrm.org/table/v1/driving/" + coords + "?annotations=duration,distance");
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (!j || j.code !== "Ok" || !j.durations || !j.distances) return null;
+    return { dur: j.durations, dist: j.distances };
+  };
+  // Ordre de visite. Le plus proche voisin donne un premier parcours honnête mais typiquement 15 à
+  // 25 % trop long : il s'engage dans un choix local qu'il ne remet jamais en cause, et le trajet
+  // finit par se croiser lui-même. La passe 2-opt reprend ce parcours et retourne tout segment dont
+  // l'inversion raccourcit le total, jusqu'à ce qu'il n'y ait plus rien à gagner — c'est l'essentiel
+  // du rattrapage, pour une vingtaine de lignes. L'indice 0 est le point de départ, imposé.
+  const ordonnerTournee = (n, cout, boucle) => {
+    const reste = []; for (let i = 1; i < n; i++) reste.push(i);
+    const ordre = [0]; let cur = 0;
+    while (reste.length) {
+      let bi = 0, bd = Infinity;
+      reste.forEach((i, k) => { const d = cout(cur, i); if (d < bd) { bd = d; bi = k; } });
+      cur = reste[bi]; ordre.push(cur); reste.splice(bi, 1);
+    }
+    const total = (o) => { let t = 0; for (let i = 0; i < o.length - 1; i++) t += cout(o[i], o[i + 1]); if (boucle && o.length > 1) t += cout(o[o.length - 1], o[0]); return t; };
+    let meilleur = total(ordre), ameliore = true, tours = 0;
+    while (ameliore && tours++ < 40) {
+      ameliore = false;
+      for (let i = 1; i < ordre.length - 1; i++) {
+        for (let j = i + 1; j < ordre.length; j++) {
+          const essai = ordre.slice(0, i).concat(ordre.slice(i, j + 1).reverse(), ordre.slice(j + 1));
+          const t = total(essai);
+          if (t < meilleur - 1e-9) { ordre.splice(0, ordre.length, ...essai); meilleur = t; ameliore = true; }
+        }
+      }
+    }
+    return ordre;
+  };
+  // Google Maps n'accepte que 9 étapes intermédiaires en plus du départ et de l'arrivée : un
+  // itinéraire ne peut donc pas transporter plus de 10 arrêts. Au-delà, on découpe, et on le dit.
+  const GMAPS_ARRETS = 10;
+  const ouvrirGmaps = (arrets, depart) => {
+    if (!arrets.length) return;
+    const pos = (x) => x.lat + "," + x.lng;
+    const origin = pos(depart || arrets[0]);
+    const suite = depart ? arrets : arrets.slice(1);
+    if (!suite.length) { window.open("https://www.google.com/maps/dir/?api=1&origin=" + origin + "&destination=" + origin + "&travelmode=driving", "_blank"); return; }
+    const dest = pos(suite[suite.length - 1]);
+    const way = suite.slice(0, -1).map(pos).join("|");
+    window.open("https://www.google.com/maps/dir/?api=1&origin=" + origin + "&destination=" + dest + (way ? "&waypoints=" + encodeURIComponent(way) : "") + "&travelmode=driving", "_blank");
+  };
+  const [tourneeBusy, setTourneeBusy] = useState(false);
+  // Construit une tournée à partir d'une liste d'établissements (les visibles, ceux d'une zone…).
+  const construireTournee = async (stops, origine) => {
+    if (!stops.length) { setTourneeOrder({ vide: true, origine }); return; }
+    setTourneeBusy(true);
+    try {
+      const depot = entrepot && entrepot.lat != null ? entrepot : null;
+      const pts = depot ? [depot, ...stops] : stops;
+      let mat = null; try { mat = await matriceOSRM(pts); } catch (e) { }
+      // À défaut de matrice routière, la distance à vol d'oiseau suffit à ordonner les arrêts :
+      // elle se trompe sur les kilomètres, rarement sur l'ordre.
+      const cout = mat ? (i, j) => mat.dur[i][j] : (i, j) => distanceKm(pts[i].lat, pts[i].lng, pts[j].lat, pts[j].lng) || 0;
+      const ordre = ordonnerTournee(pts.length, cout, !!depot);
+      const etapes = []; let totalKm = 0, totalMin = 0;
+      for (let k = 1; k < ordre.length; k++) {
+        const a = ordre[k - 1], b = ordre[k]; const st = pts[b];
+        const km = mat ? mat.dist[a][b] / 1000 : distanceKm(pts[a].lat, pts[a].lng, st.lat, st.lng);
+        const min = mat ? mat.dur[a][b] / 60 : null;
+        totalKm += km || 0; totalMin += min || 0;
+        etapes.push({ id: st.id, label: st.label || "Établissement", lat: st.lat, lng: st.lng, km, min });
+      }
+      let retour = null;
+      if (depot && ordre.length > 1) {
+        const a = ordre[ordre.length - 1];
+        const km = mat ? mat.dist[a][0] / 1000 : distanceKm(pts[a].lat, pts[a].lng, depot.lat, depot.lng);
+        const min = mat ? mat.dur[a][0] / 60 : null;
+        totalKm += km || 0; totalMin += min || 0;
+        retour = { km, min };
+      }
+      const arrets = depot ? etapes : [{ id: pts[ordre[0]].id, label: pts[ordre[0]].label || "Établissement", lat: pts[ordre[0]].lat, lng: pts[ordre[0]].lng, km: null, min: null }, ...etapes];
+      const tour = { arrets, retour, totalKm, totalMin: mat ? totalMin : null, reel: !!mat, depart: depot ? (depot.label || "l'entrepôt") : null, origine, transmis: Math.min(arrets.length, GMAPS_ARRETS) };
+      setTourneeOrder(tour);
+      ouvrirGmaps(arrets.slice(0, GMAPS_ARRETS), depot);
+    } finally { setTourneeBusy(false); }
+  };
+  // Tournée des établissements actuellement affichés (donc filtres compris).
+  const runTournee = () => construireTournee(shown.filter((s) => s.lat && s.lng && s.type !== "penup" && s.type !== "entrepot" && s.type !== "usine"), "les établissements affichés");
+  // Ouvre la portion d'itinéraire que Google Maps n'a pas pu recevoir du premier coup.
+  const ouvrirSuiteTournee = (depuis) => { const t = tourneeOrder; if (!t || !t.arrets) return; ouvrirGmaps(t.arrets.slice(depuis, depuis + GMAPS_ARRETS), null); };
   // « Autour de moi » : géolocalisation de l'appareil + établissements/prospects les plus proches.
   const aroundMe = () => {
     if (!navigator.geolocation) { setMeMsg({ ok: false, t: "Géolocalisation non disponible sur cet appareil." }); return; }
@@ -9462,26 +9618,49 @@ function Carte({ data, persist, go, focus }) {
   // La couche « Boundaries & Places » ajoute les noms de villes/pays par-dessus (rendu hybride type Google).
   useEffect(() => {
     if (!LF || !mapEl.current || mapInst.current) return;
-    const map = LF.map(mapEl.current, { zoomControl: false, attributionControl: true, worldCopyJump: true, scrollWheelZoom: false, preferCanvas: true, zoomSnap: 0.5, zoomDelta: 0.5, wheelDebounceTime: 40 }).setView([46.6, 2.4], 6);
-    LF.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, maxNativeZoom: 19, attribution: "Imagerie © Esri, Maxar, Earthstar Geographics" }).addTo(map);
-    LF.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, maxNativeZoom: 19 }).addTo(map);
+    // Le cadrage de la visite précédente est restitué : sans lui, la carte revenait sur la France
+    // entière à chaque aller-retour entre onglets, et il fallait refaire le trajet à la main.
+    const depart = cadrage && Array.isArray(cadrage.c) ? cadrage : { c: [46.6, 2.4], z: 6 };
+    const map = LF.map(mapEl.current, { zoomControl: false, attributionControl: true, worldCopyJump: true, scrollWheelZoom: false, preferCanvas: true, zoomSnap: 0.5, zoomDelta: 0.5, wheelDebounceTime: 40 }).setView(depart.c, depart.z);
+    // Deux fonds au choix. L'imagerie satellite montre le bâti et les parkings ; le plan, lui,
+    // nomme les rues et les commerces — indispensable pour préparer une visite.
+    satLayer.current = LF.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, maxNativeZoom: 19, attribution: "Imagerie © Esri, Maxar, Earthstar Geographics" });
+    labelsLayer.current = LF.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, maxNativeZoom: 19 });
+    planLayer.current = LF.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", { maxZoom: 20, maxNativeZoom: 20, subdomains: "abcd", attribution: "© OpenStreetMap, © CARTO" });
     // Couche routière (autoroutes & grands axes) superposée à l'imagerie : rendu hybride type Google Maps.
     // Stockée dans une ref pour pouvoir l'afficher/masquer via le bouton « Axes routiers ».
     roadsLayer.current = LF.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, maxNativeZoom: 19 });
-    if (showRoads) roadsLayer.current.addTo(map);
+    // Le fond est posé DÈS L'INITIALISATION, et pas seulement par l'effet qui suit : une carte sans
+    // aucune couche n'a pas de zoom maximal, et le regroupement de marqueurs, qui a besoin de cette
+    // borne pour savoir à partir de quel niveau se déplier, refusait de se construire.
+    (fondPlan ? planLayer.current : satLayer.current).addTo(map);
+    if (!fondPlan) { labelsLayer.current.addTo(map); if (showRoads) roadsLayer.current.addTo(map); }
     LF.control.zoom({ position: "topright" }).addTo(map);
     LF.control.scale({ imperial: false, metric: true, position: "bottomleft" }).addTo(map);
     routesLayer.current = LF.layerGroup().addTo(map);
-    markersLayer.current = LF.layerGroup().addTo(map);
+    // Regroupement : au-delà d'une poignée de fiches dans la même ville, les marqueurs se
+    // superposent et deviennent tous inatteignables. Le cluster les remplace par une pastille
+    // comptée, qui se rouvre au zoom ou au clic. Si la bibliothèque n'a pas pu être chargée, on
+    // retombe sur un simple groupe de calques : un marqueur par fiche, comme avant.
+    markersLayer.current = (LF.markerClusterGroup ? LF.markerClusterGroup({ maxClusterRadius: 45, disableClusteringAtZoom: 13, spiderfyOnMaxZoom: true, showCoverageOnHover: false, chunkedLoading: true }) : LF.layerGroup()).addTo(map);
     isoLayer.current = LF.layerGroup().addTo(map);
+    zoneLayer.current = LF.layerGroup().addTo(map);
     mapInst.current = map;
     // Zoom molette maîtrisé : exactement UN niveau par cran. Le zoom natif de Leaflet
     // additionne les événements d'un cran (rafale) et saute plusieurs niveaux. On applique
     // un seul pas, puis on VERROUILLE tant que des événements continuent d'arriver : le
     // verrou ne se relâche qu'après 110 ms sans aucun événement (fin réelle du cran), ce qui
     // neutralise les rafales longues (souris/pavés à défilement lissé).
-    let zoomBusy = false; let idleT = null;
+    //
+    // Le zoom exige la touche Ctrl (ou Cmd). Sans elle, la molette laisse la page défiler : la
+    // carte occupe les trois quarts de la hauteur, et l'intercepter revenait à emprisonner le
+    // défilement dès que le pointeur passait dessus.
+    let zoomBusy = false; let idleT = null; let hintT = null;
     const onWheel = (e) => {
+      if (!e.ctrlKey && !e.metaKey) {
+        setMolette(true); clearTimeout(hintT); hintT = setTimeout(() => setMolette(false), 1400);
+        return; // pas de preventDefault : la page défile normalement
+      }
       e.preventDefault();
       clearTimeout(idleT); idleT = setTimeout(() => { zoomBusy = false; }, 110);
       if (zoomBusy) return;
@@ -9492,32 +9671,50 @@ function Carte({ data, persist, go, focus }) {
     };
     const wheelEl = mapEl.current;
     wheelEl.addEventListener("wheel", onWheel, { passive: false });
+    // Mémorisation du cadrage, une fois le déplacement terminé.
+    const onMove = () => { try { const c = map.getCenter(); setCadrage({ c: [c.lat, c.lng], z: map.getZoom() }); } catch (e) { } };
+    map.on("moveend", onMove); map.on("zoomend", onMove);
+    // Clic droit n'importe où : « qui est à moins de N minutes d'ici ? » depuis ce point précis.
+    const onCtx = (e) => { LF.DomEvent.preventDefault(e.originalEvent); lancerIso(e.latlng.lat, e.latlng.lng, "ce point"); };
+    map.on("contextmenu", onCtx);
     setTimeout(() => { try { map.invalidateSize(); } catch (e) { } }, 60);
-    // Au démarrage/rafraîchissement, la carte reste centrée sur la France métropolitaine
-    // (vue initiale [46.6, 2.4] zoom 6) plutôt que recadrée sur les sites. Le bouton « ⤢ »
-    // permet de recadrer sur l'ensemble des sites à la demande.
     setMapReady(true);
-    return () => { clearTimeout(idleT); try { wheelEl.removeEventListener("wheel", onWheel); } catch (e) { } try { map.remove(); } catch (e) { } mapInst.current = null; markersLayer.current = null; routesLayer.current = null; roadsLayer.current = null; setMapReady(false); };
+    return () => { clearTimeout(idleT); clearTimeout(hintT); try { wheelEl.removeEventListener("wheel", onWheel); } catch (e) { } try { map.off("moveend", onMove); map.off("zoomend", onMove); map.off("contextmenu", onCtx); } catch (e) { } try { map.remove(); } catch (e) { } mapInst.current = null; markersLayer.current = null; routesLayer.current = null; roadsLayer.current = null; zoneLayer.current = null; setMapReady(false); };
   }, [LF]);
-  // Bascule d'affichage de la couche des grands axes routiers.
+  // Fond de carte : plan seul, ou imagerie + noms de lieux (+ axes routiers au choix). Le plan
+  // porte déjà ses rues et ses étiquettes, les surcouches n'y ont donc pas leur place.
   useEffect(() => {
-    if (!mapReady || !roadsLayer.current || !mapInst.current) return;
-    if (showRoads) roadsLayer.current.addTo(mapInst.current); else mapInst.current.removeLayer(roadsLayer.current);
-  }, [mapReady, showRoads]);
+    const map = mapInst.current; if (!mapReady || !map) return;
+    const pose = (couche, oui) => { if (!couche) return; if (oui) { if (!map.hasLayer(couche)) couche.addTo(map); } else if (map.hasLayer(couche)) map.removeLayer(couche); };
+    pose(planLayer.current, fondPlan);
+    pose(satLayer.current, !fondPlan);
+    pose(labelsLayer.current, !fondPlan);
+    pose(roadsLayer.current, !fondPlan && showRoads);
+    // Les fonds doivent rester sous les tracés (routes, zones, secteurs).
+    try { [planLayer.current, satLayer.current, labelsLayer.current, roadsLayer.current].forEach((c) => c && map.hasLayer(c) && c.bringToBack()); } catch (e) { }
+  }, [mapReady, fondPlan, showRoads]);
   // Marqueurs : un divIcon SVG par site (forme = type, couleur = enseigne), surbrillance + étiquette sur le sélectionné.
-  const markerKey = useMemo(() => shown.map((p) => p.id + ":" + p.lat + ":" + p.lng + ":" + siteColor(p, accOf(p.accountId))).join("|") + "#" + sel + "#P" + prospPlaced.map((p) => p.id + ":" + p.lat + ":" + p.lng).join("|") + "#M" + (mePos ? mePos.lat.toFixed(4) + "," + mePos.lng.toFixed(4) : ""), [shown, sel, prospPlaced, mePos]);
+  //
+  // La clé volontairement DÉPOURVUE de « sel » : la sélection ne change qu'un marqueur sur deux
+  // cents, et la faire entrer ici reconstruisait toute la couche à chaque clic. Elle est traitée
+  // à part, juste en dessous, en ne retouchant que le marqueur quitté et le marqueur rejoint.
+  const iconeSite = (p, on) => {
+    const col = siteColor(p, accOf(p.accountId)); const tp = (SITE_TYPES[p.type] || SITE_TYPES.pdv).shape;
+    const W = on ? 38 : 30; const H = W * 26 / 24;
+    const html = `<svg width="${W}" height="${H}" viewBox="-12 -16 24 26" style="overflow:visible;filter:drop-shadow(0 1px 2px rgba(0,0,0,.55))">${on ? `<circle class="halo" cx="0" cy="0" r="6" fill="${col}"/>` : ""}<path d="${shapePath(tp)}" fill="${col}" stroke="#fff" stroke-width="1.6"/>${tp === "pin" ? `<circle cx="0" cy="-9" r="2.4" fill="#fff"/>` : ""}</svg>`;
+    return { icon: LF.divIcon({ html, className: "site-marker", iconSize: [W, H], iconAnchor: [W / 2, W * 2 / 3] }), W };
+  };
+  const markerKey = useMemo(() => shown.map((p) => p.id + ":" + p.lat + ":" + p.lng + ":" + siteColor(p, accOf(p.accountId))).join("|") + "#P" + prospPlaced.map((p) => p.id + ":" + p.lat + ":" + p.lng).join("|") + "#M" + (mePos ? mePos.lat.toFixed(4) + "," + mePos.lng.toFixed(4) : ""), [shown, prospPlaced, mePos]);
+  const selRendu = useRef(null);
   useEffect(() => {
     if (!mapReady || !markersLayer.current) return;
     const lg = markersLayer.current; lg.clearLayers();
-    markerById.current = {};
+    markerById.current = {}; selRendu.current = null;
     shown.forEach((p) => {
-      const acc = accOf(p.accountId); const col = siteColor(p, acc); const tp = (SITE_TYPES[p.type] || SITE_TYPES.pdv).shape; const on = p.id === sel;
-      const W = on ? 38 : 30; const H = W * 26 / 24;
-      const html = `<svg width="${W}" height="${H}" viewBox="-12 -16 24 26" style="overflow:visible;filter:drop-shadow(0 1px 2px rgba(0,0,0,.55))">${on ? `<circle class="halo" cx="0" cy="0" r="6" fill="${col}"/>` : ""}<path d="${shapePath(tp)}" fill="${col}" stroke="#fff" stroke-width="1.6"/>${tp === "pin" ? `<circle cx="0" cy="-9" r="2.4" fill="#fff"/>` : ""}</svg>`;
-      const icon = LF.divIcon({ html, className: "site-marker", iconSize: [W, H], iconAnchor: [W / 2, W * 2 / 3] });
+      const on = p.id === sel; const { icon, W } = iconeSite(p, on);
       const m = LF.marker([p.lat, p.lng], { icon, zIndexOffset: on ? 1000 : 0, title: p.label }).addTo(lg);
       m.on("click", () => setSel(p.id));
-      if (on) m.bindTooltip(p.label, { permanent: true, direction: "top", offset: [0, -W * 2 / 3], className: "site-tip" }).openTooltip();
+      if (on) { m.bindTooltip(p.label, { permanent: true, direction: "top", offset: [0, -W * 2 / 3], className: "site-tip" }).openTooltip(); selRendu.current = p.id; }
       markerById.current[p.id] = m;
     });
     // Prospects (onglet Prospection) : cercle pointillé couleur « Prospect » pour les distinguer des
@@ -9537,6 +9734,68 @@ function Carte({ data, persist, go, focus }) {
       LF.marker([mePos.lat, mePos.lng], { icon: LF.divIcon({ html, className: "site-marker", iconSize: [26, 26], iconAnchor: [13, 13] }), zIndexOffset: 2000, title: "Ma position" }).addTo(lg).bindTooltip("Ma position", { direction: "top", offset: [0, -12], className: "site-tip" });
     }
   }, [mapReady, markerKey]);
+  // Changement de sélection : deux marqueurs retouchés, pas deux cents recréés.
+  useEffect(() => {
+    if (!mapReady || !markersLayer.current || selRendu.current === sel) return;
+    const retoucher = (id, on) => {
+      const p = shown.find((x) => x.id === id); const m = markerById.current[id];
+      if (!p || !m) return;
+      const { icon, W } = iconeSite(p, on);
+      try {
+        m.setIcon(icon); m.setZIndexOffset(on ? 1000 : 0);
+        m.unbindTooltip();
+        if (on) m.bindTooltip(p.label, { permanent: true, direction: "top", offset: [0, -W * 2 / 3], className: "site-tip" }).openTooltip();
+      } catch (e) { }
+    };
+    retoucher(selRendu.current, false);
+    retoucher(sel, true);
+    selRendu.current = sel;
+  }, [mapReady, sel, markerKey]);
+  // ===== Sélection rectangulaire =====
+  // Cerner une zone à la souris pour dire « ces magasins-là » : c'est le geste naturel sur une
+  // carte, et le seul moyen de composer une tournée qui ne suive ni les filtres ni un rayon. Le
+  // glisser sert au tracé, on suspend donc le déplacement de la carte le temps de la sélection.
+  useEffect(() => {
+    const map = mapInst.current; if (!mapReady || !map) return;
+    if (!zoneMode) { try { map.dragging.enable(); map.getContainer().style.cursor = ""; } catch (e) { } return; }
+    let depart = null, rect = null;
+    try { map.dragging.disable(); map.getContainer().style.cursor = "crosshair"; } catch (e) { }
+    const bornes = (a, b) => LF.latLngBounds(a, b);
+    const onDown = (e) => { depart = e.latlng; try { zoneLayer.current.clearLayers(); } catch (er) { } rect = LF.rectangle(bornes(depart, depart), { color: "#3F60AA", weight: 2, dashArray: "5 4", fillOpacity: 0.08 }).addTo(zoneLayer.current); };
+    const onMoveSouris = (e) => { if (depart && rect) rect.setBounds(bornes(depart, e.latlng)); };
+    const onUp = (e) => {
+      if (!depart) return;
+      const b = bornes(depart, e.latlng); depart = null;
+      // Un simple clic (rectangle sans surface) efface la sélection au lieu d'en créer une vide.
+      const petit = Math.abs(b.getNorth() - b.getSouth()) < 1e-4 && Math.abs(b.getEast() - b.getWest()) < 1e-4;
+      if (petit) { try { zoneLayer.current.clearLayers(); } catch (er) { } setZone(null); setZoneMode(false); return; }
+      const dans = fichesDeZone((la, ln) => b.contains(LF.latLng(la, ln)));
+      setZone({ ...dans, bornes: [[b.getSouth(), b.getWest()], [b.getNorth(), b.getEast()]] });
+      setZoneMode(false);
+    };
+    map.on("mousedown", onDown); map.on("mousemove", onMoveSouris); map.on("mouseup", onUp);
+    return () => { try { map.off("mousedown", onDown); map.off("mousemove", onMoveSouris); map.off("mouseup", onUp); map.dragging.enable(); map.getContainer().style.cursor = ""; } catch (e) { } };
+    // Volontairement sans les fiches en dépendance : elles changent d'identité à chaque rendu, et
+    // réinstaller les gestionnaires au milieu d'un glissé perdrait le point de départ du rectangle.
+    // La liste lue est celle du rendu où le mode s'active, ce qui est la bonne.
+  }, [mapReady, zoneMode]);
+  // Rectangle redessiné au retour sur l'onglet, pour que la sélection conservée reste visible.
+  useEffect(() => {
+    if (!mapReady || !zoneLayer.current || zoneMode) return;
+    try {
+      zoneLayer.current.clearLayers();
+      if (zone && zone.bornes) LF.rectangle(zone.bornes, { color: "#3F60AA", weight: 2, dashArray: "5 4", fillOpacity: 0.06 }).addTo(zoneLayer.current);
+    } catch (e) { }
+  }, [mapReady, zone, zoneMode]);
+  const effacerZone = () => { try { zoneLayer.current && zoneLayer.current.clearLayers(); } catch (e) { } setZone(null); };
+  const exporterZone = () => {
+    if (!zone) return;
+    const lignes = [
+      ...zone.sites.map((x) => { const a = accOf(x.accountId); return { Nature: "Établissement", Nom: x.label || "", Enseigne: a ? a.enseigne : "", Type: (SITE_TYPES[x.type] || SITE_TYPES.pdv).label, Surface: x.typeSurface || "", Adresse: x.adresse || "", Telephone: x.telFixe || "", Email: x.email || "", Lat: x.lat, Lng: x.lng }; }),
+      ...zone.prospects.map((p) => ({ Nature: "Prospect", Nom: p.nom || p.enseigne || "", Enseigne: p.enseigne || "", Type: (PROSPECT_TYPES[p.type] || {}).label || "", Surface: "", Adresse: [p.adresse, p.cp, p.ville].filter(Boolean).join(", "), Telephone: p.tel || "", Email: p.email || "", Lat: p.lat, Lng: p.lng })),
+    ];
+    downloadCSV(lignes, "zone-carte-" + new Date().toISOString().slice(0, 10) + ".csv");
+  };
   // Routes de livraison : trait pointillé animé entrepôt → destination (ligne droite ou itinéraire OSRM réel).
   const routeKey = useMemo(() => routesByDest.map((g) => g[0].dest.id + ":" + g.length).join("|") + (useOSRM ? "|osrm:" + Object.keys(osrmCache).length : ""), [routesByDest, useOSRM, osrmCache]);
   useEffect(() => {
@@ -9610,15 +9869,55 @@ function Carte({ data, persist, go, focus }) {
     if (target) { setSel(target.id); if (target.lat != null && target.lng != null && mapInst.current) mapInst.current.flyTo([target.lat, target.lng], 13, { duration: 0.8 }); }
   }, [mapReady, focus && focus.n]);
   return (<div className="fade">
-    <div className="card" style={{ marginBottom: 12, padding: "10px 14px" }}><div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}><div style={{ fontSize: 12.5, color: "var(--muted)", fontWeight: 600 }}><MapPin size={13} style={{ verticalAlign: -2, marginRight: 4 }} />{shown.length} site{shown.length > 1 ? "s" : ""} affiché{shown.length > 1 ? "s" : ""}{placed.length !== shown.length ? " · " + placed.length + " géolocalisé" + (placed.length > 1 ? "s" : "") : ""}{(liveSites.length - placed.length) > 0 ? " · " + (liveSites.length - placed.length) + " à géolocaliser" : ""}{showProspects && activeProspects.length > 0 ? " · " + prospPlaced.length + "/" + activeProspects.length + " prospect" + (activeProspects.length > 1 ? "s" : "") + " (onglet Prospection)" : ""}</div><div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}><label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, marginRight: 4 }} title="Tracer les itinéraires de livraison réels (routier) plutôt qu'à vol d'oiseau"><input type="checkbox" checked={useOSRM} onChange={(e) => setUseOSRM(e.target.checked)} style={{ width: 14, height: 14 }} />Itinéraires réels</label><button className={cx("btn", "btn-s", showRoads ? "btn-p" : "btn-g")} onClick={() => setShowRoads((v) => !v)} title="Afficher / masquer les grands axes routiers (autoroutes, nationales)"><Navigation size={15} /> Axes routiers</button><button className={cx("btn", "btn-s", showLegend ? "btn-p" : "btn-g")} onClick={() => setShowLegend((v) => !v)} title="Afficher / masquer la légende des couleurs et formes"><Layers size={15} /> Légende</button><button className={cx("btn", "btn-s", secteurs ? "btn-p" : "btn-g")} onClick={() => setSecteurs((v) => !v)} title="Colorer les départements selon la part de clients facturés parmi vos fiches (sites + prospects) : vert = bien couvert, rouge = zone sous-exploitée"><PieIcon size={15} className={sectBusy ? "spin" : ""} /> Secteurs</button><button className="btn btn-g btn-s" onClick={aroundMe} disabled={meBusy} title="Se géolocaliser et lister les établissements / prospects les plus proches de moi"><MapPin size={15} className={meBusy ? "spin" : ""} /> Autour de moi</button><button className="btn btn-g btn-s" onClick={runTournee} title="Itinéraire optimisé des établissements affichés (selon les filtres)"><Navigation size={15} /> Tournée</button><span style={{ display: "inline-flex", alignItems: "center", gap: 4, border: "1px solid var(--line)", borderRadius: 9, padding: "3px 6px" }} title="Zone atteignable en voiture depuis ma position, et fiches qui s'y trouvent"><Clock size={13} style={{ color: "#7c5cf0" }} /><select value={isoMin} onChange={(e) => setIsoMin(+e.target.value)} style={{ border: "none", background: "transparent", fontFamily: "inherit", fontSize: 12, fontWeight: 700, padding: 0, maxWidth: 66 }}>{[15, 30, 45, 60].map((m) => <option key={m} value={m}>{m} min</option>)}</select><button className="btn btn-g btn-s" style={{ padding: "3px 8px" }} disabled={isoBusy} onClick={isoDepuisMoi}>{isoBusy ? "Calcul…" : "Zone"}</button>{isoMsg && <button className="iconbtn" onClick={effacerIso} title="Effacer la zone"><X size={13} /></button>}</span><button className="btn btn-p btn-s" onClick={() => setEdit({ id: "s_" + Date.now(), accountId: accounts[0]?.id || null, label: "", type: "pdv", adresse: "", lat: null, lng: null, siret: "", typeSurface: "", adresseLivraison: "", livraisonIdentique: true, contactId: "" })}><Plus size={15} /> Ajouter un site</button></div></div>
-      {isoMsg && <div style={{ marginTop: 10, fontSize: 12.5, lineHeight: 1.5, color: isoMsg.ok ? "var(--ink)" : "var(--red)", display: "flex", alignItems: "center", gap: 7 }}><Clock size={14} style={{ color: "#7c5cf0", flexShrink: 0 }} />{isoMsg.t}</div>}
+    <div className="card" style={{ marginBottom: 12, padding: "10px 14px" }}><div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}><div style={{ fontSize: 12.5, color: "var(--muted)", fontWeight: 600 }}><MapPin size={13} style={{ verticalAlign: -2, marginRight: 4 }} />{shown.length} site{shown.length > 1 ? "s" : ""} affiché{shown.length > 1 ? "s" : ""}{placed.length !== shown.length ? " · " + placed.length + " géolocalisé" + (placed.length > 1 ? "s" : "") : ""}{(liveSites.length - placed.length) > 0 ? " · " + (liveSites.length - placed.length) + " à géolocaliser" : ""}{aGeolocaliser.length > 0 ? <button className="btn btn-y btn-s" style={{ marginLeft: 8, padding: "2px 8px" }} disabled={geoBusy} onClick={geolocaliserRestants} title="Chercher les coordonnées des établissements dont l'adresse est renseignée mais qui ne sont pas placés sur la carte"><MapPin size={13} className={geoBusy ? "spin" : ""} /> Géolocaliser ({aGeolocaliser.length})</button> : null}{showProspects && activeProspects.length > 0 ? " · " + prospPlaced.length + "/" + activeProspects.length + " prospect" + (activeProspects.length > 1 ? "s" : "") + " (onglet Prospection)" : ""}</div><div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}><label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, marginRight: 4 }} title="Tracer les itinéraires de livraison réels (routier) plutôt qu'à vol d'oiseau"><input type="checkbox" checked={useOSRM} onChange={(e) => setUseOSRM(e.target.checked)} style={{ width: 14, height: 14 }} />Itinéraires réels</label><button className={cx("btn", "btn-s", fondPlan ? "btn-p" : "btn-g")} onClick={() => setFondPlan((v) => !v)} title="Basculer entre le plan (rues et commerces nommés) et l'imagerie satellite"><Layers size={15} /> {fondPlan ? "Plan" : "Satellite"}</button>{!fondPlan && <button className={cx("btn", "btn-s", showRoads ? "btn-p" : "btn-g")} onClick={() => setShowRoads((v) => !v)} title="Afficher / masquer les grands axes routiers (autoroutes, nationales)"><Navigation size={15} /> Axes routiers</button>}<button className={cx("btn", "btn-s", showLegend ? "btn-p" : "btn-g")} onClick={() => setShowLegend((v) => !v)} title="Afficher / masquer la légende des couleurs et formes"><Layers size={15} /> Légende</button><button className={cx("btn", "btn-s", secteurs ? "btn-p" : "btn-g")} onClick={() => setSecteurs((v) => !v)} title="Colorer les départements selon la part de clients facturés parmi vos fiches (sites + prospects) : vert = bien couvert, rouge = zone sous-exploitée"><PieIcon size={15} className={sectBusy ? "spin" : ""} /> Secteurs</button><button className="btn btn-g btn-s" onClick={aroundMe} disabled={meBusy} title="Se géolocaliser et lister les établissements / prospects les plus proches de moi"><MapPin size={15} className={meBusy ? "spin" : ""} /> Autour de moi</button><button className="btn btn-g btn-s" onClick={runTournee} disabled={tourneeBusy} title="Itinéraire optimisé des établissements affichés (selon les filtres)"><Navigation size={15} className={tourneeBusy ? "spin" : ""} /> {tourneeBusy ? "Calcul…" : "Tournée"}</button><button className={cx("btn", "btn-s", zoneMode ? "btn-p" : "btn-g")} onClick={() => { setZoneMode((v) => !v); if (!zoneMode) effacerZone(); }} title="Cerner une zone à la souris pour retenir les fiches qu'elle contient"><SquareDashedMousePointer size={15} /> {zoneMode ? "Tracez la zone…" : "Sélection"}</button><span style={{ display: "inline-flex", alignItems: "center", gap: 4, border: "1px solid var(--line)", borderRadius: 9, padding: "3px 6px" }} title="Zone atteignable en voiture depuis ma position, et fiches qui s'y trouvent"><Clock size={13} style={{ color: "#7c5cf0" }} /><select value={isoMin} onChange={(e) => setIsoMin(+e.target.value)} style={{ border: "none", background: "transparent", fontFamily: "inherit", fontSize: 12, fontWeight: 700, padding: 0, maxWidth: 66 }}>{[15, 30, 45, 60].map((m) => <option key={m} value={m}>{m} min</option>)}</select><button className="btn btn-g btn-s" style={{ padding: "3px 8px" }} disabled={isoBusy} onClick={isoDepuisMoi}>{isoBusy ? "Calcul…" : "Zone"}</button>{isoMsg && <button className="iconbtn" onClick={effacerIso} title="Effacer la zone"><X size={13} /></button>}</span><button className="btn btn-p btn-s" onClick={() => setEdit({ id: "s_" + Date.now(), accountId: accounts[0]?.id || null, label: "", type: "pdv", adresse: "", lat: null, lng: null, siret: "", typeSurface: "", adresseLivraison: "", livraisonIdentique: true, contactId: "" })}><Plus size={15} /> Ajouter un site</button></div></div>
+      {geoMsg && <div style={{ marginTop: 10, fontSize: 12.5, lineHeight: 1.5, color: geoMsg.ok ? "var(--ink)" : "var(--red)", display: "flex", alignItems: "flex-start", gap: 7 }}><MapPin size={14} style={{ color: "#F8B133", flexShrink: 0, marginTop: 2 }} /><span style={{ flex: 1 }}>{geoMsg.t}</span>{!geoBusy && <button className="iconbtn" onClick={() => setGeoMsg(null)} title="Fermer"><X size={14} /></button>}</div>}
+      {isoMsg && <div style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}><strong style={{ fontSize: 13, color: isoMsg.ok ? "var(--ink)" : "var(--red)" }}><Clock size={14} style={{ verticalAlign: -2, color: "#7c5cf0" }} /> {isoMsg.t}</strong><button className="iconbtn" onClick={effacerIso} title="Effacer la zone"><X size={15} /></button></div>
+        {isoMsg.ok && (() => {
+          const zs = isoMsg.sites || [], zp = isoMsg.prospects || [];
+          if (!zs.length && !zp.length) return <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 6 }}>Aucune fiche géolocalisée dans cette zone.</div>;
+          return (<>
+            <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 4 }}>{zs.length} établissement{zs.length > 1 ? "s" : ""} · {zp.length} prospect{zp.length > 1 ? "s" : ""}{isoMsg.approx ? " · estimation à vol d'oiseau" : ""}</div>
+            <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 12.5, lineHeight: 1.7, maxHeight: 180, overflowY: "auto" }}>
+              {zs.map((x) => <li key={"s" + x.id}><span className="lnk" onClick={() => selectSite(x)}>{x.label || "Établissement"}</span></li>)}
+              {zp.map((p) => <li key={"p" + p.id}><span className="lnk" onClick={() => go("prospection", p.id)}>{p.nom || p.enseigne || "Prospect"}</span> <span style={{ color: "var(--muted)" }}>· prospect</span></li>)}
+            </ul>
+            {zs.length > 0 && <button className="btn btn-g btn-s" style={{ marginTop: 9 }} disabled={tourneeBusy} onClick={() => construireTournee(zs, "la zone")}><Route size={14} className={tourneeBusy ? "spin" : ""} /> En faire une tournée</button>}
+          </>);
+        })()}
+      </div>}
+      {zone && <div style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}><strong style={{ fontSize: 13 }}><SquareDashedMousePointer size={14} style={{ verticalAlign: -2 }} /> Zone sélectionnée — {zone.sites.length} établissement{zone.sites.length > 1 ? "s" : ""} · {zone.prospects.length} prospect{zone.prospects.length > 1 ? "s" : ""}</strong><button className="iconbtn" onClick={effacerZone} title="Effacer la sélection"><X size={15} /></button></div>
+        {(zone.sites.length || zone.prospects.length) ? <>
+          <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 12.5, lineHeight: 1.7, maxHeight: 180, overflowY: "auto" }}>
+            {zone.sites.map((x) => <li key={"zs" + x.id}><span className="lnk" onClick={() => selectSite(x)}>{x.label || "Établissement"}</span></li>)}
+            {zone.prospects.map((p) => <li key={"zp" + p.id}><span className="lnk" onClick={() => go("prospection", p.id)}>{p.nom || p.enseigne || "Prospect"}</span> <span style={{ color: "var(--muted)" }}>· prospect</span></li>)}
+          </ul>
+          <div style={{ display: "flex", gap: 8, marginTop: 9, flexWrap: "wrap" }}>
+            {zone.sites.length > 0 && <button className="btn btn-g btn-s" disabled={tourneeBusy} onClick={() => construireTournee(zone.sites, "la zone tracée")}><Route size={14} className={tourneeBusy ? "spin" : ""} /> En faire une tournée</button>}
+            <button className="btn btn-ghost btn-s" onClick={exporterZone}><FileDown size={14} /> Export CSV</button>
+          </div>
+        </> : <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 6 }}>Aucune fiche dans le rectangle tracé.</div>}
+      </div>}
       {sectMsg && <div style={{ marginTop: 10, fontSize: 12.5, lineHeight: 1.5, color: sectMsg.ok ? "var(--ink)" : "var(--red)", display: "flex", alignItems: "flex-start", gap: 7 }}><PieIcon size={14} style={{ color: "#3F60AA", flexShrink: 0, marginTop: 2 }} /><span>{sectMsg.t}</span></div>}
       {meMsg && <div style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}><strong style={{ fontSize: 13, color: meMsg.ok === false ? "var(--red)" : "var(--ink)" }}><MapPin size={14} style={{ verticalAlign: -2, color: "#2563EB" }} /> Autour de moi{meMsg.near ? " — les plus proches" : ""}</strong><button className="iconbtn" onClick={() => { setMeMsg(null); setMePos(null); }} title="Fermer"><X size={15} /></button></div>
         {meMsg.t && <div style={{ fontSize: 12.5, color: meMsg.ok === false ? "var(--red)" : "var(--muted)", marginTop: 6 }}>{meMsg.t}</div>}
         {meMsg.near && (meMsg.near.length ? <ol style={{ margin: "8px 0 0", paddingLeft: 20, fontSize: 12.5, lineHeight: 1.75 }}>{meMsg.near.map((c) => (<li key={c.kind + c.id}><span className="lnk" onClick={() => c.kind === "site" ? selectSite(sites.find((s) => s.id === c.id) || c) : go("prospection", c.id)}>{c.nom}</span> <span style={{ color: "var(--muted)" }}>· {num(Math.round(c.d))} km{c.kind === "prospect" ? " · prospect" : ""}</span></li>))}</ol> : <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>Aucun établissement géolocalisé à proximité.</div>)}
       </div>}
-      {tourneeOrder && <div style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 10 }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}><strong style={{ fontSize: 13 }}><Navigation size={14} style={{ verticalAlign: -2 }} /> Tournée proposée ({tourneeOrder.length} arrêt{tourneeOrder.length > 1 ? "s" : ""})</strong><button className="iconbtn" onClick={() => setTourneeOrder(null)} title="Fermer"><X size={15} /></button></div><ol style={{ margin: "8px 0 0", paddingLeft: 20, fontSize: 12.5, lineHeight: 1.7 }}>{tourneeOrder.map((s, i) => { const prev = i === 0 ? (entrepot && entrepot.lat ? entrepot : null) : tourneeOrder[i - 1]; const dk = prev ? distanceKm(prev.lat, prev.lng, s.lat, s.lng) : null; return (<li key={s.id}><span className="lnk" onClick={() => selectSite(s)}>{s.label || "Établissement"}</span>{dk != null ? <span style={{ color: "var(--muted)" }}> · {num(Math.round(dk))} km</span> : null}</li>); })}</ol><div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6 }}>Itinéraire au plus proche voisin depuis l'entrepôt, ouvert dans Google Maps (max 9 arrêts).</div></div>}</div>
+      {tourneeOrder && tourneeOrder.arrets && <div style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}><strong style={{ fontSize: 13 }}><Route size={14} style={{ verticalAlign: -2 }} /> Tournée proposée — {tourneeOrder.arrets.length} arrêt{tourneeOrder.arrets.length > 1 ? "s" : ""}{tourneeOrder.origine ? " (" + tourneeOrder.origine + ")" : ""}</strong><button className="iconbtn" onClick={() => setTourneeOrder(null)} title="Fermer"><X size={15} /></button></div>
+        <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 4 }}>{num(Math.round(tourneeOrder.totalKm))} km{tourneeOrder.totalMin != null ? " · " + fmtMinutes(tourneeOrder.totalMin) + " de route" : ""}{tourneeOrder.retour ? " (retour à " + tourneeOrder.depart + " compris)" : ""} · {tourneeOrder.reel ? "distances routières réelles" : "distances à vol d'oiseau"}</div>
+        <ol style={{ margin: "8px 0 0", paddingLeft: 20, fontSize: 12.5, lineHeight: 1.7, maxHeight: 240, overflowY: "auto" }}>{tourneeOrder.arrets.map((a, i) => (
+          <li key={a.id} style={i + 1 > tourneeOrder.transmis ? { opacity: 0.65 } : null}><span className="lnk" onClick={() => { const st = sites.find((x) => x.id === a.id); if (st) selectSite(st); }}>{a.label}</span>{a.km != null ? <span style={{ color: "var(--muted)" }}> · {num(Math.round(a.km))} km{a.min != null ? " · " + fmtMinutes(a.min) : ""}</span> : null}</li>
+        ))}</ol>
+        {tourneeOrder.retour && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4, paddingLeft: 20 }}>↩ retour à {tourneeOrder.depart} · {num(Math.round(tourneeOrder.retour.km))} km{tourneeOrder.retour.min != null ? " · " + fmtMinutes(tourneeOrder.retour.min) : ""}</div>}
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8, lineHeight: 1.55 }}>Ordre calculé au plus proche voisin puis retendu par une passe 2-opt{tourneeOrder.depart ? ", au départ de " + tourneeOrder.depart : ""}.{tourneeOrder.arrets.length > tourneeOrder.transmis ? " Google Maps n'accepte que " + GMAPS_ARRETS + " arrêts par itinéraire : seuls les " + tourneeOrder.transmis + " premiers lui ont été transmis, les suivants sont grisés ci-dessus." : ""}</div>
+        {tourneeOrder.arrets.length > tourneeOrder.transmis && <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>{Array.from({ length: Math.ceil((tourneeOrder.arrets.length - tourneeOrder.transmis) / GMAPS_ARRETS) }, (_, k) => tourneeOrder.transmis + k * GMAPS_ARRETS).map((d) => (
+          <button key={d} className="btn btn-g btn-s" onClick={() => ouvrirSuiteTournee(d)}><ExternalLink size={14} /> Arrêts {d + 1} à {Math.min(d + GMAPS_ARRETS, tourneeOrder.arrets.length)}</button>
+        ))}</div>}
+      </div>}
+      {tourneeOrder && tourneeOrder.vide && <div style={{ marginTop: 10, fontSize: 12.5, color: "var(--red)", display: "flex", alignItems: "center", gap: 7 }}><Route size={14} style={{ flexShrink: 0 }} />Aucun établissement géolocalisé dans {tourneeOrder.origine} : ajustez les filtres, ou géolocalisez les fiches.<button className="iconbtn" onClick={() => setTourneeOrder(null)} title="Fermer"><X size={14} /></button></div>}</div>
     <div className="filtbar">
       <div className="grp"><span className="lbl">Type de surface</span><AllChip active={filtSurf.length === 0} onClick={() => setFiltSurf([])}>Toutes</AllChip>{usedSurfaces.map((t) => { const col = SURFACE_COLOR[t] || "#9aa6bd"; return <button key={t} className={cx("chip", filtSurf.includes(t) && "on")} onClick={() => tog(filtSurf, setFiltSurf, t)} style={filtSurf.includes(t) ? { background: col, borderColor: col, color: onColor(col) } : { borderLeft: `4px solid ${col}` }}>{t}</button>; })}</div>
       <div className="grp"><span className="lbl">Rattachement</span><AllChip active={filtCat.length === 0} onClick={() => setFiltCat([])}>Tous</AllChip><button className={cx("chip", filtCat.includes("groupe") && "on")} onClick={() => tog(filtCat, setFiltCat, "groupe")}>Groupe</button><button className={cx("chip", filtCat.includes("independant") && "on")} onClick={() => tog(filtCat, setFiltCat, "independant")}>Indépendant</button></div>
@@ -9630,6 +9929,8 @@ function Carte({ data, persist, go, focus }) {
         <div className="mapwrap" style={{ height: "clamp(460px, 74vh, 900px)" }}>
           <div ref={mapEl} style={{ position: "absolute", inset: 0, opacity: mapReady ? 1 : 0, transition: "opacity .55s ease" }} />
           {!mapReady && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "var(--muted)", fontSize: 13, fontWeight: 600, gap: 8, zIndex: 5, pointerEvents: "none" }}><RefreshCw size={18} className="spin" /> Chargement de la carte…</div>}
+          {molette && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", zIndex: 500, pointerEvents: "none" }}><span style={{ background: "rgba(20,22,30,.78)", color: "#fff", fontSize: 13, fontWeight: 700, padding: "9px 15px", borderRadius: 11 }}>Ctrl + molette pour zoomer</span></div>}
+          {zoneMode && <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 500, pointerEvents: "none", background: "rgba(20,22,30,.78)", color: "#fff", fontSize: 12, fontWeight: 600, padding: "6px 11px", borderRadius: 9 }}>Glissez pour cerner une zone · un simple clic annule</div>}
           <div className="zoomctl" style={{ right: "auto", left: 12 }}>
             <button className="zbtn" title="Recadrer sur tous les sites" onClick={() => { const pts = sites.filter((p) => p.lat && p.lng).map((p) => [p.lat, p.lng]); if (!mapInst.current) return; if (pts.length === 1) mapInst.current.setView(pts[0], 12); else if (pts.length > 1) mapInst.current.fitBounds(pts, { padding: [40, 40], maxZoom: 13 }); }} style={{ fontSize: 15 }}>⤢</button>
           </div>
@@ -9652,9 +9953,10 @@ function Carte({ data, persist, go, focus }) {
           {(() => { const lc = resolveSiteContact(s, data.contacts); const nm = lc ? fullName(lc) : [s.contactPrenom, s.contactNom].filter(Boolean).join(" "); const tel = lc ? (lc.mobile || lc.fixe || "") : (s.contactTel || ""); const mail = lc ? (lc.email || "") : (s.contactMail || ""); if (!nm && !tel && !mail) return null; return <div style={{ marginTop: 4, padding: "9px 11px", background: "var(--bg)", borderRadius: 10 }}><div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 5 }}>Interlocuteur sur place{lc ? " · lié au répertoire" : ""}</div>{nm && <div style={{ fontWeight: 700, fontSize: 13.5 }}>{lc ? <span className="lnk" onClick={() => go("repertoire", lc.id)}>{nm}</span> : nm}{lc && lc.fonction ? <span style={{ fontWeight: 500, color: "var(--muted)" }}> · {lc.fonction}</span> : null}</div>}{tel && <div style={{ fontSize: 12.5, color: "var(--muted)", display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}><Phone size={12} /><a href={"tel:" + tel} style={{ color: "inherit" }}>{tel}</a></div>}{mail && <div style={{ fontSize: 12.5, color: "var(--muted)", display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}><Mail size={12} /><a href={"mailto:" + mail} style={{ color: "inherit" }}>{mail}</a></div>}</div>; })()}
           {s.notes && <div style={{ marginTop: 10, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5, borderTop: "1px solid var(--line)", paddingTop: 10 }}>{s.notes}</div>}
           <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}><a className="btn btn-y btn-s" href={siteGmaps(s, sAcc && sAcc.enseigne)} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Fiche Google</a>{(s.type === "pdv" || s.type === "decision") && <button className="btn btn-p btn-s" onClick={() => go("accounts", null, s.id)} title="Ouvrir la fiche de cet établissement"><Store size={14} /> Ouvrir l'établissement</button>}{sAcc && isGroupe(sAcc) && <button className="btn btn-g btn-s" onClick={() => go("accounts", sAcc.id)} title="Ouvrir la fiche du groupe"><Building2 size={14} /> Ouvrir le groupe</button>}<button className="iconbtn" onClick={() => setEdit(s)}><Pencil size={15} /></button><button className="iconbtn" onClick={() => appConfirm("Supprimer ce site « " + (s.label || "") + " » ?", { title: "Supprimer ce site ?" }).then((ok) => { if (ok) delSite(s.id); })}><Trash2 size={15} /></button></div></>)}</div>
-        {(() => { const nq = normStr(siteRecherche); const filteredSites = liveSites.filter((x) => { if (!nq) return true; const xa = accOf(x.accountId); return normStr((x.label || "") + " " + (x.adresse || "") + " " + (xa ? xa.enseigne : "") + " " + (SITE_TYPES[x.type] || SITE_TYPES.pdv).label).includes(nq); }); return (
+        {(() => { const nq = normStr(siteRecherche); const filteredSites = liveSites.filter((x) => { if (listeAGeo && x.lat != null && x.lng != null) return false; if (!nq) return true; const xa = accOf(x.accountId); return normStr((x.label || "") + " " + (x.adresse || "") + " " + (xa ? xa.enseigne : "") + " " + (SITE_TYPES[x.type] || SITE_TYPES.pdv).label).includes(nq); }); const sansCoord = liveSites.filter((x) => x.lat == null || x.lng == null).length; return (
         <div className="card" style={{ flex: "1 1 0", minHeight: 160, display: "flex", flexDirection: "column", overflow: "hidden" }}><div className="sec-h" style={{ flexShrink: 0 }}><h3 className="pu-display">Tous les sites</h3><span>{filteredSites.length}{filteredSites.length !== liveSites.length ? " / " + liveSites.length : ""}</span></div>
           <div style={{ position: "relative", marginBottom: 8, flexShrink: 0 }}><Search size={14} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--muted)" }} /><input value={siteRecherche} onChange={(e) => setSiteRecherche(e.target.value)} placeholder="Rechercher un site…" style={{ width: "100%", padding: "7px 9px 7px 30px", border: "1px solid var(--line)", borderRadius: 9, fontFamily: "inherit", fontSize: 13, background: "#fff" }} /></div>
+          {sansCoord > 0 && <button className={cx("chip", listeAGeo && "on")} style={{ alignSelf: "flex-start", marginBottom: 8, flexShrink: 0 }} onClick={() => setListeAGeo((v) => !v)} title="N'afficher que les établissements absents de la carte, faute de coordonnées">À géolocaliser ({sansCoord})</button>}
           <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>{filteredSites.length === 0 ? <div className="empty">Aucun site ne correspond.</div> : filteredSites.map((x) => { const xa = accOf(x.accountId); return (<div key={x.id} className="hrow" onClick={() => selectSite(x)} onMouseEnter={() => hoverSite(x)} onMouseLeave={() => unhoverSite(x)} style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 6px", borderBottom: "1px solid #f0f3f9", cursor: "pointer", borderRadius: 8, background: x.id === sel ? "var(--blue-l)" : "transparent" }}><svg width="18" height="18" viewBox="-12 -16 24 26" style={{ flexShrink: 0 }}><path d={shapePath((SITE_TYPES[x.type] || SITE_TYPES.pdv).shape)} fill={siteColor(x, xa)} stroke="#fff" strokeWidth={1.5} /></svg><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600, fontSize: 13 }}>{x.label}</div><div style={{ fontSize: 11, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{(SITE_TYPES[x.type] || SITE_TYPES.pdv).label}{!x.lat && " · à géolocaliser"}</div></div></div>); })}</div>
         </div>); })()}
       </div>
@@ -11295,6 +11597,14 @@ function Prospection({ data, persist, go }) {
   // explicitement le prospect.
   const saveArchiveProspect = (p, info) => persist((d) => ({ ...d, prospects: d.prospects.map((x) => x.id === p.id ? { ...x, archived: true, archiveReason: info.reason, archiveDate: info.date || TODAY(), archiveNote: info.note || "" } : x), events: sansEvenementsLies(d.events, { prospectId: p.id }) }));
   const unarchiveProspect = (id) => persist((d) => ({ ...d, prospects: d.prospects.map((x) => x.id === id ? { ...x, archived: false } : x) }));
+  // Suppression d'une fiche depuis sa tuile. Contrairement à l'archivage, qui garde la trace d'un
+  // parcours arrêté, elle efface : c'est ce qu'il faut pour une fiche hors cible dès l'origine,
+  // arrivée là par erreur de sourçage. On retire aussi la fiche des listes de prospection et les
+  // rendez-vous qui ne concernaient qu'elle, sans quoi ils survivraient à leur objet.
+  const delProspect = (p) => appConfirm("Supprimer définitivement la fiche « " + (p.nom || p.enseigne || "") + " » ? Pour garder la trace d'un suivi arrêté, préférez l'archivage.", { title: "Supprimer ce prospect ?" }).then((ok) => {
+    if (!ok) return;
+    persist((d) => ({ ...d, prospects: d.prospects.filter((x) => x.id !== p.id), prospectLists: (d.prospectLists || []).map((l) => ({ ...l, ids: (l.ids || []).filter((id) => id !== p.id) })), events: sansEvenementsLies(d.events, { prospectId: p.id }) }));
+  });
   // Déduplication : regroupe les prospects par SIRET (si renseigné) ou par nom + ville normalisés,
   // garde la fiche la plus complète de chaque groupe (et déjà convertie en compte si applicable),
   // supprime les autres. Demande confirmation et indique le nombre supprimé.
@@ -11665,6 +11975,7 @@ function Prospection({ data, persist, go }) {
         <a className="iconbtn" href={mapsUrl(p)} target="_blank" rel="noreferrer" title="Voir sur Google Maps"><MapPin size={15} /></a>
         {p.site && <a className="iconbtn" href={ensureHttp(p.site)} target="_blank" rel="noreferrer" title={"Site web : " + cleanDomain(p.site)}><ExternalLink size={15} /></a>}
         {p.telephone && <a className="iconbtn" href={"tel:" + p.telephone.replace(/\s/g, "")} title={p.telephone}><Phone size={15} /></a>}
+        <button className="iconbtn" style={{ color: "var(--red)" }} onClick={() => delProspect(p)} title="Supprimer définitivement cette fiche (hors cible, doublon, erreur de sourçage)"><Trash2 size={15} /></button>
         <span style={{ flex: 1 }} />
         {(() => { const sc = prospectScore(p); const col = (SCORE_BANDES[scoreBande(sc.score)] || {}).color || "#9aa6bd"; return <span title={"Score de priorité : " + sc.score + "/100 — plus il est haut, plus la fiche mérite un contact rapide.\n" + sc.details.join("\n")} style={{ fontSize: 10.5, fontWeight: 800, color: col, background: col + "1c", border: "1px solid " + col + "55", borderRadius: 20, padding: "1px 7px", display: "inline-flex", alignItems: "center", gap: 3 }} className="tnum"><Zap size={10} />{sc.score}</span>; })()}
         {(() => { const c = prospectCompleteness(p); const col = c >= 70 ? "#2bb673" : c >= 40 ? "#F8B133" : "#FF5A45"; return <span title={"Complétude de la fiche : " + c + "% des champs clés renseignés"} style={{ fontSize: 10.5, fontWeight: 800, color: col, background: col + "1c", border: "1px solid " + col + "55", borderRadius: 20, padding: "1px 7px" }} className="tnum">{c}%</span>; })()}
