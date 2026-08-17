@@ -17,7 +17,6 @@
     "@clerk/clerk-react": "^5.21.0",
     "@supabase/supabase-js": "^2.108.2",
     "leaflet": "^1.9.4",
-    "leaflet.markercluster": "^1.5.3",
     "lucide-react": "^0.460.0",
     "papaparse": "^5.4.1",
     "react": "^18.3.1",
