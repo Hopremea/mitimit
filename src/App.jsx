@@ -9287,6 +9287,10 @@ function Carte({ data, persist, go, focus }) {
   const [zoneMode, setZoneMode] = useState(false); const [zone, setZone] = useVue("carte", "zone", null);
   // Géolocalisation en lot des fiches sans coordonnées.
   const [geoBusy, setGeoBusy] = useState(false); const [geoMsg, setGeoMsg] = useState(null);
+  // Recherche de prospects depuis la carte (même moteur que l'onglet Prospection). La zone saisie
+  // est conservée d'un passage à l'autre, le compte rendu non : il parle d'une recherche passée.
+  const [rechZone, setRechZone] = useVue("carte", "rechZone", "");
+  const [rechBusy, setRechBusy] = useState(false); const [rechMsg, setRechMsg] = useState(null);
   // Isochrone : polygone « à moins de N minutes » + fiches qu'il contient.
   const isoLayer = useRef(null);
   // Analyse de secteurs : départements colorés selon la part de clients facturés parmi les fiches
@@ -9485,6 +9489,24 @@ function Carte({ data, persist, go, focus }) {
     }
     setGeoBusy(false);
     setGeoMsg({ ok: echecs.length === 0, t: trouves + " établissement(s) placé(s) sur la carte." + (echecs.length ? " Adresse non reconnue pour " + echecs.length + " fiche(s) : " + echecs.slice(0, 4).join(", ") + (echecs.length > 4 ? "…" : "") + ". Corrigez l'adresse dans la fiche, puis relancez." : "") });
+  };
+  // Recherche de prospects lancée depuis la carte. Deux précautions propres à cet onglet : les
+  // fiches trouvées ne s'affichent que si le filtre d'entonnoir « Prospect » est actif — sinon on
+  // croirait la recherche vaine — et la carte se recadre sur celles qui portent déjà des
+  // coordonnées, pour que le résultat se voie sans chercher où regarder.
+  const lancerRecherche = async () => {
+    if (rechBusy) return;
+    setRechBusy(true); setRechMsg(null);
+    try {
+      const r = await chercherProspects({ zone: rechZone, data, persist });
+      if (r.err) { setRechMsg({ ok: false, t: r.err }); return; }
+      setRechMsg({ ok: true, t: r.msg });
+      if (r.created && r.created.length) {
+        if (!filtStage.includes("prospect")) setFiltStage((f) => [...f, "prospect"]);
+        const pts = r.created.filter((c) => c.lat != null && c.lng != null).map((c) => [c.lat, c.lng]);
+        try { if (pts.length && mapInst.current) mapInst.current.fitBounds(pts, { padding: [50, 50], maxZoom: 12 }); } catch (e) { }
+      }
+    } finally { setRechBusy(false); }
   };
   // ===== Tournée =====
   // Matrice des trajets réels entre tous les arrêts, en UN seul appel à OSRM (service « table »).
@@ -9918,6 +9940,18 @@ function Carte({ data, persist, go, focus }) {
         ))}</div>}
       </div>}
       {tourneeOrder && tourneeOrder.vide && <div style={{ marginTop: 10, fontSize: 12.5, color: "var(--red)", display: "flex", alignItems: "center", gap: 7 }}><Route size={14} style={{ flexShrink: 0 }} />Aucun établissement géolocalisé dans {tourneeOrder.origine} : ajustez les filtres, ou géolocalisez les fiches.<button className="iconbtn" onClick={() => setTourneeOrder(null)} title="Fermer"><X size={14} /></button></div>}</div>
+    {/* Recherche de prospects, la même qu'en Prospection et sur le même moteur : chercher une zone
+        depuis la carte, où l'on voit justement les trous de couverture, évite l'aller-retour par le
+        listing. Seul le champ est repris — la source reste celle par défaut, les magasins de jeux et
+        jouets, sans crédit IA tant qu'OpenStreetMap suffit. */}
+    <div className="card" style={{ marginBottom: 12, padding: "10px 14px" }}>
+      <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, whiteSpace: "nowrap" }}><Sparkles size={15} style={{ color: "var(--orange)" }} /> Recherche de prospects</span>
+        <input value={rechZone} onChange={(e) => setRechZone(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") lancerRecherche(); }} placeholder="Ex. Occitanie, Bordeaux, Genève, Bruxelles… ou « L'Atelier chez soi »" style={{ flex: 1, minWidth: 220, padding: "7px 11px", border: "1px solid var(--line)", borderRadius: 9, fontFamily: "inherit", fontSize: 13 }} />
+        <button className="btn btn-ai btn-s" onClick={lancerRecherche} disabled={rechBusy}><Search size={14} className={rechBusy ? "spin" : ""} /> {rechBusy ? "Recherche…" : "Chercher"}</button>
+      </div>
+      {rechMsg && <div style={{ marginTop: 8, fontSize: 12.5, lineHeight: 1.5, color: rechMsg.ok ? "var(--ink)" : "var(--red)", display: "flex", alignItems: "flex-start", gap: 7 }}><Sparkles size={14} style={{ color: rechMsg.ok ? "var(--orange)" : "var(--red)", flexShrink: 0, marginTop: 2 }} /><span style={{ flex: 1 }}>{rechMsg.t}</span><button className="iconbtn" onClick={() => setRechMsg(null)} title="Fermer"><X size={14} /></button></div>}
+    </div>
     <div className="filtbar">
       <div className="grp"><span className="lbl">Type de surface</span><AllChip active={filtSurf.length === 0} onClick={() => setFiltSurf([])}>Toutes</AllChip>{usedSurfaces.map((t) => { const col = SURFACE_COLOR[t] || "#9aa6bd"; return <button key={t} className={cx("chip", filtSurf.includes(t) && "on")} onClick={() => tog(filtSurf, setFiltSurf, t)} style={filtSurf.includes(t) ? { background: col, borderColor: col, color: onColor(col) } : { borderLeft: `4px solid ${col}` }}>{t}</button>; })}</div>
       <div className="grp"><span className="lbl">Rattachement</span><AllChip active={filtCat.length === 0} onClick={() => setFiltCat([])}>Tous</AllChip><button className={cx("chip", filtCat.includes("groupe") && "on")} onClick={() => tog(filtCat, setFiltCat, "groupe")}>Groupe</button><button className={cx("chip", filtCat.includes("independant") && "on")} onClick={() => tog(filtCat, setFiltCat, "independant")}>Indépendant</button></div>
@@ -11315,6 +11349,86 @@ function EnrichSelectModal({ prospects, onClose, onLaunch }) {
     </div>
   </Modal>);
 }
+// ===== Recherche de prospects : le moteur, hors de tout composant =====
+// Il vit ici, et non dans l'onglet Prospection où il est né, parce que la Carte s'en sert aussi :
+// une même zone se cherche indifféremment depuis le listing ou depuis la carte, et il n'y a aucune
+// raison d'en entretenir deux versions. Le moteur ne touche à aucun affichage — il enregistre les
+// fiches trouvées et rend un compte rendu ; c'est l'appelant qui décide comment le montrer.
+//
+// Renvoie { created, msg, err, ids } : « created » les fiches ajoutées, « ids » leurs identifiants
+// (pour les mettre en évidence), « msg » le compte rendu, « err » l'échec à afficher tel quel.
+async function chercherProspects({ zone, source = "magasins", kind = "toutes", naf, taille, forme, assoMot, data, persist }) {
+  const z = (zone || "").trim();
+  // Le champ étant vide par défaut, lancer sans zone deviendrait le geste le plus courant : une
+  // recherche « France » entière est très lente côté OpenStreetMap et peut basculer sur l'IA
+  // payante. On demande donc une zone plutôt que de partir sur un périmètre national par défaut.
+  if (!z) return { err: "Indiquez d'abord une zone (région, département, ville) ou le nom d'un établissement précis." };
+  try {
+    // ===== Sources 100 % GRATUITES : registres officiels, aucune IA, aucune dépense =====
+    if (source !== "magasins") {
+      // La zone doit d'abord être résolue en département / commune. Si elle ne l'est pas, c'est
+      // soit une saisie non reconnue, soit un registre momentanément indisponible : on le dit,
+      // au lieu d'afficher « aucun résultat » qui ferait croire à une zone vide.
+      const gz = await geoResolveZone(z);
+      if (!gz) return { err: "Zone « " + z + " » non reconnue, ou service d'annuaire momentanément indisponible. Saisissez une ville, un numéro de département (ex. 31) ou un nom de département, puis réessayez." };
+      let lignes = [], libelle = "";
+      if (source === "ecoles") { lignes = await educationSearch(z); libelle = "établissement(s) scolaire(s)"; }
+      else if (source === "ime") { lignes = await imeSearch(z); libelle = "IME"; }
+      else if (source === "associations") { lignes = await associationSearch(z, assoMot); libelle = "association(s)"; }
+      else if (source === "naf") { lignes = await nafSearch(z, naf, { taille, forme, cible: kind }); libelle = "entreprise(s)"; }
+      else if (source === "mediatheques") { lignes = await osmSearchLieux(z, '["amenity"="library"]', "mediatheque"); libelle = "médiathèque(s)"; }
+      // Dédoublonnage sur les mêmes clés que le reste de l'application : on ne recrée jamais une
+      // fiche déjà présente (prospect, établissement ou groupe).
+      const drafts = lignes.map((l) => ({ ...l, statut: "a_qualifier", potentiel: "", source: "Registre officiel · " + TODAY(), accountId: null, createdAt: TODAY() }));
+      const { created, skipped, sieges, exclus } = createDraftsWithDedup(drafts, data);
+      if (created.length) persist((d) => ({ ...d, prospects: [...created, ...(d.prospects || [])] }));
+      const dup = (skipped ? " " + skipped + " doublon(s) écarté(s)." : "")
+        + ((sieges && sieges.length) ? " " + sieges.length + " ligne(s) refusée(s) : identité du siège d'un groupe déjà enregistré." : "")
+        + ((exclus && exclus.length) ? " " + exclus.length + " résultat(s) refusé(s) : " + [...new Set(exclus.map((x) => x.motif))].slice(0, 2).join(" ; ") + "." : "");
+      return {
+        created, ids: created.map((c) => c.id),
+        msg: created.length
+          ? created.length + " " + libelle + " ajouté(s) au listing, sans aucune dépense." + dup + " À vérifier avant action."
+          : ("Aucun nouveau résultat pour cette zone." + dup),
+      };
+    }
+    // ===== Magasins : OpenStreetMap d'abord (gratuit), l'IA seulement si nécessaire =====
+    // Étage 1 GRATUIT : OpenStreetMap liste les magasins jouets / jeux / loisirs créatifs de la
+    // zone avec adresse, téléphone, site et horaires. L'IA (payante) n'est appelée qu'ensuite,
+    // et seulement si OSM n'a pas suffi (zone peu cartographiée ou recherche d'un nom précis).
+    let osm = [];
+    try { osm = await osmSearchStores(z); } catch (e) {}
+    const seenOsm = new Set(data.prospects.map((p) => ((p.nom || "") + "|" + (p.ville || "")).toLowerCase()));
+    const osmNew = osm.filter((s) => { const k = ((s.nom || "") + "|" + (s.ville || "")).toLowerCase(); if (seenOsm.has(k)) return false; seenOsm.add(k); return true; })
+      // « Cible » filtre pour de bon. OpenStreetMap porte une étiquette « brand » sur les points de
+      // vente de réseau : sa présence distingue une chaîne d'un indépendant sans rien deviner.
+      .filter((s) => cibleAccepte(kind, s.enseigne ? "chaine" : "independant"));
+    const today0 = TODAY();
+    const osmAdd = osmNew.map((s, i) => ({ id: "p_osm_" + Date.now() + "_" + i, nom: s.nom, enseigne: s.enseigne || "", type: s.enseigne ? "chaine" : "independant", format: "", adresse: s.adresse || "", ville: s.ville || "", cp: s.cp || "", departement: cpToDepartement(s.cp) || "", region: DEPT_REGION[cpToDepartement(s.cp)] || "", telephone: s.telephone || "", site: s.site || "", email: s.email || "", facebook: s.facebook || "", instagram: s.instagram || "", horaires: s.horaires || "", statut: "a_qualifier", potentiel: "", notes: "", source: "OpenStreetMap (gratuit) · " + today0, accountId: null, createdAt: today0, siren: "", siret: "", raisonSociale: "", formeJuridique: "", contactPrenom: "", contactNom: "", contactFonction: "", contactEmail: "", contactTel: "", contactSource: "", lat: s.lat, lng: s.lng }));
+    if (osmAdd.length) persist((d) => ({ ...d, prospects: [...osmAdd, ...d.prospects] }));
+    // OSM a suffi : on s'arrête là, sans dépenser un seul crédit IA.
+    if (osmAdd.length >= 6) return { created: osmAdd, ids: osmAdd.map((a) => a.id), msg: osmAdd.length + " prospect(s) ajouté(s) depuis OpenStreetMap — gratuitement, sans crédit IA. Statut « À qualifier », à vérifier." };
+    const { stores: arr, usage } = await aiSearchStores(z, kind);
+    const seen = new Set(data.prospects.concat(osmAdd).map((p) => ((p.nom || "") + "|" + (p.ville || "")).toLowerCase())); const today = TODAY(); const add = [];
+    let refusesDir = 0; let horsCible = 0;
+    arr.forEach((r) => { const nom = (r.nom || r.enseigne || "").trim(); if (!nom) return; const key = (nom + "|" + (r.ville || "")).toLowerCase(); if (seen.has(key)) return; seen.add(key); const ct = r.contact || {};
+      // Dirigeant exclu de la prospection : le résultat est jeté, pas rangé dans le listing.
+      if (dirigeantExclu({ contactPrenom: ct.prenom, contactNom: ct.nom, siren: r.siren })) { refusesDir++; return; }
+      // La consigne « privilégie les chaînes » n'était qu'une suggestion faite au modèle, que rien
+      // ne vérifiait ensuite. Le type renvoyé est maintenant contrôlé : hors cible, la fiche est
+      // écartée. Un « autre » passe, faute de quoi on jetterait une fiche mal typée mais valable.
+      if (!cibleAccepte(kind, r.type)) { horsCible++; return; }
+      add.push({ id: "p_" + Date.now() + "_" + add.length, nom, enseigne: r.enseigne || "", type: ["cooperative", "chaine", "franchise", "independant", "specialiste", "gss", "autre"].includes(r.type) ? r.type : "autre", format: "", adresse: r.adresse || "", ville: r.ville || "", cp: r.cp || "", departement: r.departement || "", region: r.region || "", telephone: r.telephone || "", site: r.site || "", email: r.email || "", statut: "a_qualifier", potentiel: "", notes: r.notes || "", source: "Recherche IA · " + today, accountId: null, createdAt: today, siren: r.siren || "", siret: r.siret || "", raisonSociale: r.raisonSociale || "", formeJuridique: r.formeJuridique || "", contactPrenom: ct.prenom || "", contactNom: ct.nom || "", contactFonction: ct.fonction || "", contactEmail: ct.email || "", contactTel: ct.telephone || "", contactSource: ct.source || "" }); });
+    persist((d) => ({ ...d, prospects: add.length ? [...add, ...d.prospects] : d.prospects, claudeUsage: addUsage(d.claudeUsage, usage) }));
+    const exDir = (refusesDir ? " " + refusesDir + " résultat(s) refusé(s) : dirigeant exclu de la prospection (achats en centrale, ou magasin détenu par sa tête de réseau)." : "")
+      + (horsCible ? " " + horsCible + " hors cible « " + CIBLE_LABEL[kind] + " »." : "");
+    const tous = [...osmAdd, ...add];
+    return { created: tous, ids: tous.map((a) => a.id), msg: (add.length ? add.length + " prospect(s) ajouté(s) au listing, statut « À qualifier ». À vérifier avant action." : "Aucun nouveau prospect (déjà présents ou aucun résultat exploitable).") + exDir };
+  } catch (e) {
+    const m = String((e && e.message) || e); const slow = /50[24]|delai|timeout|aborted|abort/i.test(m);
+    return { err: slow ? "La recherche IA a mis trop de temps à répondre (elle interroge le web et les registres officiels en direct). Réessaie, ou précise une zone plus petite / un établissement précis pour accélérer." : ("Recherche IA momentanément indisponible (" + m + "). Réessaie dans un instant.") };
+  }
+}
 function Prospection({ data, persist, go }) {
   const { prospects } = data;
   const [importOpen, setImportOpen] = useState(false);
@@ -11853,78 +11967,18 @@ function Prospection({ data, persist, go }) {
   const mapsUrl = (p) => "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent([p.nom, p.adresse, p.cp, p.ville].filter(Boolean).join(" "));
   const runAI = () => {
     if (aiJobs.has("prospects:search")) return;
-    // Le champ étant vide par défaut, lancer sans zone deviendrait le geste le plus courant : une
-    // recherche « France » entière est très lente côté OpenStreetMap et peut basculer sur l'IA
-    // payante. On demande donc une zone plutôt que de partir sur un périmètre national par défaut.
     if (!zone.trim()) { setAiErr("Indiquez d'abord une zone (région, département, ville) ou le nom d'un établissement précis."); return; }
     setBusy(true); setAiErr(null); setAiMsg(null);
     // Registre global : la recherche continue même si l'on quitte l'onglet, et reste visible partout.
     aiJobs.run("prospects:search", "Recherche de prospects", async () => {
       try {
-        const z = zone.trim() || "France";
-        // ===== Sources 100 % GRATUITES : registres officiels, aucune IA, aucune dépense =====
-        if (source !== "magasins") {
-          // La zone doit d'abord être résolue en département / commune. Si elle ne l'est pas, c'est
-          // soit une saisie non reconnue, soit un registre momentanément indisponible : on le dit,
-          // au lieu d'afficher « aucun résultat » qui ferait croire à une zone vide.
-          const gz = await geoResolveZone(z);
-          if (!gz) { setAiErr("Zone « " + z + " » non reconnue, ou service d'annuaire momentanément indisponible. Saisissez une ville, un numéro de département (ex. 31) ou un nom de département, puis réessayez."); return; }
-          let lignes = [], libelle = "";
-          if (source === "ecoles") { lignes = await educationSearch(z); libelle = "établissement(s) scolaire(s)"; }
-          else if (source === "ime") { lignes = await imeSearch(z); libelle = "IME"; }
-          else if (source === "associations") { lignes = await associationSearch(z, assoMot); libelle = "association(s)"; }
-          else if (source === "naf") { lignes = await nafSearch(z, naf, { taille, forme, cible: kind }); libelle = "entreprise(s)"; }
-          else if (source === "mediatheques") { lignes = await osmSearchLieux(z, '["amenity"="library"]', "mediatheque"); libelle = "médiathèque(s)"; }
-          // Dédoublonnage sur les mêmes clés que le reste de l'application : on ne recrée jamais une
-          // fiche déjà présente (prospect, établissement ou groupe).
-          const drafts = lignes.map((l) => ({ ...l, statut: "a_qualifier", potentiel: "", source: "Registre officiel · " + TODAY(), accountId: null, createdAt: TODAY() }));
-          const { created, skipped, sieges, exclus } = createDraftsWithDedup(drafts, data);
-          if (created.length) {
-            persist((d) => ({ ...d, prospects: [...created, ...(d.prospects || [])] }));
-            setQ(""); setFType("tous"); setFRegion("tous"); marquerNouveaux(created.map((c) => c.id));
-          }
-          const dup = (skipped ? " " + skipped + " doublon(s) écarté(s)." : "")
-            + ((sieges && sieges.length) ? " " + sieges.length + " ligne(s) refusée(s) : identité du siège d'un groupe déjà enregistré." : "")
-            + ((exclus && exclus.length) ? " " + exclus.length + " résultat(s) refusé(s) : " + [...new Set(exclus.map((x) => x.motif))].slice(0, 2).join(" ; ") + "." : "");
-          setAiMsg(created.length
-            ? created.length + " " + libelle + " ajouté(s) au listing, sans aucune dépense." + dup + " À vérifier avant action."
-            : ("Aucun nouveau résultat pour cette zone." + dup));
-          return;
-        }
-        // ===== Magasins : OpenStreetMap d'abord (gratuit), l'IA seulement si nécessaire =====
-        // Étage 1 GRATUIT : OpenStreetMap liste les magasins jouets / jeux / loisirs créatifs de la
-        // zone avec adresse, téléphone, site et horaires. L'IA (payante) n'est appelée qu'ensuite,
-        // et seulement si OSM n'a pas suffi (zone peu cartographiée ou recherche d'un nom précis).
-        let osm = [];
-        try { osm = await osmSearchStores(z); } catch (e) {}
-        const seenOsm = new Set(data.prospects.map((p) => ((p.nom || "") + "|" + (p.ville || "")).toLowerCase()));
-        const osmNew = osm.filter((s) => { const k = ((s.nom || "") + "|" + (s.ville || "")).toLowerCase(); if (seenOsm.has(k)) return false; seenOsm.add(k); return true; })
-          // « Cible » filtre pour de bon. OpenStreetMap porte une étiquette « brand » sur les points de
-          // vente de réseau : sa présence distingue une chaîne d'un indépendant sans rien deviner.
-          .filter((s) => cibleAccepte(kind, s.enseigne ? "chaine" : "independant"));
-        const today0 = TODAY();
-        const osmAdd = osmNew.map((s, i) => ({ id: "p_osm_" + Date.now() + "_" + i, nom: s.nom, enseigne: s.enseigne || "", type: s.enseigne ? "chaine" : "independant", format: "", adresse: s.adresse || "", ville: s.ville || "", cp: s.cp || "", departement: cpToDepartement(s.cp) || "", region: DEPT_REGION[cpToDepartement(s.cp)] || "", telephone: s.telephone || "", site: s.site || "", email: s.email || "", facebook: s.facebook || "", instagram: s.instagram || "", horaires: s.horaires || "", statut: "a_qualifier", potentiel: "", notes: "", source: "OpenStreetMap (gratuit) · " + today0, accountId: null, createdAt: today0, siren: "", siret: "", raisonSociale: "", formeJuridique: "", contactPrenom: "", contactNom: "", contactFonction: "", contactEmail: "", contactTel: "", contactSource: "", lat: s.lat, lng: s.lng }));
-        if (osmAdd.length) persist((d) => ({ ...d, prospects: [...osmAdd, ...d.prospects] }));
-        // OSM a suffi : on s'arrête là, sans dépenser un seul crédit IA.
-        if (osmAdd.length >= 6) { setQ(""); setFType("tous"); setFRegion("tous"); marquerNouveaux(osmAdd.map((a) => a.id)); setAiMsg(osmAdd.length + " prospect(s) ajouté(s) depuis OpenStreetMap — gratuitement, sans crédit IA. Statut « À qualifier », à vérifier."); return; }
-        const { stores: arr, usage } = await aiSearchStores(z, kind);
-        const seen = new Set(data.prospects.concat(osmAdd).map((p) => ((p.nom || "") + "|" + (p.ville || "")).toLowerCase())); const today = TODAY(); const add = [];
-        let refusesDir = 0; let horsCible = 0;
-        arr.forEach((r) => { const nom = (r.nom || r.enseigne || "").trim(); if (!nom) return; const key = (nom + "|" + (r.ville || "")).toLowerCase(); if (seen.has(key)) return; seen.add(key); const ct = r.contact || {};
-          // Dirigeant exclu de la prospection : le résultat est jeté, pas rangé dans le listing.
-          if (dirigeantExclu({ contactPrenom: ct.prenom, contactNom: ct.nom, siren: r.siren })) { refusesDir++; return; }
-          // La consigne « privilégie les chaînes » n'était qu'une suggestion faite au modèle, que rien
-          // ne vérifiait ensuite. Le type renvoyé est maintenant contrôlé : hors cible, la fiche est
-          // écartée. Un « autre » passe, faute de quoi on jetterait une fiche mal typée mais valable.
-          if (!cibleAccepte(kind, r.type)) { horsCible++; return; }
-          add.push({ id: "p_" + Date.now() + "_" + add.length, nom, enseigne: r.enseigne || "", type: ["cooperative", "chaine", "franchise", "independant", "specialiste", "gss", "autre"].includes(r.type) ? r.type : "autre", format: "", adresse: r.adresse || "", ville: r.ville || "", cp: r.cp || "", departement: r.departement || "", region: r.region || "", telephone: r.telephone || "", site: r.site || "", email: r.email || "", statut: "a_qualifier", potentiel: "", notes: r.notes || "", source: "Recherche IA · " + today, accountId: null, createdAt: today, siren: r.siren || "", siret: r.siret || "", raisonSociale: r.raisonSociale || "", formeJuridique: r.formeJuridique || "", contactPrenom: ct.prenom || "", contactNom: ct.nom || "", contactFonction: ct.fonction || "", contactEmail: ct.email || "", contactTel: ct.telephone || "", contactSource: ct.source || "" }); });
-        persist((d) => ({ ...d, prospects: add.length ? [...add, ...d.prospects] : d.prospects, claudeUsage: addUsage(d.claudeUsage, usage) }));
-        if (add.length) { setQ(""); setFType("tous"); setFRegion("tous"); marquerNouveaux(add.map((a) => a.id)); }
-        const exDir = (refusesDir ? " " + refusesDir + " résultat(s) refusé(s) : dirigeant exclu de la prospection (achats en centrale, ou magasin détenu par sa tête de réseau)." : "")
-          + (horsCible ? " " + horsCible + " hors cible « " + CIBLE_LABEL[kind] + " »." : "");
-        setAiMsg((add.length ? add.length + " prospect(s) ajouté(s) au listing, statut « À qualifier ». À vérifier avant action." : "Aucun nouveau prospect (déjà présents ou aucun résultat exploitable).") + exDir);
-      } catch (e) { const m = String((e && e.message) || e); const slow = /50[24]|delai|timeout|aborted|abort/i.test(m); setAiErr(slow ? "La recherche IA a mis trop de temps à répondre (elle interroge le web et les registres officiels en direct). Réessaie, ou précise une zone plus petite / un établissement précis pour accélérer." : ("Recherche IA momentanément indisponible (" + m + "). Réessaie dans un instant.")); }
-      finally { setBusy(false); }
+        const r = await chercherProspects({ zone, source, kind, naf, taille, forme, assoMot, data, persist });
+        if (r.err) { setAiErr(r.err); return; }
+        // Les filtres en cours masqueraient les fiches à peine créées : on les relâche pour que le
+        // résultat de la recherche soit visible immédiatement, puis on le met en évidence.
+        if (r.ids && r.ids.length) { setQ(""); setFType("tous"); setFRegion("tous"); marquerNouveaux(r.ids); }
+        setAiMsg(r.msg);
+      } finally { setBusy(false); }
     });
   };
   const hasFilter = q || fType !== "tous" || fRegion !== "tous" || fTag !== "tous" || fList !== "tous" || fIncomplete || fOuvert;
