@@ -114,6 +114,14 @@ const aiPanels = {
   // Oublie tout ce qui concerne un dossier (ex. « recommencer » dans le volet).
   clear(scope) { const pre = scope + "|"; [...this.vals.keys()].filter((k) => k.startsWith(pre)).forEach((k) => { this.vals.delete(k); const s = this.subs.get(k); if (s) s.forEach((f) => { try { f(undefined); } catch (e) {} }); }); },
 };
+// Réglages d'affichage d'un onglet — filtres, recherche, tri, sélection — conservés d'un passage à
+// l'autre. Changer d'onglet DÉMONTE le précédent : sans cela, on retrouvait la carte vierge de ses
+// filtres au retour, et il fallait tout recocher. S'utilise exactement comme useState.
+//
+// Ne conviennent PAS à ce traitement : les fenêtres modales, les indicateurs d'activité et les
+// messages passagers. Rouvrir une modale que l'utilisateur croyait fermée serait déroutant, et un
+// « chargement en cours » figé mentirait sur l'état réel.
+const useVue = (vue, cle, initial) => useKept("vue:" + vue, cle, initial);
 // useState dont la valeur survit à la fermeture de la fenêtre, et que peut alimenter un traitement en
 // cours même fenêtre fermée. S'utilise exactement comme useState.
 function useKept(scope, key, initial) {
@@ -5860,11 +5868,11 @@ function ArchiveModal({ account, existing, onUsage, onArchive, onClose, noun = "
   </Modal>);
 }
 function Accounts({ data, persist, go, focus }) {
-  const { accounts, contacts } = data; const [detailId, setDetailId] = useState(null); const [edit, setEdit] = useState(null); const [addC, setAddC] = useState(null); const [openSite, setOpenSite] = useState(null); const [q, setQ] = useState(""); const [sortPdv, setSortPdv] = useState("nom"); const [dirPdv, setDirPdv] = useState("asc"); const [archQ, setArchQ] = useState(""); const [archSort, setArchSort] = useState("date"); const [archDir, setArchDir] = useState("desc"); const [siteAdd, setSiteAdd] = useState(null); const [siteDetailId, setSiteDetailId] = useState(null); const [logosOpen, setLogosOpen] = useState(false); const [enrichEtabOpen, setEnrichEtabOpen] = useState(false); const [enrichEtabMsg, setEnrichEtabMsg] = useState(null); const [dupOpen, setDupOpen] = useState(false); const [view, setView] = useState("actifs"); const [archiveEdit, setArchiveEdit] = useState(null);
+  const { accounts, contacts } = data; const [detailId, setDetailId] = useState(null); const [edit, setEdit] = useState(null); const [addC, setAddC] = useState(null); const [openSite, setOpenSite] = useState(null); const [q, setQ] = useVue("etablissements", "q", ""); const [sortPdv, setSortPdv] = useVue("etablissements", "sortPdv", "nom"); const [dirPdv, setDirPdv] = useVue("etablissements", "dirPdv", "asc"); const [archQ, setArchQ] = useVue("etablissements", "archQ", ""); const [archSort, setArchSort] = useVue("etablissements", "archSort", "date"); const [archDir, setArchDir] = useVue("etablissements", "archDir", "desc"); const [siteAdd, setSiteAdd] = useState(null); const [siteDetailId, setSiteDetailId] = useState(null); const [logosOpen, setLogosOpen] = useState(false); const [enrichEtabOpen, setEnrichEtabOpen] = useState(false); const [enrichEtabMsg, setEnrichEtabMsg] = useState(null); const [dupOpen, setDupOpen] = useState(false); const [view, setView] = useVue("etablissements", "view", "actifs"); const [archiveEdit, setArchiveEdit] = useState(null);
   // Piles d'établissements dépliées (cf. la grille plus bas). Ce hook doit rester AVANT les
   // retours anticipés des vues « fiche compte » et « fiche établissement » : un hook sauté
   // change le nombre de hooks entre deux rendus, et React refuse net.
-  const [pilesOuvertes, setPilesOuvertes] = useState(() => new Set());
+  const [pilesOuvertes, setPilesOuvertes] = useVue("etablissements", "pilesOuvertes", () => new Set());
   const basculerPile = (id) => setPilesOuvertes((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   useEffect(() => { if (focus && focus.site) { setSiteDetailId(focus.site); setDetailId(null); } else if (focus && focus.id) { setDetailId(focus.id); setSiteDetailId(null); } }, [focus && focus.n]);
   // Enrichissement IA des établissements : même moteur et même déroulé que la Prospection
@@ -9247,26 +9255,30 @@ function Carte({ data, persist, go, focus }) {
   const isArch = (s) => { if (s.archived) return true; const a = accOf(s.accountId); return !!(a && a.archived); };
   const liveSites = sites.filter((s) => !isArch(s));
   const placed = liveSites.filter((s) => s.lat && s.lng);
-  const [sel, setSel] = useState(placed[0]?.id || null); const [edit, setEdit] = useState(null);
-  const [filtSurf, setFiltSurf] = useState([]); const [filtCat, setFiltCat] = useState([]); const [filtStage, setFiltStage] = useState([]);
-  const [useOSRM, setUseOSRM] = useState(false);
+  const [sel, setSel] = useVue("carte", "sel", placed[0]?.id || null); const [edit, setEdit] = useState(null);
+  // La sélection étant conservée d'un passage à l'autre, elle peut désigner un établissement
+  // supprimé entre-temps : on retombe alors sur le premier de la carte, plutôt que de laisser un
+  // volet de détail vide sans que rien n'explique pourquoi.
+  useEffect(() => { if (sel && !placed.some((x) => x.id === sel)) setSel(placed[0]?.id || null); }, [placed, sel]);
+  const [filtSurf, setFiltSurf] = useVue("carte", "filtSurf", []); const [filtCat, setFiltCat] = useVue("carte", "filtCat", []); const [filtStage, setFiltStage] = useVue("carte", "filtStage", []);
+  const [useOSRM, setUseOSRM] = useVue("carte", "useOSRM", false);
   const [osrmCache, setOsrmCache] = useState({});
-  const [tourneeOrder, setTourneeOrder] = useState(null);
+  const [tourneeOrder, setTourneeOrder] = useVue("carte", "tourneeOrder", null);
   const [mePos, setMePos] = useState(null); const [meMsg, setMeMsg] = useState(null); const [meBusy, setMeBusy] = useState(false);
-  const [showLegend, setShowLegend] = useState(false);
-  const [showRoads, setShowRoads] = useState(true);
+  const [showLegend, setShowLegend] = useVue("carte", "showLegend", false);
+  const [showRoads, setShowRoads] = useVue("carte", "showRoads", true);
   // « siteRecherche » et non « siteQuery » : ce dernier nom masquerait la fonction utilitaire
   // globale siteQuery(s, enseigne), appelée plus bas pour le lien Google Maps de la fiche — l'ombre
   // faisait planter tout l'onglet (« siteQuery is not a function ») dès qu'un site était sélectionné.
-  const [siteRecherche, setSiteRecherche] = useState("");
+  const [siteRecherche, setSiteRecherche] = useVue("carte", "siteRecherche", "");
   const mapEl = useRef(null); const mapInst = useRef(null); const markersLayer = useRef(null); const routesLayer = useRef(null); const roadsLayer = useRef(null);
   // Isochrone : polygone « à moins de N minutes » + fiches qu'il contient.
   const isoLayer = useRef(null);
   // Analyse de secteurs : départements colorés selon la part de clients facturés parmi les fiches
   // suivies (sites + prospects). Contours France entière téléchargés une fois puis mis en cache local.
   const secteursLayer = useRef(null);
-  const [secteurs, setSecteurs] = useState(false); const [sectMsg, setSectMsg] = useState(null); const [sectBusy, setSectBusy] = useState(false);
-  const [isoMin, setIsoMin] = useState(30); const [isoBusy, setIsoBusy] = useState(false); const [isoMsg, setIsoMsg] = useState(null);
+  const [secteurs, setSecteurs] = useVue("carte", "secteurs", false); const [sectMsg, setSectMsg] = useState(null); const [sectBusy, setSectBusy] = useState(false);
+  const [isoMin, setIsoMin] = useVue("carte", "isoMin", 30); const [isoBusy, setIsoBusy] = useState(false); const [isoMsg, setIsoMsg] = useState(null);
   // Marqueurs indexés par id de site, pour la mise en avant au survol de la liste « Tous les sites ».
   const markerById = useRef({});
   const [mapReady, setMapReady] = useState(false);
@@ -11004,16 +11016,16 @@ function EnrichSelectModal({ prospects, onClose, onLaunch }) {
 function Prospection({ data, persist, go }) {
   const { prospects } = data;
   const [importOpen, setImportOpen] = useState(false);
-  const [q, setQ] = useState(""); const [fType, setFType] = useState("tous"); const [fRegion, setFRegion] = useState("tous"); const [sort, setSort] = useState("type"); const [dir, setDir] = useState("asc"); const [view, setView] = useState("actifs"); const [archiveEdit, setArchiveEdit] = useState(null); const [dupOpen, setDupOpen] = useState(null); const [mailingOpen, setMailingOpen] = useState(false);
-  const [fTag, setFTag] = useState("tous"); const [fList, setFList] = useState("tous"); const [fIncomplete, setFIncomplete] = useState(false);
+  const [q, setQ] = useVue("prospection", "q", ""); const [fType, setFType] = useVue("prospection", "fType", "tous"); const [fRegion, setFRegion] = useVue("prospection", "fRegion", "tous"); const [sort, setSort] = useVue("prospection", "sort", "type"); const [dir, setDir] = useVue("prospection", "dir", "asc"); const [view, setView] = useVue("prospection", "view", "actifs"); const [archiveEdit, setArchiveEdit] = useState(null); const [dupOpen, setDupOpen] = useState(null); const [mailingOpen, setMailingOpen] = useState(false);
+  const [fTag, setFTag] = useVue("prospection", "fTag", "tous"); const [fList, setFList] = useVue("prospection", "fList", "tous"); const [fIncomplete, setFIncomplete] = useVue("prospection", "fIncomplete", false);
   // Recherche et tri de la vue « Archivés », comme dans les autres listes. Tri par défaut : date
   // d'archivage décroissante (comportement historique, les derniers archivés en tête).
-  const [archQ, setArchQ] = useState(""); const [archSort, setArchSort] = useState("date"); const [archDir, setArchDir] = useState("desc");
+  const [archQ, setArchQ] = useVue("prospection", "archQ", ""); const [archSort, setArchSort] = useVue("prospection", "archSort", "date"); const [archDir, setArchDir] = useVue("prospection", "archDir", "desc");
   // Filtre « ouvert maintenant ». Il ne retient QUE les fiches dont les horaires sont interprétés et
   // en cours : une fiche sans horaires (pastille orange) est écartée, puisqu'on ne peut pas affirmer
   // qu'elle est ouverte — la confondre avec une ouverte enverrait passer un appel dans le vide.
-  const [fOuvert, setFOuvert] = useState(false);
-  const [selMode, setSelMode] = useState(false); const [selIds, setSelIds] = useState(() => new Set());
+  const [fOuvert, setFOuvert] = useVue("prospection", "fOuvert", false);
+  const [selMode, setSelMode] = useVue("prospection", "selMode", false); const [selIds, setSelIds] = useVue("prospection", "selIds", () => new Set());
   const [sirBusy, setSirBusy] = useState(false); const [sirMsg, setSirMsg] = useState(null);
   const [edit, setEdit] = useState(null);
   // Champ vide au départ : « Occitanie » était pré-saisi en dur, donc à retaper à chaque recherche
