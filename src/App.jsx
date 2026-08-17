@@ -9278,8 +9278,6 @@ function Carte({ data, persist, go, focus }) {
   const [fondPlan, setFondPlan] = useVue("carte", "fondPlan", false);
   // Dernier cadrage : centre et zoom, restitués au retour sur l'onglet.
   const [cadrage, setCadrage] = useVue("carte", "cadrage", null);
-  // Message fugace « Ctrl + molette pour zoomer », affiché quand on tourne la molette sans Ctrl.
-  const [molette, setMolette] = useState(false);
   const mapEl = useRef(null); const mapInst = useRef(null); const markersLayer = useRef(null); const routesLayer = useRef(null); const roadsLayer = useRef(null);
   const satLayer = useRef(null); const labelsLayer = useRef(null); const planLayer = useRef(null);
   // Sélection rectangulaire : couche du tracé, mode actif, et fiches retenues.
@@ -9290,6 +9288,8 @@ function Carte({ data, persist, go, focus }) {
   // Recherche de prospects depuis la carte (même moteur que l'onglet Prospection). La zone saisie
   // est conservée d'un passage à l'autre, le compte rendu non : il parle d'une recherche passée.
   const [rechZone, setRechZone] = useVue("carte", "rechZone", "");
+  const [rechSource, setRechSource] = useVue("carte", "rechSource", "magasins");
+  const [rechKind, setRechKind] = useVue("carte", "rechKind", "toutes");
   const [rechBusy, setRechBusy] = useState(false); const [rechMsg, setRechMsg] = useState(null);
   // Isochrone : polygone « à moins de N minutes » + fiches qu'il contient.
   const isoLayer = useRef(null);
@@ -9303,25 +9303,10 @@ function Carte({ data, persist, go, focus }) {
   const [mapReady, setMapReady] = useState(false);
   const [LF, setLF] = useState(null);
   // Leaflet (≈ 150 Ko) est chargé à la demande, uniquement à l'ouverture de la carte :
-  // il n'alourdit donc pas le démarrage des autres onglets. Le regroupement de marqueurs
-  // (markercluster) s'installe SUR Leaflet : il doit donc être importé après lui, jamais en
-  // parallèle, sinon il ne trouve pas la bibliothèque qu'il vient compléter.
+  // il n'alourdit donc pas le démarrage des autres onglets.
   useEffect(() => {
     let on = true;
-    (async () => {
-      try {
-        const mod = await import("leaflet");
-        const L = mod.default || mod;
-        await import("leaflet/dist/leaflet.css");
-        try {
-          window.L = L; // markercluster s'accroche au L global quand il en trouve un
-          await import("leaflet.markercluster");
-          await import("leaflet.markercluster/dist/MarkerCluster.css");
-          await import("leaflet.markercluster/dist/MarkerCluster.Default.css");
-        } catch (e) { /* sans regroupement, la carte reste utilisable : un marqueur par fiche */ }
-        if (on) setLF(L);
-      } catch (e) { }
-    })();
+    Promise.all([import("leaflet"), import("leaflet/dist/leaflet.css")]).then(([mod]) => { if (on) setLF(mod.default || mod); }).catch(() => { });
     return () => { on = false; };
   }, []);
   // ===== Isochrone : « qui est à moins de N minutes d'ici ? » =====
@@ -9498,7 +9483,10 @@ function Carte({ data, persist, go, focus }) {
     if (rechBusy) return;
     setRechBusy(true); setRechMsg(null);
     try {
-      const r = await chercherProspects({ zone: rechZone, data, persist });
+      // Les réglages fins propres au registre NAF — code d'activité, taille, forme juridique — et
+      // le mot-clé des associations restent dans l'onglet Prospection : ici on part de leurs
+      // valeurs par défaut, la carte servant à couvrir une zone, pas à composer une requête.
+      const r = await chercherProspects({ zone: rechZone, source: rechSource, kind: rechKind, naf: NAF_CIBLES[0].code, taille: "", forme: "", assoMot: "ludothèque", data, persist });
       if (r.err) { setRechMsg({ ok: false, t: r.err }); return; }
       setRechMsg({ ok: true, t: r.msg });
       if (r.created && r.created.length) {
@@ -9660,11 +9648,11 @@ function Carte({ data, persist, go, focus }) {
     LF.control.zoom({ position: "topright" }).addTo(map);
     LF.control.scale({ imperial: false, metric: true, position: "bottomleft" }).addTo(map);
     routesLayer.current = LF.layerGroup().addTo(map);
-    // Regroupement : au-delà d'une poignée de fiches dans la même ville, les marqueurs se
-    // superposent et deviennent tous inatteignables. Le cluster les remplace par une pastille
-    // comptée, qui se rouvre au zoom ou au clic. Si la bibliothèque n'a pas pu être chargée, on
-    // retombe sur un simple groupe de calques : un marqueur par fiche, comme avant.
-    markersLayer.current = (LF.markerClusterGroup ? LF.markerClusterGroup({ maxClusterRadius: 45, disableClusteringAtZoom: 13, spiderfyOnMaxZoom: true, showCoverageOnHover: false, chunkedLoading: true }) : LF.layerGroup()).addTo(map);
+    // Un marqueur par fiche, toujours : le regroupement en pastilles comptées a été essayé puis
+    // retiré. Il remplaçait la carte des implantations — ce qu'on vient y lire — par une carte de
+    // densité, et masquait la forme et la couleur de chaque établissement, qui portent justement
+    // le type de site et le type de surface.
+    markersLayer.current = LF.layerGroup().addTo(map);
     isoLayer.current = LF.layerGroup().addTo(map);
     zoneLayer.current = LF.layerGroup().addTo(map);
     mapInst.current = map;
@@ -9673,16 +9661,8 @@ function Carte({ data, persist, go, focus }) {
     // un seul pas, puis on VERROUILLE tant que des événements continuent d'arriver : le
     // verrou ne se relâche qu'après 110 ms sans aucun événement (fin réelle du cran), ce qui
     // neutralise les rafales longues (souris/pavés à défilement lissé).
-    //
-    // Le zoom exige la touche Ctrl (ou Cmd). Sans elle, la molette laisse la page défiler : la
-    // carte occupe les trois quarts de la hauteur, et l'intercepter revenait à emprisonner le
-    // défilement dès que le pointeur passait dessus.
-    let zoomBusy = false; let idleT = null; let hintT = null;
+    let zoomBusy = false; let idleT = null;
     const onWheel = (e) => {
-      if (!e.ctrlKey && !e.metaKey) {
-        setMolette(true); clearTimeout(hintT); hintT = setTimeout(() => setMolette(false), 1400);
-        return; // pas de preventDefault : la page défile normalement
-      }
       e.preventDefault();
       clearTimeout(idleT); idleT = setTimeout(() => { zoomBusy = false; }, 110);
       if (zoomBusy) return;
@@ -9701,7 +9681,7 @@ function Carte({ data, persist, go, focus }) {
     map.on("contextmenu", onCtx);
     setTimeout(() => { try { map.invalidateSize(); } catch (e) { } }, 60);
     setMapReady(true);
-    return () => { clearTimeout(idleT); clearTimeout(hintT); try { wheelEl.removeEventListener("wheel", onWheel); } catch (e) { } try { map.off("moveend", onMove); map.off("zoomend", onMove); map.off("contextmenu", onCtx); } catch (e) { } try { map.remove(); } catch (e) { } mapInst.current = null; markersLayer.current = null; routesLayer.current = null; roadsLayer.current = null; zoneLayer.current = null; setMapReady(false); };
+    return () => { clearTimeout(idleT); try { wheelEl.removeEventListener("wheel", onWheel); } catch (e) { } try { map.off("moveend", onMove); map.off("zoomend", onMove); map.off("contextmenu", onCtx); } catch (e) { } try { map.remove(); } catch (e) { } mapInst.current = null; markersLayer.current = null; routesLayer.current = null; roadsLayer.current = null; zoneLayer.current = null; setMapReady(false); };
   }, [LF]);
   // Fond de carte : plan seul, ou imagerie + noms de lieux (+ axes routiers au choix). Le plan
   // porte déjà ses rues et ses étiquettes, les surcouches n'y ont donc pas leur place.
@@ -9713,7 +9693,15 @@ function Carte({ data, persist, go, focus }) {
     pose(labelsLayer.current, !fondPlan);
     pose(roadsLayer.current, !fondPlan && showRoads);
     // Les fonds doivent rester sous les tracés (routes, zones, secteurs).
-    try { [planLayer.current, satLayer.current, labelsLayer.current, roadsLayer.current].forEach((c) => c && map.hasLayer(c) && c.bringToBack()); } catch (e) { }
+    // Le fond descend au dernier plan, mais les surcouches de référence — noms de villes et de
+    // rues, frontières de départements, de régions et de pays, axes routiers — doivent rester
+    // AU-DESSUS de lui : les renvoyer toutes au fond, comme on le faisait ici, revenait à les
+    // cacher derrière l'imagerie, et la carte satellite se retrouvait muette.
+    try {
+      const base = fondPlan ? planLayer.current : satLayer.current;
+      if (base && map.hasLayer(base)) base.bringToBack();
+      [labelsLayer.current, roadsLayer.current].forEach((c) => { if (c && map.hasLayer(c)) c.bringToFront(); });
+    } catch (e) { }
   }, [mapReady, fondPlan, showRoads]);
   // Marqueurs : un divIcon SVG par site (forme = type, couleur = enseigne), surbrillance + étiquette sur le sélectionné.
   //
@@ -9947,9 +9935,23 @@ function Carte({ data, persist, go, focus }) {
     <div className="card" style={{ marginBottom: 12, padding: "10px 14px" }}>
       <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 700, whiteSpace: "nowrap" }}><Sparkles size={15} style={{ color: "var(--orange)" }} /> Recherche de prospects</span>
-        <input value={rechZone} onChange={(e) => setRechZone(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") lancerRecherche(); }} placeholder="Ex. Occitanie, Bordeaux, Genève, Bruxelles… ou « L'Atelier chez soi »" style={{ flex: 1, minWidth: 220, padding: "7px 11px", border: "1px solid var(--line)", borderRadius: 9, fontFamily: "inherit", fontSize: 13 }} />
-        <button className="btn btn-ai btn-s" onClick={lancerRecherche} disabled={rechBusy}><Search size={14} className={rechBusy ? "spin" : ""} /> {rechBusy ? "Recherche…" : "Chercher"}</button>
+        <input value={rechZone} onChange={(e) => setRechZone(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") lancerRecherche(); }} placeholder={rechSource === "magasins" ? "Ex. Occitanie, Bordeaux, Genève, Bruxelles… ou « L'Atelier chez soi »" : "Ville, département (31) ou nom de département"} style={{ flex: 1, minWidth: 200, padding: "7px 11px", border: "1px solid var(--line)", borderRadius: 9, fontFamily: "inherit", fontSize: 13 }} />
+        {/* Chaque source interroge un registre officiel différent : le choix change complètement
+            la nature des fiches créées (et, pour toutes sauf « magasins », le coût est nul). */}
+        <select value={rechSource} onChange={(e) => setRechSource(e.target.value)} title="Quel registre interroger" style={{ padding: "7px 9px", border: "1px solid var(--line)", borderRadius: 9, fontFamily: "inherit", fontSize: 12.5, background: "#fff", maxWidth: 260 }}>
+          <option value="magasins">Magasins de jouets / loisirs (France, Suisse, Belgique)</option>
+          <option value="naf">Commerces par code d'activité (NAF · France)</option>
+          <option value="ecoles">Scolaire (écoles, collèges, lycées · France)</option>
+          <option value="ime">IME &amp; instituts médico-éducatifs (France)</option>
+          <option value="associations">Associations &amp; ludothèques (France)</option>
+          <option value="mediatheques">Médiathèques &amp; bibliothèques</option>
+        </select>
+        {(rechSource === "magasins" || rechSource === "naf") && <select value={rechKind} onChange={(e) => setRechKind(e.target.value)} title={rechSource === "naf" ? "Déterminé par le nombre d'établissements ouverts de la société (" + SEUIL_RESEAU + " ou plus = réseau), donnée du registre." : "Déterminé par l'enseigne de réseau déclarée sur le point de vente."} style={{ padding: "7px 9px", border: "1px solid var(--line)", borderRadius: 9, fontFamily: "inherit", fontSize: 12.5, background: "#fff" }}>
+          <option value="toutes">Cible : tous</option><option value="chaine">Chaînes &amp; franchises</option><option value="independant">Indépendants &amp; concept stores</option>
+        </select>}
+        <button className="btn btn-ai btn-s" onClick={lancerRecherche} disabled={rechBusy}><Search size={14} className={rechBusy ? "spin" : ""} /> {rechBusy ? "Recherche…" : (rechSource === "magasins" ? "Chercher" : "Chercher (gratuit)")}</button>
       </div>
+      {rechSource === "naf" && <div style={{ marginTop: 6, fontSize: 11, color: "var(--muted)" }}>Code d'activité {NAF_CIBLES[0].code} — {NAF_CIBLES[0].label.toLowerCase()}, toutes tailles et toutes formes juridiques. Pour choisir un autre code ou affiner, passez par l'onglet Prospection.</div>}
       {rechMsg && <div style={{ marginTop: 8, fontSize: 12.5, lineHeight: 1.5, color: rechMsg.ok ? "var(--ink)" : "var(--red)", display: "flex", alignItems: "flex-start", gap: 7 }}><Sparkles size={14} style={{ color: rechMsg.ok ? "var(--orange)" : "var(--red)", flexShrink: 0, marginTop: 2 }} /><span style={{ flex: 1 }}>{rechMsg.t}</span><button className="iconbtn" onClick={() => setRechMsg(null)} title="Fermer"><X size={14} /></button></div>}
     </div>
     <div className="filtbar">
@@ -9963,7 +9965,6 @@ function Carte({ data, persist, go, focus }) {
         <div className="mapwrap" style={{ height: "clamp(460px, 74vh, 900px)" }}>
           <div ref={mapEl} style={{ position: "absolute", inset: 0, opacity: mapReady ? 1 : 0, transition: "opacity .55s ease" }} />
           {!mapReady && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "var(--muted)", fontSize: 13, fontWeight: 600, gap: 8, zIndex: 5, pointerEvents: "none" }}><RefreshCw size={18} className="spin" /> Chargement de la carte…</div>}
-          {molette && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", zIndex: 500, pointerEvents: "none" }}><span style={{ background: "rgba(20,22,30,.78)", color: "#fff", fontSize: 13, fontWeight: 700, padding: "9px 15px", borderRadius: 11 }}>Ctrl + molette pour zoomer</span></div>}
           {zoneMode && <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 500, pointerEvents: "none", background: "rgba(20,22,30,.78)", color: "#fff", fontSize: 12, fontWeight: 600, padding: "6px 11px", borderRadius: 9 }}>Glissez pour cerner une zone · un simple clic annule</div>}
           <div className="zoomctl" style={{ right: "auto", left: 12 }}>
             <button className="zbtn" title="Recadrer sur tous les sites" onClick={() => { const pts = sites.filter((p) => p.lat && p.lng).map((p) => [p.lat, p.lng]); if (!mapInst.current) return; if (pts.length === 1) mapInst.current.setView(pts[0], 12); else if (pts.length > 1) mapInst.current.fitBounds(pts, { padding: [40, 40], maxZoom: 13 }); }} style={{ fontSize: 15 }}>⤢</button>
