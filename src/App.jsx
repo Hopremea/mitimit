@@ -11443,6 +11443,11 @@ function Prospection({ data, persist, go }) {
   // qu'elle est ouverte — la confondre avec une ouverte enverrait passer un appel dans le vide.
   const [fOuvert, setFOuvert] = useVue("prospection", "fOuvert", false);
   const [selMode, setSelMode] = useVue("prospection", "selMode", false); const [selIds, setSelIds] = useVue("prospection", "selIds", () => new Set());
+  // En-têtes de groupe repliés : on mémorise les clés MASQUÉES, pas les visibles — ainsi un groupe
+  // qui apparaît plus tard (nouveau type, nouvelle région) est déplié par défaut, comme on l'attend.
+  // Conservé d'un passage à l'autre, comme les filtres.
+  const [groupesReplies, setGroupesReplies] = useVue("prospection", "groupesReplies", () => new Set());
+  const toggleGroupe = (k) => setGroupesReplies((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   const [sirBusy, setSirBusy] = useState(false); const [sirMsg, setSirMsg] = useState(null);
   const [edit, setEdit] = useState(null);
   // Champ vide au départ : « Occitanie » était pré-saisi en dur, donc à retaper à chaque recherche
@@ -12116,6 +12121,9 @@ function Prospection({ data, persist, go }) {
           <select value={sort} onChange={(e) => setSort(e.target.value)} style={{ padding: "9px 12px", borderRadius: "10px 0 0 10px", border: "1px solid var(--line)", borderRight: "none", fontFamily: "inherit", fontSize: 13 }}><option value="type">Grouper par type</option><option value="statut">Grouper par statut</option><option value="region">Grouper par région</option><option value="enseigne">Grouper par groupe / établissement</option><option value="potentiel">Grouper par potentiel</option><option value="ville">Grouper par ville</option><option value="ouverture">Grouper par ouvert / fermé</option><option value="score">Grouper par priorité (score)</option></select>
           <button onClick={() => setDir((d) => d === "asc" ? "desc" : "asc")} title={dir === "asc" ? "Ordre croissant (cliquer pour inverser)" : "Ordre décroissant (cliquer pour inverser)"} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 11px", border: "1px solid var(--line)", borderRadius: "0 10px 10px 0", background: "#fff", cursor: "pointer", color: "var(--blue)" }}>{dir === "asc" ? <ArrowDown size={15} /> : <ArrowUp size={15} />}</button>
         </div>
+        {view === "actifs" && groups.length > 1 && (() => { const tousReplies = groups.every((g) => groupesReplies.has(g.key)); return (
+          <button className="btn btn-ghost btn-s" onClick={() => setGroupesReplies(tousReplies ? new Set() : new Set(groups.map((g) => g.key)))} title={tousReplies ? "Déplier tous les groupes" : "Replier tous les groupes pour ne voir que les en-têtes"}>{tousReplies ? <><ChevronDown size={15} /> Tout déplier</> : <><ChevronUp size={15} /> Tout replier</>}</button>
+        ); })()}
         <div style={{ display: "inline-flex", alignItems: "stretch" }} title="Vues enregistrées : rappelez un jeu de filtres + tri en un clic">
           <select value="" onChange={(e) => { const v = e.target.value; if (v === "__save") saveView(); else if (v.startsWith("del:")) delView(v.slice(4)); else applyView(savedViews.find((x) => x.id === v)); e.target.value = ""; }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid var(--line)", fontFamily: "inherit", fontSize: 13, background: "#fff", color: "var(--blue)" }}>
             <option value="">Vues…{savedViews.length ? " (" + savedViews.length + ")" : ""}</option>
@@ -12156,15 +12164,20 @@ function Prospection({ data, persist, go }) {
       </div>); })()}
     {data.claudeBatchMsg && data.claudeBatchMsg.kind !== "sites" && <div className="card" style={{ borderLeft: "4px solid " + (data.claudeBatchMsg.ok ? "var(--green)" : "var(--red)"), marginBottom: 12, fontSize: 12.5, display: "flex", alignItems: "center", gap: 10 }}><span style={{ flex: 1 }}>{data.claudeBatchMsg.t}</span><button className="btn btn-g btn-s" onClick={() => persist((d) => ({ ...d, claudeBatchMsg: null }))}>Fermer</button></div>}
     <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}><span>{list.length} prospect(s){list.length !== activeCount ? " sur " + activeCount : ""} · groupés par {gd.label.toLowerCase()}</span>{selMode && <><button className="btn btn-ghost btn-s" onClick={selectAllVisible}><CheckSquare size={13} /> Tout sélectionner ({list.length})</button>{selCount > 0 && <button className="btn btn-ghost btn-s" onClick={clearSel}><X size={13} /> Désélectionner ({selCount})</button>}</>}</div>
-    {list.length === 0 ? <div className="card empty">Aucun prospect ne correspond.</div> : groups.map((g) => { const m = gd.meta ? gd.meta(g.key) : null; const lbl = m ? m.label : g.key; const col = m ? m.color : "#9aa6bd"; return (
-      <div key={g.key} style={{ marginBottom: 20 }}>
+    {list.length === 0 ? <div className="card empty">Aucun prospect ne correspond.</div> : groups.map((g) => { const m = gd.meta ? gd.meta(g.key) : null; const lbl = m ? m.label : g.key; const col = m ? m.color : "#9aa6bd"; const replie = groupesReplies.has(g.key); return (
+      <div key={g.key} style={{ marginBottom: replie ? 12 : 20 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "2px 0 12px", paddingBottom: 8, borderBottom: "2px solid " + col + "33" }}>
           {selMode && (() => { const allIn = g.items.every((x) => selIds.has(x.id)); return <input type="checkbox" checked={allIn} onChange={() => setSelIds((s) => { const n = new Set(s); if (allIn) g.items.forEach((x) => n.delete(x.id)); else g.items.forEach((x) => n.add(x.id)); return n; })} title={allIn ? "Tout décocher dans ce groupe" : "Tout cocher dans ce groupe"} style={{ width: 16, height: 16 }} />; })()}
-          <span style={{ width: 11, height: 11, borderRadius: 4, background: col, display: "inline-block", flexShrink: 0 }} />
-          <span className="pu-display" style={{ fontWeight: 800, fontSize: 15 }}>{lbl}</span>
-          <span style={{ fontSize: 11.5, color: "var(--muted)", background: "var(--bg)", borderRadius: 20, padding: "2px 10px", fontWeight: 700 }}>{g.items.length}</span>
+          {/* L'en-tête entier plie/déplie le groupe : un clic masque ou réaffiche ses tuiles. Le
+              chevron dit l'état et pivote. C'est un vrai bouton pour rester accessible au clavier. */}
+          <button onClick={() => toggleGroupe(g.key)} title={replie ? "Déplier ce groupe" : "Replier ce groupe"} style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0, background: "none", border: "none", padding: 0, margin: 0, cursor: "pointer", font: "inherit", textAlign: "left" }}>
+            <ChevronRight size={16} style={{ flexShrink: 0, color: col, transition: "transform .15s ease", transform: replie ? "none" : "rotate(90deg)" }} />
+            <span style={{ width: 11, height: 11, borderRadius: 4, background: col, display: "inline-block", flexShrink: 0 }} />
+            <span className="pu-display" style={{ fontWeight: 800, fontSize: 15 }}>{lbl}</span>
+            <span style={{ fontSize: 11.5, color: "var(--muted)", background: "var(--bg)", borderRadius: 20, padding: "2px 10px", fontWeight: 700 }}>{g.items.length}</span>
+          </button>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(330px, 1fr))", gap: 12 }}>{g.items.map(card)}</div>
+        {!replie && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(330px, 1fr))", gap: 12 }}>{g.items.map(card)}</div>}
       </div>); })}
     </>)}
     {selMode && selCount > 0 && view === "actifs" && (
