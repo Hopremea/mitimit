@@ -16102,12 +16102,12 @@ export default function App() {
   const [syncState, setSyncState] = useState("saved"); // saved | saving | remote | offline
   const [loading, setLoading] = useState(true);
   const coldStart = loading && (!data.accounts || data.accounts.length === 0);
-  useEffect(() => {
-    const off = () => setSyncState("offline"); const on = () => setSyncState("saved");
-    window.addEventListener("offline", off); window.addEventListener("online", on);
-    if (typeof navigator !== "undefined" && navigator.onLine === false) setSyncState("offline");
-    return () => { window.removeEventListener("offline", off); window.removeEventListener("online", on); };
-  }, []);
+  // L'indicateur ne suit plus navigator.onLine, qui ment souvent — faux « hors ligne » après une
+  // sortie de veille, derrière un VPN ou un réseau d'entreprise : s'y fier affichait « Hors ligne »
+  // alors que tout s'enregistrait normalement, et collait l'alerte à l'écran sans raison. Seule une
+  // écriture serveur qui échoue vraiment bascule désormais en « hors ligne » (cf. persist /
+  // retenterPush), et la reprise au retour de connexion est déjà gérée par l'effet « rafraichir »
+  // plus bas (il réécoute l'événement « online » et repousse toute écriture en attente).
   const fileImportRef = useRef(null);
   const saveTimer = useRef(null);
   const lastSyncAt = useRef(null);    // updated_at de la dernière version appliquée/écrite : ignore nos propres échos.
@@ -16245,12 +16245,16 @@ export default function App() {
   // réseau ou de l'onglet. Le drapeau « en attente » reste levé jusqu'au succès : les données locales
   // sont protégées et l'indicateur reste honnête.
   const repriseTimer = useRef(null); const repriseEssais = useRef(0);
-  const retenterPush = () => {
+  // `manuel` : une reprise déclenchée par l'utilisateur (clic sur la pastille) affiche brièvement
+  // « Enregistrement… » pour accuser réception du geste. Les reprises AUTOMATIQUES en arrière-plan,
+  // elles, laissent la pastille sur « Hors ligne » et ne passent à « Synchronisé » qu'en cas de
+  // succès : sans ça, la pastille clignotait entre les deux états à chaque tentative.
+  const retenterPush = (manuel) => {
     if (!supabaseEnabled || !supabase) return;
     if (repriseTimer.current) { clearTimeout(repriseTimer.current); repriseTimer.current = null; }
     if (!pendingWrite.current || saveTimer.current) return; // rien à repousser, ou une écriture débouncée arrive déjà
     const payload = latestRef.current; if (!payload) { pendingWrite.current = false; return; }
-    setSyncState("saving");
+    if (manuel === true) setSyncState("saving");
     pousserServeur(payload).then(
       () => { pendingWrite.current = false; repriseEssais.current = 0; setSyncState("saved"); },
       () => { repriseEssais.current++; setSyncState("offline"); planifierReprise(); }
@@ -16723,7 +16727,15 @@ export default function App() {
           {(() => {
             const SS = { saving: { l: "Enregistrement…", c: "#a06a06", I: RefreshCw }, saved: { l: supabaseEnabled ? "Synchronisé" : "Enregistré", c: "#1d8956", I: CheckCircle2 }, remote: { l: "Mis à jour par un collègue", c: "var(--blue)", I: Users }, offline: { l: "Hors ligne", c: "var(--red)", I: AlertTriangle } };
             const m = SS[syncState] || SS.saved; const Ic = m.I;
-            return <span title="État de la synchronisation des données" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 700, color: "#fff", background: m.c, border: "1px solid " + m.c, borderRadius: 20, padding: "5px 11px", whiteSpace: "nowrap" }}><Ic size={13} className={syncState === "saving" ? "spin" : undefined} />{m.l}</span>;
+            const style = { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 700, color: "#fff", background: m.c, border: "1px solid " + m.c, borderRadius: 20, padding: "5px 11px", whiteSpace: "nowrap", fontFamily: "inherit" };
+            const contenu = <><Ic size={13} className={syncState === "saving" ? "spin" : undefined} />{m.l}</>;
+            // Hors ligne : la pastille elle-même renvoie au serveur d'un clic. On a retiré le grand
+            // bandeau d'alerte qui, en apparaissant et disparaissant à chaque tentative, décalait
+            // toute la page toutes les quelques secondes. Le message rassurant tient dans l'infobulle :
+            // rien n'est perdu, tout est enregistré sur l'appareil en attendant.
+            return syncState === "offline"
+              ? <button onClick={() => retenterPush(true)} title="Modifications enregistrées sur cet appareil, pas encore envoyées au serveur. Elles partiront automatiquement dès que la connexion le permettra — cliquez pour réessayer tout de suite." style={{ ...style, cursor: "pointer" }}>{contenu}</button>
+              : <span title="État de la synchronisation des données" style={style}>{contenu}</span>;
           })()}
           <AiJobsBadge />
           <button className="btn btn-ghost btn-s" onClick={() => setCmdkOpen(true)} title="Recherche (Ctrl/Cmd+K)"><Search size={15} /> Rechercher <span style={{ fontSize: 10, opacity: .6, marginLeft: 4 }}>⌘K</span></button>
@@ -16741,11 +16753,6 @@ export default function App() {
         </div>
       </div>
       {importMsg && <div className="card" style={{ borderLeft: "4px solid var(--blue)", marginBottom: 14, fontSize: 13 }}>{importMsg}</div>}
-      {syncState === "offline" && supabaseEnabled && <div className="card no-print" style={{ borderLeft: "4px solid var(--red)", marginBottom: 14, fontSize: 13, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <AlertTriangle size={17} color="var(--red)" style={{ flexShrink: 0 }} />
-        <span style={{ flex: 1, minWidth: 200, lineHeight: 1.5 }}><strong>Modifications non synchronisées.</strong> Vos saisies sont enregistrées sur cet appareil et seront envoyées automatiquement dès que la connexion le permettra — laissez l'application ouverte, ou réessayez manuellement.</span>
-        <button className="btn btn-g btn-s" onClick={retenterPush}><RefreshCw size={14} /> Réessayer maintenant</button>
-      </div>}
       {coldStart && (
         <div className="fade no-print" aria-busy="true" aria-label="Chargement…">
           <div className="skel" style={{ height: 28, width: 220, marginBottom: 18 }} />
