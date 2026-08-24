@@ -445,6 +445,35 @@ const TRANCHE_ENDS=[9,19,29,39,49,59,69,79,89,100,299,499,699,999];
 const PORT_GAZOLE=0.11, PORT_FIXE=2.24, PORT_PARIS=5.14, PORT_SAISON=0.15;
 function shippingCost(dept,kg,opts){opts=opts||{};const arr=DEPT_TARIF[dept];if(!arr||!(kg>0))return null;let i=TRANCHE_ENDS.findIndex(e=>kg<=e);if(i<0)i=TRANCHE_ENDS.length-1;const cent=i>=10;let base,kgF=kg;if(cent){kgF=Math.ceil(kg/10)*10;base=Math.round((kgF/100)*arr[i]*100)/100;}else{base=arr[i];}const r2=(x)=>Math.round(x*100)/100;const gazole=r2(base*PORT_GAZOLE);const saison=opts.saison?r2(base*PORT_SAISON):0;const paris=opts.paris?PORT_PARIS:0;const fixe=PORT_FIXE;const total=r2(base+gazole+saison+paris+fixe);const lbl=i===0?"1 à 9":(i<10?(TRANCHE_ENDS[i-1]+1)+" à "+TRANCHE_ENDS[i]:(i===10?"101 à 299":i===11?"300 à 499":i===12?"500 à 699":"700 à 999"));return{dept,zone:DEPT_ZONES[dept]||"",kg,kgF,trancheLabel:lbl,mode:cent?"aux 100 kg":"forfait",base,gazole,saison,paris,fixe,total};}
 function poidsProvisoire(code,designation){const c=(code||"");const d=(designation||"").toLowerCase();if(c.includes("-PACK-COMPLET"))return 0.95;if(c.includes("-PACK-DECOUVERTE"))return 0.65;if(c.includes("-PACK-INITIATION")||c.includes("-PACK-"))return 0.5;if(c.includes("-KIT-"))return 0.55;if(c==="PU3D-STYLO")return 0.12;if(c.includes("-POCHO"))return 0.05;if(c.includes("-LIVRET-"))return 0.18;if(/^PU3D-FIL-/.test(c)){if(/lot de 12|multicolore/.test(d))return 0.36;if(/lot de 4|pastel/.test(d))return 0.12;if(/lot de 3|magique|galaxie|soleil|nature|noir/.test(d))return 0.09;return 0.09;}return 0.1;}
+// Coût RÉEL du transport d'un document (grille du transporteur), pour information INTERNE pendant la
+// rédaction. La participation au port facturée au client est un forfait commercial adossé au franco :
+// elle ne dit rien de ce que l'expédition coûte vraiment. Le département vient du code postal de
+// livraison, le poids du cumul des lignes (poids produit, provisoire tant qu'il n'a pas été validé).
+// Les majorations sont appliquées comme le transporteur les facture : gazole, contributions fixes,
+// ajustement saisonnier du 1er juin au 31 août, et Région Parisienne.
+// Ce coût n'apparaît JAMAIS sur le document remis au client.
+const PORT_DEPTS_PARIS = ["75", "77", "78", "91", "92", "93", "94", "95"];
+function coutTransportDoc(lines, products, adresse, dateDoc) {
+  const cp = (String(adresse || "").match(/\b(\d{5})\b/) || [])[1] || "";
+  const dept = cp ? cp.slice(0, 2) : "";
+  const wmap = {}; (products || []).forEach((p) => { wmap[p.code] = p; });
+  const util = (lines || []).filter((l) => l && l.code);
+  // Une ligne offerte pèse et s'expédie comme les autres : elle compte dans le poids.
+  const grammes = util.reduce((s, l) => s + ((wmap[l.code] || {}).poidsG || 0) * (l.qte || 0), 0);
+  const kg = Math.round(grammes) / 1000;
+  const poidsEstime = util.some((l) => (wmap[l.code] || {}).poidsEstime);
+  const mois = +String(dateDoc || "").slice(5, 7);
+  const saison = mois >= 6 && mois <= 8;
+  const paris = PORT_DEPTS_PARIS.indexOf(dept) >= 0;
+  const horsGrille = !!dept && !DEPT_TARIF[dept];
+  const est = (dept && !horsGrille && kg > 0) ? shippingCost(dept, kg, { saison, paris }) : null;
+  // Motif de l'absence d'estimation : on l'annonce plutôt que d'afficher un tiret muet.
+  const manque = est ? "" : (!cp ? "adresse de livraison sans code postal"
+    : horsGrille ? ("département " + dept + " hors grille transporteur")
+    : !util.length ? "aucune ligne renseignée"
+    : "poids des produits à renseigner dans l'onglet Stock");
+  return { cp, dept, kg, grammes, poidsEstime, saison, paris, est, manque };
+}
 function coefColor(coef, cible, plafond) {
   const R = [255, 90, 69], LG = [118, 204, 152], G = [43, 182, 115], DG = [22, 122, 73];
   const hx = (a) => "#" + a.map((x) => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, "0")).join("");
@@ -8261,7 +8290,12 @@ function DealForm({ deal, accounts, products, sites, onSave, onPreview }) {
   // Marge PEN'UP en temps réel : coût de revient (product.cout, repli sur le prix d'achat officiel)
   // rapporté au prix de cession de chaque ligne. Alerte discrète si la marge globale est faible.
   const coutOf = (code) => { const p = products.find((x) => x.code === code); if (p && p.cout != null) return p.cout; return PA_HT_OFFICIEL[code] != null ? PA_HT_OFFICIEL[code] : null; };
-  const marge = (() => { let cost = 0, ca = 0, known = true, anyKnown = false; f.lines.forEach((l) => { if (!l.code) return; const c = coutOf(l.code); if (c == null) { known = false; return; } anyKnown = true; cost += c * (l.qte || 0); ca += (l.pu || 0) * (l.qte || 0); }); const m = ca - cost; return { m, pct: ca > 0 ? m / ca * 100 : 0, known, anyKnown }; })();
+  const marge = (() => { let cost = 0, ca = 0, known = true, anyKnown = false; f.lines.forEach((l) => { if (!l.code) return; const c = coutOf(l.code); if (c == null) { known = false; return; } anyKnown = true; cost += c * (l.qte || 0); ca += l.offert ? 0 : (l.pu || 0) * (l.qte || 0); }); const m = ca - cost; return { m, ca, pct: ca > 0 ? m / ca * 100 : 0, known, anyKnown }; })();
+  // Coût RÉEL du transport de cette expédition, en regard de la participation encaissée : c'est la
+  // seule façon de voir, en rédigeant, ce que la livraison coûte vraiment. Strictement interne.
+  const transport = useMemo(() => coutTransportDoc(f.lines, products, destAdr, f.date), [f.lines, products, destAdr, f.date]);
+  // Solde de la livraison : positif quand la participation facturée couvre le coût du transporteur.
+  const portSolde = transport.est ? Math.round((port - transport.est.total) * 100) / 100 : null;
   // Upsell « atteindre le franco » : complète la commande avec un ASSORTIMENT ÉQUILIBRÉ de bobines Fil'Up
   // (plusieurs coloris répartis en tourniquet) plutôt qu'un seul lot en grande quantité, jusqu'à dépasser
   // le seuil de franco de la zone. La marchandise ajoutée coûte au revendeur moins que le port économisé.
@@ -8304,6 +8338,22 @@ function DealForm({ deal, accounts, products, sites, onSave, onPreview }) {
     <div className="row2"><div className="fld"><label>TVA (%)</label><input type="number" value={f.tva} onChange={(e) => up("tva", +e.target.value)} /></div><div className="fld"><label>Note</label><input value={f.note} onChange={(e) => up("note", e.target.value)} /></div></div>
     <div style={{ display: "flex", justifyContent: "flex-end", gap: 26, padding: "4px 2px", borderTop: "1px solid var(--line)", paddingTop: 12 }}><Stat label="Total HT" value={eur2(ht)} /><Stat label={port > 0 ? "Participation port" : (f.portOffert ? "Livraison offerte" : "Franco de port")} value={port > 0 ? eur2(port) : "offert"} /><Stat label={"TVA " + f.tva + "%"} value={eur2(tva)} /><Stat label="Total TTC" value={eur2(ttc)} /></div>
     {f.type !== "Avoir" && marge.anyKnown && <div style={{ fontSize: 11.5, textAlign: "right", fontWeight: 700, marginTop: 2, color: marge.pct >= 40 ? "var(--green)" : marge.pct >= 25 ? "var(--amber)" : "var(--red)" }} title="Marge interne PEN'UP (prix de cession − coût de revient). N'apparaît jamais sur le document client.">Marge PEN'UP : {eur2(marge.m)} ({Math.round(marge.pct)}%){!marge.known ? " · coûts partiels" : ""}</div>}
+    {/* Coût réel de la livraison, affiché pendant la rédaction. Jamais imprimé, jamais sur le document client. */}
+    {f.type !== "Avoir" && <div className="no-print" style={{ fontSize: 11.5, textAlign: "right", marginTop: 3, color: "var(--muted)", lineHeight: 1.6 }}>
+      {transport.est ? (<>
+        <span title={"Grille transporteur — " + transport.dept + " " + transport.est.zone + " · " + transport.grammes + " g · tranche " + transport.est.trancheLabel + " (" + transport.est.mode + ")"
+          + "\nBase " + eur2(transport.est.base) + " + gazole 11 % " + eur2(transport.est.gazole)
+          + (transport.saison ? " + saisonnier 15 % " + eur2(transport.est.saison) : "")
+          + (transport.paris ? " + Région Parisienne " + eur2(transport.est.paris) : "")
+          + " + contributions fixes " + eur2(transport.est.fixe)
+          + (transport.poidsEstime ? "\nPoids partiellement provisoires (≈) : à valider dans l'onglet Stock." : "")
+          + "\nInformation interne : n'apparaît jamais sur le document client."}>
+          <Truck size={12} style={{ verticalAlign: -2 }} /> Livraison réelle <b className="tnum" style={{ color: "var(--ink)" }}>{eur2(transport.est.total)}</b>{transport.poidsEstime ? " ≈" : ""} · encaissée {eur2(port)} · solde <b className="tnum" style={{ color: portSolde < 0 ? "var(--red)" : "var(--green)" }}>{(portSolde > 0 ? "+" : "") + eur2(portSolde)}</b>
+        </span>
+        {marge.anyKnown && (() => { const net = marge.m + portSolde; const base = marge.ca + port; const pct = base > 0 ? net / base * 100 : 0;
+          return (<div style={{ fontWeight: 700, color: pct >= 40 ? "var(--green)" : pct >= 25 ? "var(--amber)" : "var(--red)" }} title="Marge PEN'UP diminuée du coût réel du transport et augmentée de la participation encaissée. N'apparaît jamais sur le document client.">Marge nette, livraison comprise : {eur2(net)} ({Math.round(pct)}%)</div>); })()}
+      </>) : (<span title="Information interne : n'apparaît jamais sur le document client."><Truck size={12} style={{ verticalAlign: -2 }} /> Livraison réelle non estimable — {transport.manque}.</span>)}
+    </div>}
     {f.type !== "Avoir" && <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}><label style={{ display: "inline-flex", alignItems: "center", gap: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", border: "1px solid " + (f.portOffert ? "#2bb673" : "var(--line)"), background: f.portOffert ? "#eafaf1" : "var(--card)", color: f.portOffert ? "#1f7a4d" : "inherit", borderRadius: 10, padding: "9px 12px" }}><input type="checkbox" checked={!!f.portOffert} onChange={(e) => up("portOffert", e.target.checked)} style={{ width: 16, height: 16 }} /><Truck size={15} /> Offrir la livraison{f.portOffert ? " ✓" : ""}</label></div>}
     {f.type !== "Avoir" && <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: -4, flexWrap: "wrap" }}>
       {port > 0 && <button className="btn btn-g btn-s" onClick={completerFranco} title="Ajouter un assortiment équilibré de bobines Fil'Up pour dépasser le seuil de franco"><Plus size={13} /> Compléter pour le franco</button>}
@@ -8378,7 +8428,22 @@ function DevisPreview({ deal, account, settings, products = [], data = {}, onClo
       <div className="doc-bloc" style={{ background: "#f4f6fb", borderRadius: 10, padding: 14, marginBottom: 18 }}><div style={{ fontSize: 10, textTransform: "uppercase", color: "#6b7589", fontWeight: 700, marginBottom: 4 }}>Client</div><div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}><div style={{ fontWeight: 700, fontSize: 15 }}>{(site && site.label) || account?.enseigne || account?.raisonSociale || (princ && fullName(princ)) || "—"}</div>{(docCode || account?.code) && <span style={{ fontSize: 11.5, fontWeight: 700, color: "#6b7589", letterSpacing: ".03em" }}>Code client {docCode || account.code}</span>}</div>{(account?.siren || account?.formeJuridique) && <div style={{ fontSize: 11.5, color: "#6b7589", marginTop: 2 }}>{[account.formeJuridique, account.siren && ("SIREN " + account.siren)].filter(Boolean).join(" · ")}</div>}{clientAdresse && <div style={{ fontSize: 12, color: "#6b7589", marginTop: 2 }}>{clientAdresse}</div>}{(clientTel || clientMail) && <div style={{ fontSize: 12, color: "#6b7589", marginTop: 2 }}>{[clientTel, clientMail].filter(Boolean).join(" · ")}</div>}</div>
       <table><thead><tr><th>Désignation</th><th style={{ textAlign: "right" }}>Qté</th><th style={{ textAlign: "right" }}>PU HT</th><th style={{ textAlign: "right" }}>Total HT</th></tr></thead><tbody>{deal.lines.map((l) => (<tr key={l.id}><td>{l.designation || l.code}</td><td style={{ textAlign: "right" }} className="tnum">{num(l.qte)}</td><td style={{ textAlign: "right", color: l.offert ? "#2bb673" : "inherit", fontWeight: l.offert ? 600 : "inherit" }} className="tnum">{l.offert ? "Offert" : eur2(l.pu)}</td><td style={{ textAlign: "right", fontWeight: 600, color: l.offert ? "#2bb673" : "inherit" }} className="tnum">{l.offert ? "Offert" : eur2((l.qte || 0) * (l.pu || 0))}</td></tr>))}</tbody></table>
       <div className="doc-bloc" style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}><div style={{ width: 280 }}><div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", fontSize: 13 }}><span style={{ color: "#6b7589" }}>Total marchandise HT</span><strong className="tnum">{eur2(ht)}</strong></div><div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", fontSize: 13 }}><span style={{ color: "#6b7589" }}>{port > 0 ? "Participation frais de port HT" : (deal.portOffert ? "Livraison offerte" : "Frais de port")}</span><strong className="tnum" style={{ color: port > 0 ? "#a06a06" : "#2bb673" }}>{port > 0 ? eur2(port) : (deal.portOffert ? "Offert" : "Franco (offert)")}</strong></div><div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", fontSize: 13 }}><span style={{ color: "#6b7589" }}>TVA {deal.tva}%</span><strong className="tnum">{eur2(tva)}</strong></div><div style={{ display: "flex", justifyContent: "space-between", padding: "9px 12px", marginTop: 4, background: "#3F60AA", color: "#fff", borderRadius: 9, fontSize: 15 }}><span>Total TTC</span><strong className="tnum">{eur2(ttc)}</strong></div></div></div>
-      {(() => { const cp = ((livAdr || account?.adresseLivraison || account?.adressePostale || "").match(/\b(\d{5})\b/) || [])[1]; const dpt = cp ? cp.slice(0, 2) : ""; const wmap = {}; (products || []).forEach((p) => { wmap[p.code] = p; }); const kg = Math.round((deal.lines || []).reduce((s, l) => s + ((wmap[l.code] || {}).poidsG || 0) * (l.qte || 0), 0)) / 1000; const est = dpt && kg > 0 ? shippingCost(dpt, kg) : null; const estime = (deal.lines || []).some((l) => (wmap[l.code] || {}).poidsEstime); return (<div className="no-print" style={{ marginTop: 14, background: "#fff8ef", border: "1px dashed #e6b87a", borderRadius: 10, padding: "10px 13px", fontSize: 11.5, color: "#8a6326" }}><strong>Estimation interne (non imprimée) · coût transport Régis Martelet</strong><div style={{ marginTop: 3 }}>{est ? (dpt + " " + est.zone + " · " + kg + " kg · tranche " + est.trancheLabel + " → " + eur2(est.total) + " (base " + eur2(est.base) + " + gazole + contributions fixes ; hors saisonnier et Région Parisienne)" + (estime ? " · poids partiellement provisoires" : "")) : (!dpt ? "Renseignez une adresse de livraison avec code postal pour estimer le transport." : "Poids produits manquants pour estimer.")}</div><div style={{ marginTop: 3, color: "#a98b5e" }}>À comparer à la participation port facturée ci-dessus. Ce bloc n'apparaît pas à l'impression du devis.</div></div>); })()}
+      {/* Coût réel du transport, en regard de la participation facturée. Repris à l'identique du
+          formulaire de rédaction (même calcul), et jamais imprimé. */}
+      {(() => {
+        const t = coutTransportDoc(deal.lines, products, livAdr || (account && (account.adresseLivraison || account.adressePostale)) || "", deal.date);
+        const solde = t.est ? Math.round((port - t.est.total) * 100) / 100 : null;
+        return (<div className="no-print" style={{ marginTop: 14, background: "#fff8ef", border: "1px dashed #e6b87a", borderRadius: 10, padding: "10px 13px", fontSize: 11.5, color: "#8a6326" }}>
+          <strong>Estimation interne (non imprimée) · coût transport Régis Martelet</strong>
+          <div style={{ marginTop: 3 }}>{t.est
+            ? (t.dept + " " + t.est.zone + " · " + t.kg + " kg · tranche " + t.est.trancheLabel + " → " + eur2(t.est.total)
+               + " (base " + eur2(t.est.base) + " + gazole" + (t.saison ? " + saisonnier" : "") + (t.paris ? " + Région Parisienne" : "") + " + contributions fixes)"
+               + (t.poidsEstime ? " · poids partiellement provisoires" : ""))
+            : ("Coût transport non estimable — " + t.manque + ".")}</div>
+          {t.est && <div style={{ marginTop: 3 }}>Participation port facturée {eur2(port)} · solde {(solde > 0 ? "+" : "") + eur2(solde)} {solde < 0 ? "(le transport coûte plus qu'il ne rapporte)" : "(la participation couvre le transport)"}</div>}
+          <div style={{ marginTop: 3, color: "#a98b5e" }}>Ce bloc n'apparaît pas à l'impression du document.</div>
+        </div>);
+      })()}
       {titre === "FACTURE" && <div className="doc-bloc" style={{ marginTop: 18, background: "#f4f6fb", borderRadius: 10, padding: 14 }}>
         <div style={{ fontSize: 10, textTransform: "uppercase", color: "#6b7589", fontWeight: 700, marginBottom: 6 }}>Coordonnées bancaires</div>
         <div style={{ fontSize: 12, color: "#1E2533", lineHeight: 1.6 }}>
