@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="MATMAT — application multi-clients : organisations, rôles, invitations, abonnements." />
+    <meta name="theme-color" content="#3f60aa" />
+    <meta name="color-scheme" content="light dark" />
+    <title>MATMAT</title>
+    <!-- Écran d'attente en HTML et CSS purs : il s'affiche AVANT que React ne soit chargé,
+         moment où ni les composants ni la feuille de style de l'application n'existent.
+         React remplace le contenu de #root en s'installant, l'écran disparaît donc seul. -->
+    <style>
+      #demarrage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#f7f8fb;color:#6b7589;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:14px;font-weight:600;}
+      @media(prefers-color-scheme:dark){#demarrage{background:#11141f;color:#9aa3b8;}}
+    </style>
+  </head>
+  <body>
+    <div id="root"><div id="demarrage" role="status">Chargement…</div></div>
+    <noscript style="display:block;max-width:460px;margin:14vh auto;padding:24px;font-family:system-ui,sans-serif;text-align:center;line-height:1.55;">
+      <strong>JavaScript est requis.</strong><br />Activez-le dans votre navigateur, puis rechargez la page.
+    </noscript>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
