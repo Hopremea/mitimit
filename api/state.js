@@ -48,9 +48,23 @@ export default async function handler(req, res) {
       let body = {};
       try { body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {}); } catch (e) {}
       if (!body || typeof body.data === "undefined") { res.status(400).json({ error: "Corps invalide (attendu { data })." }); return; }
-      const { error } = await sb.from("cockpit_state").upsert({ id: "shared", data: body.data, updated_at: new Date().toISOString() }, { onConflict: "id" });
+      const ts = new Date().toISOString();
+      // Écriture PROTÉGÉE quand le client fournit « depuis » : la version qu'il a acquittée. L'écriture
+      // n'aboutit que si le serveur en est toujours là. Sans cette condition, ce relais serait une porte
+      // dérobée par laquelle un appareil resté sur un état ancien écraserait une session entière —
+      // exactement ce que l'écriture directe du navigateur empêche déjà. « applied: false » signale au
+      // client qu'un autre appareil a écrit entre-temps : à lui de relire, fusionner et repousser.
+      if (body.depuis) {
+        const { data: rows, error } = await sb.from("cockpit_state")
+          .update({ data: body.data, updated_at: ts })
+          .eq("id", "shared").eq("updated_at", body.depuis).select("updated_at");
+        if (error) throw error;
+        res.status(200).json({ ok: true, applied: !!(rows && rows.length), updated_at: ts });
+        return;
+      }
+      const { error } = await sb.from("cockpit_state").upsert({ id: "shared", data: body.data, updated_at: ts }, { onConflict: "id" });
       if (error) throw error;
-      res.status(200).json({ ok: true });
+      res.status(200).json({ ok: true, applied: true, updated_at: ts });
       return;
     }
     res.status(405).json({ error: "Methode non autorisee" });

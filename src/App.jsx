@@ -50,6 +50,27 @@ async function claudeErrorText(res) {
   return "HTTP " + res.status + (detail ? " — " + detail : "");
 }
 
+// ===== Voie de secours : le relais serveur /api/state =====
+// Le navigateur écrit normalement en direct dans la table partagée, avec la clé anon publique. Dès
+// qu'une RLS stricte est posée sur cette table (c'est la recommandation de SECURITE.md §2), cette
+// écriture est REFUSÉE : la pastille passe « Hors ligne » et y reste, pour de bon, alors que le
+// réseau va très bien. Le relais existe déjà côté serveur, avec la clé service role et le jeton
+// vérifié ; il n'était simplement jamais appelé. On l'utilise donc en repli de toute écriture ou
+// lecture directe refusée. La condition « depuis » y est reconduite à l'identique : le relais n'est
+// pas une porte dérobée par laquelle un appareil resté sur un état ancien pourrait écraser une
+// session entière.
+async function relaisLireEtat() {
+  const r = await fetch("/api/state", { headers: await claudeHeaders() });
+  if (!r.ok) throw new Error("relais /api/state — " + (await claudeErrorText(r)));
+  return await r.json(); // { data, updated_at } | null
+}
+async function relaisEcrireEtat(payload, depuis) {
+  const r = await fetch("/api/state", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ data: payload, depuis: depuis || undefined }) });
+  if (!r.ok) throw new Error("relais /api/state — " + (await claudeErrorText(r)));
+  let j = {}; try { j = await r.json(); } catch (e) {}
+  return j; // { ok, applied, updated_at }
+}
+
 // ===== Suivi global des opérations IA =====
 // Registre singleton (hors cycle de vie React) : une opération IA continue même si le composant qui
 // l'a lancée est démonté (onglet fermé, modale quittée), et reste visible via un indicateur global.
@@ -16178,6 +16199,10 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [importMsg, setImportMsg] = useState(null);
   const [syncState, setSyncState] = useState("saved"); // saved | saving | remote | offline
+  // Raison du dernier échec d'écriture, montrée dans l'infobulle de la pastille. « Hors ligne » sans
+  // motif n'apprend rien : une base qui refuse l'écriture (RLS) et une coupure réseau demandent des
+  // gestes opposés, et jusqu'ici les deux se taisaient de la même façon.
+  const [echecSync, setEchecSync] = useState("");
   const [loading, setLoading] = useState(true);
   const coldStart = loading && (!data.accounts || data.accounts.length === 0);
   // L'indicateur ne suit plus navigator.onLine, qui ment souvent — faux « hors ligne » après une
@@ -16297,26 +16322,59 @@ export default function App() {
   // cet appareil a acquittée (curseur). Sinon un autre appareil a écrit entre-temps : on récupère sa
   // version, on FUSIONNE (base commune / notre état / le sien) et on pousse le résultat — plus jamais
   // d'écrasement d'une session entière par un appareil resté sur un état ancien.
+  // Mémorise le motif du dernier échec (voir echecSync). Appelée avec null dès qu'une écriture aboutit.
+  const noterEchec = (e, ou) => {
+    const t = e ? ((ou ? ou + " : " : "") + String((e && (e.message || e.error_description || e.hint || e.details)) || e)) : "";
+    setEchecSync((prev) => (prev === t ? prev : t));
+  };
+  // Écriture CONDITIONNELLE (compare-and-set), voie directe puis relais si la voie directe est refusée.
+  const ecrireCondition = async (payload, depuis, ts) => {
+    try {
+      const { data: rows, error } = await supabase.from("cockpit_state").update({ data: payload, updated_at: ts }).eq("id", "shared").eq("updated_at", depuis).select("updated_at");
+      if (error) throw error;
+      return { applied: !!(rows && rows.length), ts };
+    } catch (e) {
+      noterEchec(e, "écriture directe");
+      try { const j = await relaisEcrireEtat(payload, depuis); return { applied: !!(j && j.applied), ts: (j && j.updated_at) || ts }; }
+      catch (e2) { noterEchec(e2, "relais"); throw e2; }  // les deux voies ont échoué : c'est un vrai « hors ligne »
+    }
+  };
+  // Écriture INCONDITIONNELLE (premier envoi de cet appareil, ou dépôt d'une fusion déjà arbitrée).
+  const ecrireLibre = async (payload, ts) => {
+    try {
+      const { error } = await supabase.from("cockpit_state").upsert({ id: "shared", data: payload, updated_at: ts }, { onConflict: "id" });
+      if (error) throw error;
+      return { ts };
+    } catch (e) {
+      noterEchec(e, "écriture directe");
+      try { const j = await relaisEcrireEtat(payload, null); return { ts: (j && j.updated_at) || ts }; }
+      catch (e2) { noterEchec(e2, "relais"); throw e2; }
+    }
+  };
+  const lireEtatServeur = async () => {
+    try {
+      const { data: row, error } = await supabase.from("cockpit_state").select("data, updated_at").eq("id", "shared").maybeSingle();
+      if (error) throw error;
+      return row || null;
+    } catch (e) { noterEchec(e, "lecture directe"); return await relaisLireEtat(); }
+  };
   const pousserServeur = useCallback(async (payload) => {
     const depuis = lastSyncAt.current;
     const ts = new Date().toISOString();
     if (depuis) {
-      const { data: rows, error } = await supabase.from("cockpit_state").update({ data: payload, updated_at: ts }).eq("id", "shared").eq("updated_at", depuis).select("updated_at");
-      if (error) throw error;
-      if (rows && rows.length) { poserCurseur(ts); poserBase(payload); return payload; }
+      const r = await ecrireCondition(payload, depuis, ts);
+      if (r.applied) { poserCurseur(r.ts); poserBase(payload); noterEchec(null); return payload; }
       // Conflit : le serveur a reçu une autre version depuis notre dernier accusé.
-      const { data: row, error: e2 } = await supabase.from("cockpit_state").select("data, updated_at").eq("id", "shared").maybeSingle();
-      if (e2) throw e2;
+      const row = await lireEtatServeur();
       const distant = row && row.data ? normalize(row.data) : null;
       const fusion = distant ? normalize(fusionEtats(baseRef.current, payload, distant)) : payload;
-      const ts2 = new Date().toISOString();
-      await supabase.from("cockpit_state").upsert({ id: "shared", data: fusion, updated_at: ts2 }, { onConflict: "id" });
-      poserCurseur(ts2); poserBase(fusion); latestRef.current = fusion;
-      setData(fusion); ecrireCache(fusion);
+      const r2 = await ecrireLibre(fusion, new Date().toISOString());
+      poserCurseur(r2.ts); poserBase(fusion); latestRef.current = fusion;
+      setData(fusion); ecrireCache(fusion); noterEchec(null);
       return fusion;
     }
-    await supabase.from("cockpit_state").upsert({ id: "shared", data: payload, updated_at: ts }, { onConflict: "id" });
-    poserCurseur(ts); poserBase(payload); return payload;
+    const r = await ecrireLibre(payload, ts);
+    poserCurseur(r.ts); poserBase(payload); noterEchec(null); return payload;
   }, []);
   // Reprise automatique : une écriture serveur échouée (réseau coupé, tunnel…) est retentée toute
   // seule avec un délai croissant (5 s → 15 s → 45 s → 90 s max), et immédiatement au retour du
@@ -16695,9 +16753,15 @@ export default function App() {
     flashLocalClear();
     const filet = setTimeout(go, 5000);
     const borne = (promesse, ms) => Promise.race([Promise.resolve(promesse).catch(() => null), new Promise((r) => setTimeout(r, ms))]);
-    // Vide d'abord toute écriture Supabase en attente (persist est débouncé de 800 ms) : sinon une
-    // valeur enregistrée juste avant la mise à jour serait perdue, le pull au rechargement écrasant
-    // le localStorage par la version serveur (obsolète). On pousse l'état local courant avant de recharger.
+    // PREMIÈRE ÉTAPE, avant toute autre : mettre le cache local à jour et ATTENDRE qu'il soit écrit.
+    // `persist` lance cette écriture sans l'attendre — c'est voulu, la saisie ne doit pas attendre le
+    // disque. Mais recharger la page pendant qu'elle est en vol ANNULE la transaction IndexedDB, et
+    // les dernières saisies n'existaient plus que dans la mémoire de l'onglet, qui meurt avec lui.
+    // Toutes les autres étapes de ce bouton étaient bornées ; celle-ci, la seule qui protège vraiment
+    // les données, n'était pas même tentée. C'est ce qui faisait disparaître le travail récent.
+    try { if (latestRef.current) await borne(ecrireCache(latestRef.current), 2500); else await borne(cacheEcriture.current, 2500); } catch (e) { }
+    // Puis on vide l'écriture serveur en attente (persist est débouncé de 800 ms) : sinon une valeur
+    // enregistrée juste avant la mise à jour repartirait du serveur au prochain chargement.
     try {
       // On ne renvoie au serveur QUE si une modification locale est réellement en attente : sinon un
       // appareil qui n'a rien changé (mais dont le cache est plus ancien) écraserait les modifications
@@ -16705,9 +16769,18 @@ export default function App() {
       const hadPending = pendingWrite.current || !!saveTimer.current;
       if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
       if (supabaseEnabled && supabase && hadPending) {
-        const payload = latestRef.current || (() => { try { const raw = localStorage.getItem(KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } })();
+        // Repli sur le cache local si la mémoire est vide. L'ancien repli lisait localStorage, que
+        // `ecrireCache` efface pourtant après chaque écriture IndexedDB réussie : il ne renvoyait
+        // jamais rien.
+        const payload = latestRef.current || (await borne(lireCacheLocal(), 1000));
         // Écriture protégée (fusion en cas de conflit) et bornée dans le temps : le rechargement prime.
-        if (payload) { await borne(pousserServeur(payload), 2500); pendingWrite.current = false; }
+        if (payload) {
+          // Le drapeau n'est baissé QUE si l'envoi a vraiment abouti. `borne` avale les échecs comme
+          // les dépassements de délai : le baisser dans tous les cas désarmait le dernier filet, le
+          // vidage sur « pagehide » qui suit immédiatement le rechargement.
+          const envoye = await borne(pousserServeur(payload), 2500);
+          if (envoye) pendingWrite.current = false;
+        }
       }
     } catch (e) { }
     try { if (typeof caches !== "undefined") { const ks = await borne(caches.keys(), 1500) || []; await borne(Promise.all(ks.map((k) => caches.delete(k))), 1500); } } catch (e) { }
@@ -16812,7 +16885,7 @@ export default function App() {
             // toute la page toutes les quelques secondes. Le message rassurant tient dans l'infobulle :
             // rien n'est perdu, tout est enregistré sur l'appareil en attendant.
             return syncState === "offline"
-              ? <button onClick={() => retenterPush(true)} title="Modifications enregistrées sur cet appareil, pas encore envoyées au serveur. Elles partiront automatiquement dès que la connexion le permettra — cliquez pour réessayer tout de suite." style={{ ...style, cursor: "pointer" }}>{contenu}</button>
+              ? <button onClick={() => retenterPush(true)} title={"Modifications enregistrées sur cet appareil, pas encore envoyées au serveur. Elles partiront automatiquement dès que la connexion le permettra — cliquez pour réessayer tout de suite." + (echecSync ? "\n\nMotif du dernier échec — " + echecSync : "")} style={{ ...style, cursor: "pointer" }}>{contenu}</button>
               : <span title="État de la synchronisation des données" style={style}>{contenu}</span>;
           })()}
           <AiJobsBadge />
