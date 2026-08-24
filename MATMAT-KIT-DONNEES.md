@@ -854,6 +854,41 @@ const SS = {
 Le grand bandeau d'alerte a été supprimé : en apparaissant et disparaissant à chaque tentative, il
 décalait toute la page toutes les quelques secondes.
 
+**Mais « honnête » ne suffit pas : il faut aussi être bavard sur la cause.** Un voyant qui dit
+seulement « Hors ligne » n'apprend rien, alors qu'une base qui refuse l'écriture et une coupure
+réseau demandent des gestes opposés. MITMIT avalait chaque erreur dans un `catch` muet, et il a fallu
+lire le code pour découvrir qu'une règle de sécurité côté base bloquait toutes les écritures, réseau
+intact. Retenez le motif du dernier échec et montrez-le dans l'infobulle :
+
+```js
+const [echecSync, setEchecSync] = useState("");
+const noterEchec = (e, ou) => {
+  const t = e ? ((ou ? ou + " : " : "") + String((e && (e.message || e.error_description || e.hint || e.details)) || e)) : "";
+  setEchecSync((prev) => (prev === t ? prev : t));   // forme fonctionnelle : aucune fermeture périmée
+};
+// … noterEchec(e, "écriture directe") sur chaque échec, noterEchec(null) dès qu'une écriture aboutit.
+title={"…" + (echecSync ? "\n\nMotif du dernier échec — " + echecSync : "")}
+```
+
+**Et prévoyez une seconde voie d'écriture.** Si la voie directe navigateur → base peut être fermée par
+une règle de sécurité, elle le sera un jour, et le logiciel n'enregistrera plus rien. Faites basculer
+toute écriture refusée vers un relais serveur — **en y reconduisant la condition `depuis`**, sinon le
+relais devient une porte dérobée par laquelle un appareil resté sur un état ancien écrase une session
+entière :
+
+```js
+// Le relais reçoit la version acquittée par le client et n'écrit que si le serveur en est toujours
+// là ; sinon il répond applied:false, et le client relit, fusionne et repousse (#14, #15).
+if (body.depuis) {
+  const { data: rows, error } = await sb.from("etat")
+    .update({ data: body.data, updated_at: ts })
+    .eq("id", "shared").eq("updated_at", body.depuis).select("updated_at");
+  if (error) throw error;
+  res.status(200).json({ ok: true, applied: !!(rows && rows.length), updated_at: ts });
+  return;
+}
+```
+
 ---
 
 ## 22. Résolution au chargement : quatre branches
@@ -1329,6 +1364,12 @@ const hardRefresh = useCallback(async () => {
   const filet = setTimeout(go, 5000);                      // le rechargement AURA lieu
   const borne = (p, ms) => Promise.race([Promise.resolve(p).catch(() => null), new Promise((r) => setTimeout(r, ms))]);
 
+  // 0. LA PLUS IMPORTANTE, et celle qu'on oublie : écrire le cache local et ATTENDRE.
+  //    `persist` lance cette écriture sans l'attendre — c'est voulu, la saisie ne doit pas attendre
+  //    le disque. Mais recharger pendant qu'elle est en vol ANNULE la transaction IndexedDB, et les
+  //    dernières saisies n'existaient plus que dans latestRef, en mémoire, qui meurt avec l'onglet.
+  try { if (latestRef.current) await borne(ecrireCache(latestRef.current), 2500); else await borne(cacheEcriture.current, 2500); } catch (e) {}
+
   // 1. Vider l'écriture serveur en attente (persist est débouncé de 800 ms) : sinon une valeur
   //    enregistrée juste avant serait perdue, le chargement suivant écrasant le local par la
   //    version serveur, obsolète.
@@ -1340,7 +1381,9 @@ const hardRefresh = useCallback(async () => {
     if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
     if (supabaseEnabled && hadPending) {
       const payload = latestRef.current;
-      if (payload) { await borne(pousserServeur(payload), 2500); pendingWrite.current = false; }
+      // Le drapeau n'est baissé QUE si l'envoi a vraiment abouti : `borne` avale les échecs comme
+    // les dépassements de délai, et le baisser dans tous les cas désarme le vidage sur `pagehide`.
+    if (payload) { const envoye = await borne(pousserServeur(payload), 2500); if (envoye) pendingWrite.current = false; }
     }
   } catch (e) {}
 
@@ -1355,8 +1398,13 @@ const hardRefresh = useCallback(async () => {
 }, [pousserServeur]);
 ```
 
-**Les quatre idées à retenir**, dans l'ordre d'importance :
+**Les cinq idées à retenir**, dans l'ordre d'importance :
 
+0. **Attendre l'écriture du cache local, avant tout le reste.** C'est la seule étape qui protège
+   vraiment les données, et c'est celle qu'on oublie. MITMIT bornait soigneusement l'envoi serveur,
+   la Cache API et les service workers — et ne tentait pas celle-là. Résultat : modifier une fiche
+   puis cliquer « Mettre à jour » dans la foulée faisait disparaître la modification, qui n'avait
+   atteint ni le disque ni le serveur. Corrigé depuis ; ne reproduisez pas l'omission.
 1. **Le filet de 5 s.** Le bouton promet un rechargement : il doit tenir, même si toutes les étapes
    se figent. Un bouton qui ne fait rien est pire qu'un bouton qui recharge trop tôt.
 2. **Chaque étape est bornée** par `Promise.race` — 2,5 s pour le réseau, 1,5 s pour les caches.
