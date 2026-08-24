@@ -1,0 +1,145 @@
+/* Jetons de couleur : une seule définition claire, redéfinie en sombre. Chaque couleur du
+   reste de la feuille passe par une variable — changer d'identité visuelle se fait ici. */
+:root {
+  color-scheme: light dark;
+  --fond: #f7f8fb;
+  --carte: #ffffff;
+  --bord: #e6e8ef;
+  --texte: #16203a;
+  --doux: #6b7589;
+  --accent: #3f60aa;
+  --accent-fonce: #2f4c86;
+  --accent-doux: #eef2fb;
+  --succes: #157a4a;
+  --succes-doux: #e6f5ec;
+  --alerte: #a33a2a;
+  --alerte-doux: #fbecea;
+  --ombre: 0 1px 2px rgba(20, 32, 58, .05), 0 8px 24px rgba(20, 32, 58, .06);
+  --rayon: 14px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fond: #11141f;
+    --carte: #191d2c;
+    --bord: #2a3043;
+    --texte: #e8ebf3;
+    --doux: #9aa3b8;
+    --accent: #8ea6e0;
+    --accent-fonce: #a8bcea;
+    --accent-doux: #212942;
+    --succes: #6ed09b;
+    --succes-doux: #16301f;
+    --alerte: #f19d8e;
+    --alerte-doux: #33191a;
+    --ombre: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .35);
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--fond);
+  color: var(--texte);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 { line-height: 1.25; margin: 0 0 10px; }
+h1 { font-size: 26px; font-weight: 800; letter-spacing: -.02em; }
+h2 { font-size: 19px; font-weight: 750; }
+h3 { font-size: 15px; font-weight: 700; }
+p { margin: 0 0 12px; }
+a { color: var(--accent); }
+
+.contenu { max-width: 940px; margin: 0 auto; padding: 26px 20px 64px; }
+.doux { color: var(--doux); }
+.petit { font-size: 13px; }
+.pile { display: flex; flex-direction: column; gap: 16px; }
+.ligne { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pousse { margin-left: auto; }
+
+/* --- barre de navigation --- */
+.barre {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 14px;
+  padding: 11px 20px;
+  background: color-mix(in srgb, var(--carte) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--bord);
+}
+.marque { font-weight: 800; letter-spacing: -.02em; text-decoration: none; color: var(--texte); }
+.onglets { display: flex; gap: 2px; flex-wrap: wrap; }
+.onglet {
+  text-decoration: none; color: var(--doux); font-weight: 600; font-size: 13.5px;
+  padding: 6px 11px; border-radius: 9px;
+}
+.onglet:hover { background: var(--accent-doux); color: var(--texte); }
+.onglet[aria-current="page"] { background: var(--accent-doux); color: var(--accent); }
+
+/* --- cartes --- */
+.carte {
+  background: var(--carte);
+  border: 1px solid var(--bord);
+  border-radius: var(--rayon);
+  padding: 18px;
+  box-shadow: var(--ombre);
+}
+.grille { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+
+/* --- contrôles --- */
+button, .bouton {
+  font: inherit; font-weight: 700; font-size: 14px;
+  border: 1px solid transparent; border-radius: 10px;
+  padding: 9px 15px; cursor: pointer;
+  background: var(--accent); color: #fff;
+  text-decoration: none; display: inline-block;
+}
+button:hover:not(:disabled), .bouton:hover { background: var(--accent-fonce); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button.discret { background: transparent; color: var(--texte); border-color: var(--bord); }
+button.discret:hover:not(:disabled) { background: var(--accent-doux); }
+button.danger { background: transparent; color: var(--alerte); border-color: var(--bord); }
+button.danger:hover:not(:disabled) { background: var(--alerte-doux); }
+button.mini { font-size: 12.5px; padding: 5px 10px; }
+
+input, select, textarea {
+  font: inherit; color: var(--texte);
+  background: var(--fond);
+  border: 1px solid var(--bord); border-radius: 10px;
+  padding: 9px 11px; width: 100%;
+}
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+label { display: block; font-size: 13px; font-weight: 650; margin-bottom: 5px; }
+.champ { flex: 1 1 190px; min-width: 0; }
+
+/* --- pastilles d'état --- */
+.pastille {
+  display: inline-block; font-size: 11.5px; font-weight: 750;
+  padding: 3px 9px; border-radius: 999px;
+  background: var(--accent-doux); color: var(--accent);
+}
+.pastille.ok { background: var(--succes-doux); color: var(--succes); }
+.pastille.ko { background: var(--alerte-doux); color: var(--alerte); }
+
+/* --- messages --- */
+.message { border-radius: 10px; padding: 10px 13px; font-size: 13.5px; font-weight: 600; }
+.message.erreur { background: var(--alerte-doux); color: var(--alerte); }
+.message.succes { background: var(--succes-doux); color: var(--succes); }
+
+/* --- listes --- */
+.liste { list-style: none; margin: 0; padding: 0; }
+.liste li {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 11px 0; border-top: 1px solid var(--bord);
+}
+.liste li:first-child { border-top: none; }
+
+/* --- page d'accueil publique --- */
+.hero { text-align: center; padding: 68px 20px 40px; max-width: 720px; margin: 0 auto; }
+.hero h1 { font-size: clamp(30px, 6vw, 46px); }
+.hero p { font-size: 17px; color: var(--doux); }
+.vide { text-align: center; color: var(--doux); padding: 26px 12px; }

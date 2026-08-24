@@ -6,3 +6,6 @@ dist
 .vercel
 .DS_Store
 *.log
+saas/node_modules
+saas/dist
+saas/.vercel
