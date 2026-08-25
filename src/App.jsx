@@ -1391,24 +1391,39 @@ function ClaudeCostChart({ usage }) {
 }
 
 const RAW = [
-  ["PU3D-FIL-BEIGE","Bobines Fil'Up Beige X3",32,9.99],["PU3D-FIL-BLANC","Bobines Fil'Up Blanc X3",85,9.99],
-  ["PU3D-FIL-BLEU","Bobines Fil'Up Bleu X3",31,9.99],["PU3D-FIL-BLEUCLAIR","Bobines Fil'Up Bleu clair X3",37,9.99],
-  ["PU3D-FIL-BLEU-TURQUOISE","Bobines Fil'Up Turquoise X3",34,9.99],["PU3D-FIL-GALAXIE","Lot de 3 bobines Fil'Up Galaxie",556,9.99],
-  ["PU3D-FIL-GRIS","Bobines Fil'Up Gris X3",34,9.99],["PU3D-FIL-JAUNE","Bobines Fil'Up Jaune X3",35,9.99],
-  ["PU3D-FIL-MAGIQUE","Lot de 3 bobines Fil'Up Magique",1213,9.99],["PU3D-FIL-MARRON","Bobines Fil'Up Marron X3",17,9.99],
-  ["PU3D-FIL-MULTICOLORE","Lot de 12 bobines Fil'Up",1369,34.99],["PU3D-FIL-NATURE","Lot de 3 bobines Fil'Up Nature",560,9.99],
-  ["PU3D-FIL-NOIR","Bobines Fil'Up Noir X3",46,9.99],["PU3D-FIL-NOIRETBLANC","Lot de 4 bobines Fil'Up Noir et Blanc",1701,12.99],
-  ["PU3D-FIL-OR","Bobines Fil'Up Or X3",33,9.99],["PU3D-FIL-ORANGE","Bobines Fil'Up Orange X3",41,9.99],
-  ["PU3D-FIL-PASTEL","Lot de 4 bobines Fil'Up Pastel",1658,12.99],["PU3D-FIL-PHOSPHORESCENT","Bobines Fil'Up Phosphorescent X3",18,9.99],
-  ["PU3D-FIL-ROSE","Bobines Fil'Up Rose X3",46,9.99],["PU3D-FIL-ROSE-SAUMON","Bobines Fil'Up Saumon X3",31,9.99],
-  ["PU3D-FIL-ROUGE","Bobines Fil'Up Rouge X3",0,9.99],["PU3D-FIL-SOLEIL","Lot de 4 bobines Fil'Up Soleil",841,12.99],
-  ["PU3D-FIL-TRANSLUCIDE","Bobines Fil'Up Translucide X3",30,9.99],["PU3D-FIL-VERT","Bobines Fil'Up Vert X3",45,9.99],
-  ["PU3D-FIL-VERT-FLUO","Bobines Fil'Up Vert fluo X3",31,9.99],["PU3D-FIL-VIOLET","Bobines Fil'Up Violet X3",55,9.99],
-  ["PU3D-FIL-VIOLET-LAVANDE","Bobines Fil'Up Lavande X3",29,9.99],["PU3D-KIT-MECANIQUE","Kit Mécanique",0,39.99],
+  ["PU3D-FIL-BEIGE","Bobines Fil'Up Beige X3",32,7.99],["PU3D-FIL-BLANC","Bobines Fil'Up Blanc X3",85,7.99],
+  ["PU3D-FIL-BLEU","Bobines Fil'Up Bleu X3",31,7.99],["PU3D-FIL-BLEUCLAIR","Bobines Fil'Up Bleu clair X3",37,7.99],
+  ["PU3D-FIL-BLEU-TURQUOISE","Bobines Fil'Up Turquoise X3",34,7.99],["PU3D-FIL-GALAXIE","Lot de 3 bobines Fil'Up Galaxie",556,7.99],
+  ["PU3D-FIL-GRIS","Bobines Fil'Up Gris X3",34,7.99],["PU3D-FIL-JAUNE","Bobines Fil'Up Jaune X3",35,7.99],
+  ["PU3D-FIL-MAGIQUE","Lot de 3 bobines Fil'Up Magique",1213,7.99],["PU3D-FIL-MARRON","Bobines Fil'Up Marron X3",17,7.99],
+  ["PU3D-FIL-MULTICOLORE","Lot de 12 bobines Fil'Up",1369,24.99],["PU3D-FIL-NATURE","Lot de 3 bobines Fil'Up Nature",560,7.99],
+  ["PU3D-FIL-NOIR","Bobines Fil'Up Noir X3",46,7.99],["PU3D-FIL-NOIRETBLANC","Lot de 4 bobines Fil'Up Noir et Blanc",1701,9.99],
+  ["PU3D-FIL-OR","Bobines Fil'Up Or X3",33,7.99],["PU3D-FIL-ORANGE","Bobines Fil'Up Orange X3",41,7.99],
+  ["PU3D-FIL-PASTEL","Lot de 4 bobines Fil'Up Pastel",1658,9.99],["PU3D-FIL-PHOSPHORESCENT","Bobines Fil'Up Phosphorescent X3",18,7.99],
+  ["PU3D-FIL-ROSE","Bobines Fil'Up Rose X3",46,7.99],["PU3D-FIL-ROSE-SAUMON","Bobines Fil'Up Saumon X3",31,7.99],
+  ["PU3D-FIL-ROUGE","Bobines Fil'Up Rouge X3",0,7.99],["PU3D-FIL-SOLEIL","Lot de 4 bobines Fil'Up Soleil",841,9.99],
+  ["PU3D-FIL-TRANSLUCIDE","Bobines Fil'Up Translucide X3",30,7.99],["PU3D-FIL-VERT","Bobines Fil'Up Vert X3",45,7.99],
+  ["PU3D-FIL-VERT-FLUO","Bobines Fil'Up Vert fluo X3",31,7.99],["PU3D-FIL-VIOLET","Bobines Fil'Up Violet X3",55,7.99],
+  ["PU3D-FIL-VIOLET-LAVANDE","Bobines Fil'Up Lavande X3",29,7.99],["PU3D-KIT-MECANIQUE","Kit Mécanique",0,39.99],
   ["PU3D-LIVRET-DECOUVERTE","Livret Découverte",2,14.99],["PU3D-LIVRET-EXPERT3D","Livret Expert 3D",108,19.99],
   ["PU3D-PACK-COMPLET","Pack Complet",3424,99.99],["PU3D-PACK-DECOUVERTE","Pack Découverte",0,69.99],
   ["PU3D-POCHOIRS-PADUP","Pochoirs Pad'Up",1092,14.99],["PU3D-STYLO","Stylo Pen'Up 3D",91,49.99],
 ];
+// Grille des prix publics Fil'Up (TTC) entrée en vigueur avec la nouvelle boutique : les lots comme
+// les bobines à l'unité baissent. Sert au démarrage d'une installation neuve (RAW ci-dessus porte
+// déjà ces valeurs) ET à la mise à jour, en une fois, des fiches déjà enregistrées. Les prix
+// professionnels (cessionHT) et les coûts de revient ne sont PAS concernés : seul le prix public change.
+const PVC_FILUP_NOUVEAUX = {
+  "PU3D-FIL-MULTICOLORE": 24.99, "PU3D-FIL-SOLEIL": 9.99, "PU3D-FIL-PASTEL": 9.99,
+  "PU3D-FIL-NOIRETBLANC": 9.99, "PU3D-FIL-NATURE": 7.99, "PU3D-FIL-MAGIQUE": 7.99,
+  "PU3D-FIL-GALAXIE": 7.99, "PU3D-FIL-BEIGE": 7.99, "PU3D-FIL-BLANC": 7.99,
+  "PU3D-FIL-BLEU": 7.99, "PU3D-FIL-BLEUCLAIR": 7.99, "PU3D-FIL-BLEU-TURQUOISE": 7.99,
+  "PU3D-FIL-GRIS": 7.99, "PU3D-FIL-JAUNE": 7.99, "PU3D-FIL-MARRON": 7.99,
+  "PU3D-FIL-NOIR": 7.99, "PU3D-FIL-OR": 7.99, "PU3D-FIL-ORANGE": 7.99,
+  "PU3D-FIL-PHOSPHORESCENT": 7.99, "PU3D-FIL-ROSE": 7.99, "PU3D-FIL-ROSE-SAUMON": 7.99,
+  "PU3D-FIL-ROUGE": 7.99, "PU3D-FIL-TRANSLUCIDE": 7.99, "PU3D-FIL-VERT": 7.99,
+  "PU3D-FIL-VERT-FLUO": 7.99, "PU3D-FIL-VIOLET": 7.99, "PU3D-FIL-VIOLET-LAVANDE": 7.99,
+};
 const PA_HT_OFFICIEL = { "PU3D-PACK-COMPLET": 44.44, "PU3D-PACK-DECOUVERTE": 31.11, "PU3D-KIT-MECANIQUE": 17.93, "PU3D-KIT-MECA": 17.93, "PU3D-LIVRET-DECOUVERTE": 6.72, "PU3D-LIVRET-EXPERT3D": 8.96, "PU3D-POCHOIRS-PADUP": 6.72, "PU3D-FIL-MULTICOLORE": 15.83, "PU3D-FIL-SOLEIL": 5.88, "PU3D-FIL-PASTEL": 5.88, "PU3D-FIL-NOIRETBLANC": 5.88, "PU3D-FIL-MAGIQUE": 4.52, "PU3D-FIL-NATURE": 4.52, "PU3D-FIL-GALAXIE": 4.52 };
 const familleOf = (code) => code.includes("-PACK-") ? "Pack" : code.includes("-KIT-") ? "Kit" : code.includes("-LIVRET-") ? "Livret" : code.includes("-POCHOIRS") ? "Accessoire" : code.includes("-STYLO") ? "Stylo" : code.includes("-FIL-") ? "Filament" : "Autre";
 // Modèle rasoir/lame : "stylo" = matériel porteur (packs, stylo, kit), "consommable" = bobines Fil'Up, "autre" = livrets/accessoires
@@ -1657,6 +1672,9 @@ function normalize(d) {
   delete d.settings.coefMin;
   if (!d.settings.coefBasisTTC) { d.settings.coefTarget = Math.round((d.settings.coefTarget || 1.8) * 1.2 * 100) / 100; d.settings.coefMax = Math.round((d.settings.coefMax || 2.0) * 1.2 * 100) / 100; if (d.settings.coefTarget < 2.2) d.settings.coefTarget = 2.2; if (d.settings.coefMax <= d.settings.coefTarget) d.settings.coefMax = Math.round((d.settings.coefTarget + 0.2) * 100) / 100; d.settings.coefBasisTTC = true; }
   if (!d.settings._tarif2026) { d.products = (d.products || []).map((p) => p.code === "PU3D-KIT-MECA" ? { ...p, code: "PU3D-KIT-MECANIQUE" } : p); d.settings._tarif2026 = true; }
+  // Nouveaux prix publics Fil'Up : appliqués UNE seule fois. Un prix retouché à la main ensuite n'est
+  // jamais réécrit — le drapeau reste posé, la migration ne repasse pas.
+  if (!d.settings._pvcFilUpNouveaux) { d.products = (d.products || []).map((p) => PVC_FILUP_NOUVEAUX[p.code] != null ? { ...p, pvc: PVC_FILUP_NOUVEAUX[p.code] } : p); d.settings._pvcFilUpNouveaux = true; }
   if (!d.settings._livretRename) { d.products = (d.products || []).map((p) => p.code === "PU3D-LIVRET-DECOUVERTE" ? { ...p, designation: "Livret Découverte" } : p); d.deals = (d.deals || []).map((dl) => ({ ...dl, lines: (dl.lines || []).map((l) => l.code === "PU3D-LIVRET-DECOUVERTE" ? { ...l, designation: "Livret Découverte" } : l) })); d.settings._livretRename = true; }
   // Coûts de revient : renseigne le coût produit (product.cout) à partir des prix d'achat officiels, et
   // pour les bobines Fil'Up par taille de lot (lot de 12 = 15,83 · lot de 4 = 5,88 · X3/lot de 3 = 4,52),
@@ -9084,6 +9102,31 @@ const flashLocalClear = () => { try { localStorage.removeItem(FLASH_LOCAL_KEY); 
 const SHOPIFY_LOCAL_KEY = "penup_shopify_creds";
 const shopifyLocalGet = () => { try { return JSON.parse(localStorage.getItem(SHOPIFY_LOCAL_KEY) || "{}"); } catch (e) { return {}; } };
 const shopifyLocalSet = (d) => { try { localStorage.setItem(SHOPIFY_LOCAL_KEY, JSON.stringify(d || {})); } catch (e) {} };
+// Champ de prix. La saisie vit en local le temps de la frappe et n'est enregistrée qu'à la sortie du
+// champ (ou sur Entrée) : écrire à chaque touche casse la saisie des décimales, « 7. » n'étant pas un
+// nombre. La virgule est acceptée. Un champ ouvert puis quitté sans rien changer n'enregistre RIEN :
+// sans cette garde, un aller-retour HT → TTC déplacerait le prix d'un centime par arrondi.
+function PrixInput({ value, onCommit, title, largeur = 78 }) {
+  const affiche = (v) => (v == null || v === "" ? "" : String(Math.round(v * 100) / 100));
+  const [txt, setTxt] = useState(() => affiche(value));
+  const vuRef = useRef(value);
+  useEffect(() => { if (value !== vuRef.current) { vuRef.current = value; setTxt(affiche(value)); } }, [value]);
+  const initial = value == null ? null : Math.round(value * 100) / 100;
+  const commit = () => {
+    const t = String(txt).trim().replace(",", ".");
+    if (t === "") { if (initial != null) { vuRef.current = null; onCommit(null); } return; }
+    const n = Number(t);
+    if (!isFinite(n) || n < 0) { setTxt(affiche(value)); return; }   // saisie inexploitable : on remet la valeur en place
+    const arrondi = Math.round(n * 100) / 100;
+    setTxt(String(arrondi));
+    if (arrondi === initial) return;                                  // rien n'a changé : aucune écriture
+    vuRef.current = arrondi; onCommit(arrondi);
+  };
+  return <input className="inp" type="text" inputMode="decimal" value={txt} title={title}
+    onChange={(e) => setTxt(e.target.value)} onBlur={commit}
+    onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") { setTxt(affiche(value)); e.currentTarget.blur(); } }}
+    style={{ width: largeur, textAlign: "right" }} />;
+}
 function Stock({ data, persist }) {
   const { products } = data; const [q, setQ] = useState(""); const [fam, setFam] = useState("Tous");
   const [filtStatut, setFiltStatut] = useState("tous"); const [grp, setGrp] = useState("catalogue"); const [dir, setDir] = useState("asc");
@@ -9118,13 +9161,13 @@ function Stock({ data, persist }) {
       {hasFilter && <div style={{ display: "flex", alignItems: "center" }}><button className="btn btn-ghost btn-s" onClick={() => { setQ(""); setFam("Tous"); setFiltStatut("tous"); }}><X size={13} /> Effacer</button></div>}
     </div>
     <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>{list.length} référence{list.length > 1 ? "s" : ""} {hasFilter ? "filtrée" + (list.length > 1 ? "s" : "") : ""}</div>
-    <div className="card" style={{ padding: 0, overflow: "hidden" }}><div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Référence</th><th>Famille</th><th style={{ textAlign: "right" }}>PVC HT</th><th style={{ textAlign: "right" }}>Prix pro HT</th><th style={{ textAlign: "right" }}>Dispo</th><th style={{ textAlign: "right" }}>Seuil</th><th style={{ textAlign: "right" }}>Ventes/mois</th><th style={{ textAlign: "right" }}>Couverture</th><th style={{ textAlign: "right" }}>Poids (g)</th><th>État</th><th style={{ textAlign: "center" }}>Vente</th></tr></thead><tbody>
-      {list.length === 0 ? <tr><td colSpan={11} className="empty">Aucune référence {hasFilter && "correspondant aux filtres"}.</td></tr> : (() => {
+    <div className="card" style={{ padding: 0, overflow: "hidden" }}><div style={{ overflowX: "auto" }}><table className="tbl"><thead><tr><th>Référence</th><th>Famille</th><th style={{ textAlign: "right" }}>PVC HT</th><th style={{ textAlign: "right" }}>PVC TTC</th><th style={{ textAlign: "right" }}>Prix pro HT</th><th style={{ textAlign: "right" }}>Dispo</th><th style={{ textAlign: "right" }}>Seuil</th><th style={{ textAlign: "right" }}>Ventes/mois</th><th style={{ textAlign: "right" }}>Couverture</th><th style={{ textAlign: "right" }}>Poids (g)</th><th>État</th><th style={{ textAlign: "center" }}>Vente</th></tr></thead><tbody>
+      {list.length === 0 ? <tr><td colSpan={12} className="empty">Aucune référence {hasFilter && "correspondant aux filtres"}.</td></tr> : (() => {
         const GD = { catalogue: { get: (p) => prodCat(p), meta: (v) => ({ color: "#3F60AA", label: v }), order: CAT_ORDER }, etat: { get: (p) => statusOf(p), meta: (v) => SM[v] || SM.ok, order: ["rupture", "bas", "ok"] }, famille: { get: (p) => p.famille } };
         const gd = GD[grp] || GD.catalogue;
-        const prow = (p) => { const stt = statusOf(p); const sm = SM[stt]; const cov = coverage(p); const pvcHt = pvcHtOf(p); return (<tr key={p.code}><td><div style={{ fontWeight: 600 }}>{p.designation}</div><div style={{ fontSize: 11, color: "var(--muted)" }}>{p.code}</div></td><td>{p.famille}</td><td style={{ textAlign: "right" }} className="tnum">{pvcHt != null ? eur2(pvcHt) : "—"}</td><td style={{ textAlign: "right", fontWeight: 700, color: "var(--blue)" }} className="tnum">{p.cessionHT != null ? eur2(p.cessionHT) : "—"}</td><td style={{ textAlign: "right", fontWeight: 700 }} className="tnum">{num(p.dispo)}</td><td style={{ textAlign: "right" }}><input className="inp" type="number" value={p.seuil} onChange={(e) => set(p.code, { seuil: +e.target.value })} /></td><td style={{ textAlign: "right" }}>{(() => { const a = ventesMoisAuto(p); return a != null ? (<span className="tnum" title={"Calculé automatiquement : " + (p.vSold || 0) + " unité(s) vendue(s) observée(s) depuis le " + new Date(p.vSince).toLocaleDateString("fr-FR") + " via la baisse de stock. Cliquez pour réinitialiser le suivi (redémarre la fenêtre de mesure)."} onClick={() => set(p.code, { vSince: null, vSold: 0 })} style={{ cursor: "pointer", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}>{a}<span style={{ fontSize: 8.5, fontWeight: 800, color: "#fff", background: "var(--green)", borderRadius: 5, padding: "1px 4px", letterSpacing: ".03em" }}>AUTO</span></span>) : (<input className="inp" type="number" value={p.ventesMois} onChange={(e) => set(p.code, { ventesMois: +e.target.value })} />); })()}</td><td style={{ textAlign: "right" }} className="tnum">{cov == null ? "—" : cov + " j"}</td><td style={{ textAlign: "right" }}><input className="inp" type="number" step="1" min="0" value={p.poidsG ?? 0} title={p.poidsEstime ? "Poids provisoire estimé, à valider" : "Poids validé"} onChange={(e) => set(p.code, { poidsG: Math.max(0, Math.round(+e.target.value || 0)), poidsEstime: false })} style={p.poidsEstime ? { color: "var(--orange)", borderColor: "var(--orange)" } : {}} />{p.poidsEstime && <span title="Poids provisoire, à valider" style={{ color: "var(--orange)", marginLeft: 4, fontWeight: 700 }}>≈</span>}</td><td><Badge color={sm.color}>{sm.label}</Badge></td>
+        const prow = (p) => { const stt = statusOf(p); const sm = SM[stt]; const cov = coverage(p); const pvcHt = pvcHtOf(p); return (<tr key={p.code}><td><div style={{ fontWeight: 600 }}>{p.designation}</div><div style={{ fontSize: 11, color: "var(--muted)" }}>{p.code}</div></td><td>{p.famille}</td><td style={{ textAlign: "right" }}><PrixInput value={pvcHt} title={"Prix public conseillé HORS TAXES (TVA " + tvaPct + " %). Modifiable : le PVC TTC est recalculé.\nPour un prix public rond (24,99 €), saisissez-le dans la colonne TTC : passer par le HT arrondit au centime."} onCommit={(v) => set(p.code, { pvc: v == null ? null : Math.round(v * (1 + tvaPct / 100) * 100) / 100 })} /></td><td style={{ textAlign: "right" }}><PrixInput value={p.pvc} title="Prix public conseillé TTC, celui affiché en boutique. Modifiable : le PVC HT est recalculé." onCommit={(v) => set(p.code, { pvc: v })} /></td><td style={{ textAlign: "right", fontWeight: 700, color: "var(--blue)" }} className="tnum">{p.cessionHT != null ? eur2(p.cessionHT) : "—"}</td><td style={{ textAlign: "right", fontWeight: 700 }} className="tnum">{num(p.dispo)}</td><td style={{ textAlign: "right" }}><input className="inp" type="number" value={p.seuil} onChange={(e) => set(p.code, { seuil: +e.target.value })} /></td><td style={{ textAlign: "right" }}>{(() => { const a = ventesMoisAuto(p); return a != null ? (<span className="tnum" title={"Calculé automatiquement : " + (p.vSold || 0) + " unité(s) vendue(s) observée(s) depuis le " + new Date(p.vSince).toLocaleDateString("fr-FR") + " via la baisse de stock. Cliquez pour réinitialiser le suivi (redémarre la fenêtre de mesure)."} onClick={() => set(p.code, { vSince: null, vSold: 0 })} style={{ cursor: "pointer", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}>{a}<span style={{ fontSize: 8.5, fontWeight: 800, color: "#fff", background: "var(--green)", borderRadius: 5, padding: "1px 4px", letterSpacing: ".03em" }}>AUTO</span></span>) : (<input className="inp" type="number" value={p.ventesMois} onChange={(e) => set(p.code, { ventesMois: +e.target.value })} />); })()}</td><td style={{ textAlign: "right" }} className="tnum">{cov == null ? "—" : cov + " j"}</td><td style={{ textAlign: "right" }}><input className="inp" type="number" step="1" min="0" value={p.poidsG ?? 0} title={p.poidsEstime ? "Poids provisoire estimé, à valider" : "Poids validé"} onChange={(e) => set(p.code, { poidsG: Math.max(0, Math.round(+e.target.value || 0)), poidsEstime: false })} style={p.poidsEstime ? { color: "var(--orange)", borderColor: "var(--orange)" } : {}} />{p.poidsEstime && <span title="Poids provisoire, à valider" style={{ color: "var(--orange)", marginLeft: 4, fontWeight: 700 }}>≈</span>}</td><td><Badge color={sm.color}>{sm.label}</Badge></td>
       <td style={{ textAlign: "center" }}><button type="button" onClick={() => set(p.code, { vendable: !p.vendable })} className="chip" title={p.vendable ? "Cliquer pour retirer de la vente" : "Cliquer pour remettre en vente"} style={p.vendable ? { background: "var(--green)", borderColor: "var(--green)", color: "#fff", whiteSpace: "nowrap" } : { borderLeft: "4px solid var(--red)", color: "var(--red)", whiteSpace: "nowrap" }}>{p.vendable ? "En vente" : "Indispo."}</button></td></tr>); };
-        return groupList(sortProducts(list), gd, dir).map((g) => { const m = gd.meta ? gd.meta(g.key) : null; const col = m ? m.color : "#9aa6bd"; const lbl = m ? m.label : g.key; return (<React.Fragment key={g.key}><tr><td colSpan={11} style={{ background: col + "1f", borderLeft: "3px solid " + col, padding: "8px 12px" }}><span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 800 }} className="pu-display"><span style={{ width: 10, height: 10, borderRadius: 3, background: col, display: "inline-block" }} />{lbl}<span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>· {g.items.length}</span></span></td></tr>{g.items.map(prow)}</React.Fragment>); });
+        return groupList(sortProducts(list), gd, dir).map((g) => { const m = gd.meta ? gd.meta(g.key) : null; const col = m ? m.color : "#9aa6bd"; const lbl = m ? m.label : g.key; return (<React.Fragment key={g.key}><tr><td colSpan={12} style={{ background: col + "1f", borderLeft: "3px solid " + col, padding: "8px 12px" }}><span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 800 }} className="pu-display"><span style={{ width: 10, height: 10, borderRadius: 3, background: col, display: "inline-block" }} />{lbl}<span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>· {g.items.length}</span></span></td></tr>{g.items.map(prow)}</React.Fragment>); });
       })()}
     </tbody></table></div></div>
   </div>);
