@@ -26,8 +26,8 @@ sont la charte PEN'UP : remplacez les hex, gardez les rôles.
 | 7 | Sélecteur de thème (couleur × motif × accent) | Thème |
 | 8 | Verre liquide (liquid glass) | Surface |
 | 9 | Micro-trame de points sur le contenu | Surface |
-| 10 | Barre latérale collante + filet tricolore de marque | Structure |
-| 11 | Bandeau horloge / date / météo | Structure |
+| 10 | Barre latérale collante, et les deux emplacements de logo | Structure |
+| 11 | L'horloge météo intégrée | Structure |
 | 12 | Navigation groupée, item actif en dégradé, compteurs | Structure |
 | 13 | Famille complète de boutons (7 variantes) | Contrôle |
 | 14 | Micro-interactions au survol (lift, scale, reflet balayant) | Animation |
@@ -400,40 +400,102 @@ consciemment, elle enlève l'aspect « page blanche vide ».
 
 ---
 
-## 10. Barre latérale collante + filet tricolore
+## 10. Barre latérale collante, et les deux emplacements de logo
 
-**L'effet** : la barre reste en place au défilement. Sous le logo, un filet à trois bandes
-signe la marque en 5 pixels de haut.
+**L'effet** : la barre reste en place au défilement et porte **deux logos, à deux endroits qui ne
+disent pas la même chose**.
+
+- **En haut, le logo du logiciel.** C'est l'outil qu'on ouvre, il se présente en premier : vignette
+  carrée, filet de marque, nom, et sous-titre développant le sigle.
+- **Tout en bas, le logo de l'entreprise**, cliquable vers son site. Il ne signe pas l'outil, il
+  signe le propriétaire. Il est poussé en bas par `margin-top:auto`, donc collé au pied de la barre
+  quelle que soit la longueur du menu — et jamais au milieu de la navigation.
 
 ```css
 .sb{width:240px;flex:0 0 240px;padding:22px 16px;position:sticky;top:0;height:100vh;
-  display:flex;flex-direction:column;gap:6px;
+  display:flex;flex-direction:column;gap:6px;              /* colonne flex : indispensable au margin-top:auto */
   background:linear-gradient(180deg,#fffdf8,#fffaf0);
   border-right:1px solid var(--line);overflow-y:auto;z-index:2;}
 .mm-root.dark .sb{background:linear-gradient(180deg,#181f34,#141a2c);}
 
+/* --- Emplacement 1 : le logo du logiciel, en haut --- */
 .brand{display:flex;flex-direction:column;align-items:flex-start;gap:9px;padding:2px 6px 16px;}
 .brand-accent{height:5px;width:100%;border-radius:6px;border:1px solid rgba(22,32,58,.10);
   background:linear-gradient(90deg,var(--blue) 0 33.33%,#ffffff 33.33% 66.66%,var(--red) 66.66% 100%);}
 .brand small{color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;}
 
-.sb-brandfoot{margin-top:auto;padding:6px 8px 12px;display:block;}  /* pousse le logo pied en bas */
-.sb-brandfoot img{width:100%;max-width:160px;transition:opacity .15s;}
-.sb-brandfoot:hover img{opacity:.78;}
+/* --- Emplacement 2 : le logo de l'entreprise, en pied --- */
+.sb-brandfoot{margin-top:auto;padding:6px 8px 12px;display:block;}   /* auto = mange tout l'espace libre */
+.sb-brandfoot img{width:100%;max-width:160px;height:auto;display:block;margin:0 auto;transition:opacity .15s;}
+.sb-brandfoot:hover img{opacity:.78;}                                 /* seul indice qu'il est cliquable */
 .sb-foot{padding:12px 8px 0;border-top:1px solid var(--line);color:var(--muted);font-size:11px;}
 ```
 
-**Piège évité, noté dans le code source** : ne jamais passer la barre en `position:fixed`
-pour la faire flotter — cela lui crée un contexte d'empilement qui la place devant les
-menus surgissants de la barre du haut. `sticky` + `z-index:2` suffit.
+Le balisage, dans l'ordre exact où les blocs se succèdent — c'est cet ordre qui produit le placement :
+
+```jsx
+<aside className="sb">
+  {/* 1 · logo du logiciel */}
+  <div className="brand">
+    <img src="/logo-matmat.png" alt="MATMAT"
+      style={{ width: 88, height: 88, maxWidth: 88, borderRadius: 20, alignSelf: "center" }} />
+    <div className="brand-accent" />
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <small style={{ letterSpacing: ".12em" }}>MATMAT · Poste de pilotage</small>
+      <span style={{ fontSize: 9.5, color: "var(--muted)", fontWeight: 600, lineHeight: 1.3,
+        textTransform: "none", letterSpacing: 0 }} title="Le petit nom du logiciel">
+        Module d'Analyse, Tarification, Marges &amp; Traitement</span>
+    </div>
+  </div>
+
+  <SidebarStatus />          {/* 2 · horloge météo, cf. #11 */}
+  <nav className="nav">…</nav>
+
+  {/* 3 · logo de l'entreprise, poussé en bas par margin-top:auto */}
+  <a className="sb-brandfoot" href="https://exemple.com" target="_blank" rel="noreferrer"
+     title="Ouvrir le site exemple.com">
+    <img src="/logo-entreprise.png" alt="Nom de l'entreprise — exemple.com" />
+  </a>
+
+  <div className="sb-foot">Raison sociale · Ville<br />Mention légale courte.</div>
+</aside>
+```
+
+**Deux règles de placement à ne pas perdre.**
+
+`margin-top:auto` ne fonctionne que si `.sb` est un conteneur flex en colonne. C'est ce qui rend le
+placement robuste : ajoutez dix entrées de menu, le logo reste en bas ; retirez-en huit, il y reste
+aussi. Une marge fixe aurait demandé un réglage à chaque changement de menu.
+
+`rel="noreferrer"` sur le lien externe, toujours — avec `target="_blank"`, son absence donne à la
+page ouverte une référence sur la vôtre.
+
+**Où loger le fichier du logo.** Deux stratégies, et le choix se fait sur une seule question : *qui
+doit le lire ?*
+
+| Besoin | Où | Pourquoi |
+|---|---|---|
+| Uniquement l'interface | fichier dans `public/`, appelé par son URL | le navigateur le met en cache, il ne pèse pas sur le bundle |
+| Interface **et** serveur (documents imprimés, page publique, e-mail) | module partagé exportant une **data URI base64** | une seule source ; le recopier figerait deux versions du même logo |
+
+```js
+// lib/logoEntreprise.js — lisible des DEUX côtés : le bundle de l'interface ET le code serveur.
+// Une image référencée par URL ne convient pas ici : un document généré côté serveur, ou un PDF
+// imprimé, n'a pas de contexte de page pour la résoudre.
+export const LOGO_DATA_URI = "data:image/png;base64,iVBORw0KGgo…";
+```
+
+**Piège évité, noté dans le code source** : ne jamais passer la barre en `position:fixed` pour la
+faire flotter — cela lui crée un contexte d'empilement qui la place devant les menus surgissants de
+la barre du haut. `sticky` + `z-index:2` suffit.
 
 ---
 
-## 11. Bandeau horloge / date / météo
+## 11. L'horloge météo intégrée
 
-**L'effet** : en haut de la barre latérale, l'heure vivante en gros chiffres, la date en
-toutes lettres, la météo locale avec émoji. Coût nul en interaction, gros effet
-« tableau de bord habité ».
+**L'effet** : en haut de la barre latérale, l'heure qui avance à la seconde, la date en toutes
+lettres, et la météo du lieu où l'on se trouve avec son émoji. Aucune interaction, aucune clé d'API,
+aucun réglage — et l'écran cesse d'avoir l'air d'une capture figée.
 
 ```css
 .sb-status{margin:2px 6px 12px;padding:10px 12px;border-radius:13px;
@@ -445,17 +507,102 @@ toutes lettres, la météo locale avec émoji. Coût nul en interaction, gros ef
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 ```
 
+Le composant complet, à copier tel quel :
+
 ```jsx
-const time = now.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
-const date = now.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"});
-<div className="sb-status">
-  <div className="sb-status-time tnum">{time}</div>   {/* tnum : l'heure ne tressaute pas */}
-  <div className="sb-status-date">{date}</div>
-  <div className="sb-status-weather">{emojiMeteo} {temp}°C · {libelle}</div>
-</div>
+// Volet d'état en haut du menu latéral : heure (vivante), date et météo locale.
+// Open-Meteo, gratuit et sans clé. La géolocalisation est FACULTATIVE : refusée, indisponible ou
+// laissée sans réponse, on retombe sur une position par défaut et la météo s'affiche quand même.
+function SidebarStatus() {
+  const [now, setNow] = useState(() => new Date());
+  const [weather, setWeather] = useState(null);      // { temp, code }
+
+  // 1 · l'heure, une fois par seconde.
+  useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
+
+  // 2 · la météo, une fois localisé, puis toutes les 30 minutes.
+  useEffect(() => {
+    let cancelled = false, coords = null, timer = null, fbTimer = null;
+    const load = async () => {
+      if (!coords) return;
+      try {
+        const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + coords.lat
+          + "&longitude=" + coords.lon + "&current=temperature_2m,weather_code");
+        const d = await r.json();
+        if (!cancelled && d && d.current)
+          setWeather({ temp: Math.round(d.current.temperature_2m), code: d.current.weather_code });
+      } catch (e) {}                                  // pas de réseau : le bandeau reste sur « météo… »
+    };
+    const start = (lat, lon) => {
+      if (cancelled) return;
+      if (fbTimer) { clearTimeout(fbTimer); fbTimer = null; }
+      coords = { lat, lon }; load(); timer = setInterval(load, 1800000);   // 30 min
+    };
+    const fallback = () => start(48.8566, 2.3522);    // repli : capitale du pays
+    try {
+      if (typeof navigator !== "undefined" && navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => start(pos.coords.latitude, pos.coords.longitude),
+          () => fallback(),                            // refus explicite
+          { timeout: 6000, maximumAge: 1800000 });
+        // SECOND repli, celui qu'on oublie : l'invite de géolocalisation peut rester à l'écran sans
+        // réponse — ni acceptée, ni refusée. Aucun des deux rappels ci-dessus ne se déclenche alors,
+        // et la météo n'arriverait jamais. Au bout de 7 s, on part sur la position par défaut.
+        fbTimer = setTimeout(() => { if (!coords && !cancelled) fallback(); }, 7000);
+      } else fallback();
+    } catch (e) { fallback(); }
+    return () => { cancelled = true; if (timer) clearInterval(timer); if (fbTimer) clearTimeout(fbTimer); };
+  }, []);
+
+  const time = now.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const date = now.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+  const w = weather ? wmoMeta(weather.code) : null;
+  return (<div className="sb-status">
+    <div className="sb-status-time tnum">{time}</div>          {/* tnum : l'heure ne tressaute pas */}
+    <div className="sb-status-date">{date}</div>
+    {weather
+      ? <div className="sb-status-weather" title={w.l}>{w.e} {weather.temp}°C{w.l ? " · " + w.l : ""}</div>
+      : <div className="sb-status-weather" style={{ opacity: .6 }}>🌡️ météo…</div>}
+  </div>);
+}
 ```
 
-Météo : `api.open-meteo.com` (gratuit, sans clé), code WMO → emoji + libellé.
+Et la table de conversion du code météo WMO — la seule chose qu'Open-Meteo renvoie, et qu'il faut
+traduire soi-même :
+
+```js
+function wmoMeta(code) {
+  if (code === 0) return { e: "☀️", l: "Ensoleillé" };
+  if (code === 1 || code === 2) return { e: "🌤️", l: "Éclaircies" };
+  if (code === 3) return { e: "☁️", l: "Couvert" };
+  if (code === 45 || code === 48) return { e: "🌫️", l: "Brouillard" };
+  if (code >= 51 && code <= 57) return { e: "🌦️", l: "Bruine" };
+  if (code >= 61 && code <= 67) return { e: "🌧️", l: "Pluie" };
+  if (code >= 71 && code <= 77) return { e: "🌨️", l: "Neige" };
+  if (code >= 80 && code <= 82) return { e: "🌧️", l: "Averses" };
+  if (code >= 85 && code <= 86) return { e: "🌨️", l: "Averses de neige" };
+  if (code >= 95) return { e: "⛈️", l: "Orage" };
+  return { e: "🌡️", l: "" };                                   // code inconnu : thermomètre neutre
+}
+```
+
+**Les cinq points qui font que ça tient.**
+
+1. **Trois chemins vers une position, jamais zéro.** Accord, refus, et — le cas oublié — l'invite
+   laissée sans réponse. Sans le repli à 7 s, un utilisateur qui ignore la demande n'a jamais de
+   météo, et rien ne le lui dit.
+2. **Un drapeau `cancelled` et le nettoyage des deux minuteurs** au démontage. Sans eux, la barre
+   latérale démontée continue de solliciter le réseau toutes les 30 minutes.
+3. **`.tnum` sur l'heure** (`font-variant-numeric: tabular-nums`). Sans lui, la largeur change à
+   chaque seconde et le bloc entier tressaute.
+4. **`text-transform: capitalize` sur la date** : `toLocaleDateString` renvoie « lundi 25 août » en
+   minuscule.
+5. **L'échec est muet, pas vide.** Pas de réseau, pas de position : le bandeau affiche « 🌡️ météo… »
+   à 60 % d'opacité. Une erreur rouge pour une information d'agrément serait hors de proportion.
+
+**Pour MATMAT** : changez la position de repli pour celle de votre pays, et la locale `fr-FR` si
+l'interface n'est pas en français — les libellés WMO sont à traduire à la main, ils ne viennent pas
+de l'API.
 
 ---
 
