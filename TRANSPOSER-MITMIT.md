@@ -67,6 +67,30 @@ est très commenté — les commentaires expliquent presque toujours *pourquoi*,
 coquille multi-organisations (Clerk + Stripe + Supabase) qui ne partage aucun code avec MITMIT.
 Voir `saas/README.md`. Vous pouvez la supprimer sans rien casser.
 
+### Ce que l'archive ne contient PAS
+
+Tout le **code** y est, fonctions serveur comprises : les douze fichiers de `api/` et les cinq
+modules partagés de `lib/`. Ce qui manque, ce sont les choses qui ne sont pas du code, et qui ne
+peuvent pas l'être.
+
+| Absent | Pourquoi | Comment le reconstituer |
+|---|---|---|
+| **Les clés d'API** | un secret dans une archive est un secret perdu | `.env.example` liste les **21 variables** lues par le code, avec pour chacune où la créer |
+| **Les données** | elles vivent dans Supabase et dans les navigateurs | bouton « Sauvegarde » → JSON, ou l'export SQL du §8 |
+| **Le projet Supabase** | c'est un service, pas un fichier | le **schéma** est dans l'archive (`supabase/`, trois fichiers SQL) ; à exécuter sur un projet neuf |
+| **L'application Clerk** | idem — comptes, sessions, méthodes de connexion | à recréer ; cinq minutes, aucune donnée à migrer si l'équipe se reconnecte |
+| **L'app OAuth Google** et son *refresh token* | le jeton s'obtient par un échange interactif | recréer l'app, déclarer l'URL de rappel, puis ouvrir `/api/auth/google` connecté au bon compte : le jeton s'affiche, à recopier en variable |
+| **L'app Shopify** | jeton lié à une boutique | app personnalisée, scopes `read_products` + `read_inventory` |
+| **Les domaines** | DNS et rattachement Vercel | le domaine dédié à la page de commande est nommé en dur dans `vercel.json`, cf. §5.3 |
+| **Les réglages du projet Vercel** | variables, protection de déploiement, liaison Git | à reposer à la main |
+| **`node_modules`** | se régénère | `npm install` — `package-lock.json` **est** dans l'archive, les versions sont donc figées à l'identique |
+| **L'historique Git** | l'archive est un instantané | si l'historique compte, prenez un clone ou un `git bundle` du dépôt plutôt que cette archive |
+
+**Le piège le plus coûteux est le premier.** Une variable oubliée ne casse pas le démarrage : elle
+désactive une fonction en silence, et l'on s'en aperçoit des semaines plus tard. Après déploiement,
+ouvrez **`/api/status`** : cette fonction existe pour ça, elle dit quelles variables sont vues par le
+serveur et lesquelles manquent.
+
 ---
 
 ## 2. L'architecture en une page
@@ -114,8 +138,10 @@ compilation avant même de démarrer). Rien d'autre.
 | Google OAuth + Gmail | envoi et relève d'e-mails | fonctions Gmail désactivées |
 | Shopify | lecture du stock par SKU | bouton de synchro désactivé |
 | OpenRouteService | isochrone « à moins de N minutes » | repli sur un cercle à vol d'oiseau, annoncé comme tel |
+| La Poste / Colissimo | suivi de colis d'une commande | le champ de suivi reste saisissable, la relève renvoie une erreur |
+| Qonto | lecture bancaire, rapprochement des encaissements | onglet Banque inactif |
 
-Les quatre derniers services se coupent proprement : l'absence d'une variable désactive une
+Les six derniers services se coupent proprement : l'absence d'une variable désactive une
 fonction, elle ne casse jamais le démarrage.
 
 ---
