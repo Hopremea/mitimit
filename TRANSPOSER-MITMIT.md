@@ -1,5 +1,10 @@
 # Transposer MITMIT
 
+> **Note (septembre 2026)** : ce manuel décrit la version **branchée** du logiciel. Depuis, les
+> connecteurs ont été débranchés et le dossier `api/` ainsi que `lib/gmail.js`, `lib/depot.js` et
+> `lib/bonCommande.js` ont été retirés du dépôt. Pour transposer à partir de la version complète :
+> `git checkout avant-debranchement`. Voir l'encadré en tête du `README.md`.
+
 Ce document accompagne l'export complet du logiciel. Il dit ce que contient l'archive, ce qu'il faut
 pour la faire tourner, et ce qu'il faut changer pour la reposer ailleurs — autre hébergeur, autre
 compte, autre marque.

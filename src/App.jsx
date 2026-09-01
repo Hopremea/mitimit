@@ -26,19 +26,25 @@ import { PRODUCT_IMG } from "../lib/productImages.js";
 import { LOGO_DATA_URI } from "../lib/logoPenUp.js";
 import { supabase, supabaseEnabled } from "./supabaseClient.js";
 import RESTORE_DATA from "./restoreData.json";
-import { UserButton } from "@clerk/clerk-react";
-const CLERK_PK = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
-
-// Routage des appels IA : relais serveur en production (clé API protégée côté serveur),
-// appel direct proxifié dans l'aperçu Claude. Le jeton Clerk est joint pour que le relais l'authentifie.
-const CLAUDE_URL = (() => {
-  try { const h = (typeof window !== "undefined" && window.location && window.location.hostname) || ""; if (/claude\.ai$|usercontent|anthropic/i.test(h)) return "https://api.anthropic.com/v1/messages"; } catch (e) {}
-  return "/api/claude";
-})();
+// ===== CONNECTEURS DÉBRANCHÉS (mise en réserve du logiciel, septembre 2026) =====
+// Le cockpit ne parle plus à aucun service tiers : ni relais IA (Anthropic), ni Gmail, ni Shopify,
+// ni Qonto, ni OpenRouteService, ni La Poste, ni Supabase, ni Clerk. Les fonctions serveur (dossier
+// api/) ont été retirées du dépôt ; la version branchée reste dans l'historique Git, étiquette
+// « avant-debranchement ».
+//
+// Plutôt que de retoucher chacun des dizaines de points d'appel, TOUT appel vers un relais /api
+// passe par « relais() » : elle ne fait aucune requête réseau et répond localement par un 503 au
+// format que chaque point d'appel sait déjà lire (res.ok faux, corps JSON { error }). Les boutons
+// concernés affichent donc un motif clair au lieu d'échouer sur un 404 muet, et les tâches de fond
+// (relève des commandes, synchro Gmail) s'arrêtent d'elles-mêmes sans rien coûter.
+const CONNECTEURS_DEBRANCHES_MSG = "Connecteur débranché : MITMIT est mis en réserve, ses services externes ont été coupés (l'outil actif est désormais l'application B2B PEN'UP 3D).";
+const CLAUDE_URL = "/api/claude";
 async function claudeHeaders() {
-  const h = { "Content-Type": "application/json" };
-  try { if (typeof window !== "undefined" && window.__getClerkToken) { const t = await window.__getClerkToken(); if (t) h["Authorization"] = "Bearer " + t; } } catch (e) {}
-  return h;
+  return { "Content-Type": "application/json" };
+}
+async function relais(url, init) {
+  void url; void init;
+  return new Response(JSON.stringify({ error: CONNECTEURS_DEBRANCHES_MSG }), { status: 503, headers: { "Content-Type": "application/json" } });
 }
 // Construit un message d'erreur lisible à partir d'une réponse en échec du relais /api/claude :
 // remonte le vrai motif (401 non authentifié, 500 clé manquante, erreur/credits Anthropic…) au lieu
@@ -60,12 +66,12 @@ async function claudeErrorText(res) {
 // pas une porte dérobée par laquelle un appareil resté sur un état ancien pourrait écraser une
 // session entière.
 async function relaisLireEtat() {
-  const r = await fetch("/api/state", { headers: await claudeHeaders() });
+  const r = await relais("/api/state", { headers: await claudeHeaders() });
   if (!r.ok) throw new Error("relais /api/state — " + (await claudeErrorText(r)));
   return await r.json(); // { data, updated_at } | null
 }
 async function relaisEcrireEtat(payload, depuis) {
-  const r = await fetch("/api/state", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ data: payload, depuis: depuis || undefined }) });
+  const r = await relais("/api/state", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ data: payload, depuis: depuis || undefined }) });
   if (!r.ok) throw new Error("relais /api/state — " + (await claudeErrorText(r)));
   let j = {}; try { j = await r.json(); } catch (e) {}
   return j; // { ok, applied, updated_at }
@@ -188,7 +194,7 @@ async function shopifyApi(action, creds) {
   const payload = { action };
   if (creds && creds.domain) payload.domain = String(creds.domain).trim();
   if (creds && creds.token) payload.token = String(creds.token).trim();
-  const res = await fetch("/api/shopify", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify(payload) });
+  const res = await relais("/api/shopify", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify(payload) });
   let dt = {}; try { dt = await res.json(); } catch (e) {}
   if (!res.ok) throw new Error((dt && dt.error) ? dt.error : ("Erreur Shopify (" + res.status + ")"));
   return dt;
@@ -198,7 +204,7 @@ async function shopifyApi(action, creds) {
 // vivent UNIQUEMENT dans les variables d'environnement Vercel : rien ne transite par le navigateur,
 // rien n'est enregistré dans la base partagée. La lecture est seule permise, aucune écriture bancaire.
 async function qontoApi(quoi, params) {
-  const res = await fetch("/api/outils", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "qonto", quoi, ...(params || {}) }) });
+  const res = await relais("/api/outils", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "qonto", quoi, ...(params || {}) }) });
   let dt = {}; try { dt = await res.json(); } catch (e) {}
   if (!res.ok) throw new Error((dt && dt.error) ? dt.error : ("Erreur Qonto (" + res.status + ")"));
   return dt;
@@ -626,7 +632,7 @@ async function whatsappResumeIA(msgs, me, onUsage) {
   if (cur.length) chunks.push(cur);
   const out = {};
   for (const ch of chunks) {
-    const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 2500, temperature: 0.2, system: SYS_WA_RESUME, messages: [{ role: "user", content: ch.join("\n\n") }] }) });
+    const res = await relais(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 2500, temperature: 0.2, system: SYS_WA_RESUME, messages: [{ role: "user", content: ch.join("\n\n") }] }) });
     if (!res.ok) throw new Error(await claudeErrorText(res));
     const dt = await res.json();
     if (dt && dt.usage && onUsage) onUsage(dt.usage);
@@ -1049,7 +1055,7 @@ async function gmailSyncAll(data, persist) {
   const addrMap = gmailAddressMap(data);
   const addresses = Object.keys(addrMap);
   if (!addresses.length) { const conv0 = await gmailAutoConvertProspects(data, persist); return { added: 0, total: 0, skipped: !conv0, converted: conv0 }; }
-  const res = await fetch("/api/gmail-sync", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ addresses, max: 200 }) });
+  const res = await relais("/api/gmail-sync", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ addresses, max: 200 }) });
   const dt = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(dt.error || ("Erreur " + res.status));
   const msgs = dt.messages || [];
@@ -1083,7 +1089,7 @@ async function gmailSyncEntity(data, persist, scope) {
   const addrMap = entityGmailAddresses(data, scope);
   const addresses = Object.keys(addrMap);
   if (!addresses.length) return { added: 0, updated: 0, purged: 0, total: 0, addresses: 0 };
-  const res = await fetch("/api/gmail-sync", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ addresses, max: 200 }) });
+  const res = await relais("/api/gmail-sync", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ addresses, max: 200 }) });
   const dt = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(dt.error || ("Erreur " + res.status));
   const msgs = dt.messages || [];
@@ -1149,7 +1155,7 @@ async function gmailCheckAlreadySent(list) {
   if (!addrs.length) return out;
   for (let i = 0; i < addrs.length && i < 400; i += 80) {
     const batch = addrs.slice(i, i + 80);
-    const res = await fetch("/api/gmail-sync", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ addresses: batch, max: 120, newerThan: "2y" }) });
+    const res = await relais("/api/gmail-sync", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ addresses: batch, max: 120, newerThan: "2y" }) });
     const dt = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(dt.error || ("Erreur " + res.status));
     (dt.messages || []).forEach((m) => {
@@ -1175,7 +1181,7 @@ async function gmailAutoConvertProspects(data, persist) {
   for (let i = 0; i < pAddrs.length && i < 320; i += 80) {
     const batch = pAddrs.slice(i, i + 80);
     try {
-      const res = await fetch("/api/gmail-sync", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ addresses: batch, max: 120, newerThan: "1y" }) });
+      const res = await relais("/api/gmail-sync", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ addresses: batch, max: 120, newerThan: "1y" }) });
       const dt = await res.json().catch(() => ({}));
       if (!res.ok) continue;
       (dt.messages || []).forEach((m) => {
@@ -2946,7 +2952,7 @@ async function generateProspectMail({ prospect, angles, consigne, ton, mode, pre
   const call = async (suffix) => {
     const jid = aiJobs.anon("Mailing prospection");
     try {
-      const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1200, temperature: 0.9, system: SYS_PROSPECTION, messages: [{ role: "user", content: baseUser + (suffix || "") }] }) });
+      const res = await relais(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1200, temperature: 0.9, system: SYS_PROSPECTION, messages: [{ role: "user", content: baseUser + (suffix || "") }] }) });
       if (!res.ok) throw new Error(await claudeErrorText(res));
       const dt = await res.json();
       if (dt && dt.usage && onUsage) onUsage(dt.usage);
@@ -4443,7 +4449,7 @@ async function webFindDomain(query, persistUsage, ville) {
     const g = await sourcesGratuitesLieu({ nom: query, enseigne: query, ville: ville || "", marque: true });
     if (g && g.site) { const d = dom(g.site); if (d) return d; }
   } catch (e) {}
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 300, tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }], messages: [{ role: "user", content: "Donne le domaine du site web officiel de l'enseigne ou de l'entreprise : \"" + query + "\". Réponds UNIQUEMENT par un objet JSON sans texte ni Markdown : {\"domaine\":\"exemple.fr\"}. Si tu n'es pas sûr, mets une chaîne vide." }] }) });
+  const res = await relais(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 300, tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }], messages: [{ role: "user", content: "Donne le domaine du site web officiel de l'enseigne ou de l'entreprise : \"" + query + "\". Réponds UNIQUEMENT par un objet JSON sans texte ni Markdown : {\"domaine\":\"exemple.fr\"}. Si tu n'es pas sûr, mets une chaîne vide." }] }) });
   if (!res.ok) throw new Error("API " + res.status);
   const dt = await res.json();
   if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
@@ -4475,7 +4481,7 @@ async function aiFindHoraires(query, persistUsage) {
     "Le champ horaires liste les 7 jours, un par jour, séparés par des points-virgules, au format français : " +
     "\"Lun 10h-19h; Mar 10h-19h; Mer 10h-19h; Jeu 10h-19h; Ven 10h-19h; Sam 10h-19h; Dim fermé\". " +
     "Pour une coupure méridienne, donne les deux plages : \"Lun 9h30-12h30 et 14h-19h\". Jour de fermeture : \"Dim fermé\".";
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 600, tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }], messages: [{ role: "user", content: prompt }] }) });
+  const res = await relais(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 600, tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }], messages: [{ role: "user", content: prompt }] }) });
   if (!res.ok) throw new Error("API " + res.status);
   const dt = await res.json();
   if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
@@ -4509,7 +4515,7 @@ async function aiFindLinksHoraires(query, persistUsage, wantHoraires, ctx) {
     (veutHoraires ? " Les horaires sont ceux d'ouverture habituels de CE magasin (fiche Google Business / site officiel), au format français jour par jour, séparés par des points-virgules (ex. \"Lun 10h-19h; Mar 10h-19h; …; Dim fermé\" ; coupure méridienne : \"Lun 9h30-12h30 et 14h-19h\")." : "") +
     (has(out.site) ? " Le site officiel est déjà connu : " + out.site + " — sers-t'en comme point de départ, ne le recherche pas." : "") +
     " N'invente RIEN : laisse une chaîne vide si tu n'es pas certain. Réponds UNIQUEMENT par un objet JSON sans texte ni Markdown : {" + manque.map((k) => "\"" + k + "\":\"\"").join(",") + "}.";
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 700, tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }], messages: [{ role: "user", content: prompt }] }) });
+  const res = await relais(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 700, tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }], messages: [{ role: "user", content: prompt }] }) });
   if (!res.ok) throw new Error("API " + res.status);
   const dt = await res.json();
   if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
@@ -5044,7 +5050,7 @@ function dossiersStagnants(data, jours = 14) {
 // Récit du rapport hebdomadaire : 4 à 6 phrases factuelles comparant la semaine à la précédente.
 const SYS_RAPPORT_HEBDO = `Tu rédiges le bilan hebdomadaire du commercial de PEN'UP 3D (stylos 3D, B2B). À partir des chiffres JSON fournis (semaine écoulée, semaine précédente, dossiers qui stagnent), écris 4 à 6 phrases courtes en français : volume et nature des échanges (en évolution vs la semaine précédente), CA facturé, devis envoyés, avancées d'entonnoir marquantes, puis une phrase sur les dossiers qui stagnent (nommer les enseignes). Uniquement des faits présents dans les données — aucun chiffre inventé, aucun conseil générique, pas de titre, pas de liste : un paragraphe.`;
 async function aiRapportHebdo(stats, prec, stagne, onUsage) {
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 600, temperature: 0.4, system: SYS_RAPPORT_HEBDO, messages: [{ role: "user", content: JSON.stringify({ semaine: stats, precedente: prec, stagnants: stagne }) }] }) });
+  const res = await relais(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 600, temperature: 0.4, system: SYS_RAPPORT_HEBDO, messages: [{ role: "user", content: JSON.stringify({ semaine: stats, precedente: prec, stagnants: stagne }) }] }) });
   if (!res.ok) throw new Error(await claudeErrorText(res));
   const dt = await res.json();
   if (dt && dt.usage && onUsage) onUsage(dt.usage);
@@ -6610,7 +6616,7 @@ function AccountDetail({ account, data, persist, go, onBack, onEdit, onAddContac
 }
 // Reformulation IA d'une note libre en compte rendu clair et professionnel (sans inventer de faits).
 async function aiRephrase(text, persistUsage) {
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 500, system: "Tu reformules des notes de compte rendu commercial B2B en français : style clair, professionnel et concis. Tu conserves TOUS les faits, dates, chiffres, noms et décisions sans rien inventer ni ajouter. Tu renvoies UNIQUEMENT le texte reformulé, sans préambule, sans guillemets, sans Markdown.", messages: [{ role: "user", content: text }] }) });
+  const res = await relais(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 500, system: "Tu reformules des notes de compte rendu commercial B2B en français : style clair, professionnel et concis. Tu conserves TOUS les faits, dates, chiffres, noms et décisions sans rien inventer ni ajouter. Tu renvoies UNIQUEMENT le texte reformulé, sans préambule, sans guillemets, sans Markdown.", messages: [{ role: "user", content: text }] }) });
   if (!res.ok) throw new Error(await claudeErrorText(res));
   const dt = await res.json();
   if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
@@ -6620,7 +6626,7 @@ async function aiRephrase(text, persistUsage) {
 async function aiGenerate(system, user, persistUsage, maxTokens = 800) {
   const jid = aiJobs.anon("Rédaction IA");
   try {
-    const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] }) });
+    const res = await relais(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] }) });
     if (!res.ok) throw new Error(await claudeErrorText(res));
     const dt = await res.json();
     if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
@@ -6632,7 +6638,7 @@ async function aiGenerate(system, user, persistUsage, maxTokens = 800) {
 async function aiChat(system, messages, persistUsage, maxTokens = 700) {
   const jid = aiJobs.anon("Assistant IA");
   try {
-    const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: maxTokens, system, messages }) });
+    const res = await relais(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: maxTokens, system, messages }) });
     if (!res.ok) throw new Error(await claudeErrorText(res));
     const dt = await res.json();
     if (dt && dt.usage && persistUsage) persistUsage(dt.usage);
@@ -6697,7 +6703,7 @@ Suites à donner :
 • …
 Règles : reprendre UNIQUEMENT ce qui figure dans le texte (aucune invention, aucune interprétation) ; corriger les tics de l'oral (répétitions, hésitations) ; ne pas omettre un fait, un chiffre, une date ou un engagement ; omettre une section vide ; répondre avec le compte rendu seul, sans commentaire.`;
 async function aiStructureCR(texte, onUsage) {
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 900, temperature: 0.2, system: SYS_STRUCTURE_CR, messages: [{ role: "user", content: texte }] }) });
+  const res = await relais(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 900, temperature: 0.2, system: SYS_STRUCTURE_CR, messages: [{ role: "user", content: texte }] }) });
   if (!res.ok) throw new Error(await claudeErrorText(res));
   const dt = await res.json();
   if (dt && dt.usage && onUsage) onUsage(dt.usage);
@@ -7162,7 +7168,7 @@ async function generateMessage({ contexte, consigne, mode, canal, sousCanal, typ
   const call = async (suffix) => {
     const jid = aiJobs.anon("Message IA");
     try {
-      const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1500, temperature: reformulation ? 0.2 : 0.6, system: reformulation ? SYS_REFORMULATION : SYS_REDACTION, messages: [{ role: "user", content: baseUser + (suffix || "") }] }) });
+      const res = await relais(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1500, temperature: reformulation ? 0.2 : 0.6, system: reformulation ? SYS_REFORMULATION : SYS_REDACTION, messages: [{ role: "user", content: baseUser + (suffix || "") }] }) });
       if (!res.ok) throw new Error(await claudeErrorText(res));
       const dt = await res.json();
       if (dt && dt.usage && onUsage) onUsage(dt.usage);
@@ -7318,7 +7324,7 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
     // le cas où l'on veut garder le message sous la main et compléter l'adresse dans Gmail.
     setDrafting(true); setSentMsg("");
     try {
-      const res = await fetch("/api/gmail-draft", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ to: (recipient && recipient.email) || "", subject: subject || ("PEN'UP 3D : " + estabName), body: out }) });
+      const res = await relais("/api/gmail-draft", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ to: (recipient && recipient.email) || "", subject: subject || ("PEN'UP 3D : " + estabName), body: out }) });
       const dt = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(dt.error || ("Erreur " + res.status));
       setSentMsg(recMail ? ("✅ Brouillon créé dans Gmail pour " + recipient.email + ". Rien n'a été envoyé.") : "✅ Brouillon créé dans Gmail, sans destinataire : ajoutez l'adresse dans Gmail avant d'envoyer.");
@@ -7329,7 +7335,7 @@ function MessageComposer({ account, site, contacts, contact, defaultContactId, d
     if (!recipient || !recipient.email) { setSentMsg("❌ Le destinataire n'a pas d'adresse e-mail."); return; }
     setSending(true); setSentMsg("");
     try {
-      const res = await fetch("/api/gmail-send", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ to: recipient.email, subject: subject || ("PEN'UP 3D : " + estabName), body: out }) });
+      const res = await relais("/api/gmail-send", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ to: recipient.email, subject: subject || ("PEN'UP 3D : " + estabName), body: out }) });
       const dt = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(dt.error || ("Erreur " + res.status));
       logInteraction("email");
@@ -7912,12 +7918,12 @@ function Fiche({ c, account, data, myEmail, settings, deals, interactions, onBac
   const addInteraction = (it) => persist((p) => ({ ...p, interactions: [...p.interactions, it] }));
   const saveInteraction = (it) => persist((p) => ({ ...p, interactions: p.interactions.some((x) => x.id === it.id) ? p.interactions.map((x) => x.id === it.id ? it : x) : [...p.interactions, it] }));
   const delInteraction = (id) => persist((p) => ({ ...p, interactions: p.interactions.filter((i) => i.id !== id) }));
-  async function callClaude(body) { const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify(body) }); const dt = await res.json(); if (dt && dt.usage) persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, dt.usage) })); return (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n"); }
+  async function callClaude(body) { const res = await relais(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify(body) }); const dt = await res.json(); if (dt && dt.usage) persist((p) => ({ ...p, claudeUsage: addUsage(p.claudeUsage, dt.usage) })); return (dt.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n"); }
   async function syncGmail() {
     if (!c.email) { setSyncMsg("Renseignez d'abord le courriel du contact (Modifier)."); return; }
     setSyncing(true); setSyncMsg(null);
     try {
-      const res = await fetch("/api/gmail", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ email: c.email }) });
+      const res = await relais("/api/gmail", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ email: c.email }) });
       const dt = await res.json();
       if (!res.ok) throw new Error(dt && dt.error ? dt.error : "Erreur " + res.status);
       const arr = Array.isArray(dt.messages) ? dt.messages : [];
@@ -8089,7 +8095,7 @@ async function aiQualifyCommande(text, products) {
   const cat = (products || []).map((p) => p.code + " | " + p.designation).join("\n");
   const sys = "Tu extrais une commande de produits à partir d'un message en langage naturel (mail, note, liste). Tu ne mappes QUE sur les produits du catalogue fourni et tu renvoies leur code EXACT. Tu peux déduire une quantité quand le client est vague (ex. 'une dizaine' = 10) et proposer le produit le plus proche quand il est nommé approximativement, MAIS tu signales toujours ton incertitude via le champ confiance, et tu n'inventes JAMAIS un code absent du catalogue.";
   const user = "Catalogue (CODE | désignation), seules valeurs autorisées pour \"code\" :\n" + cat + "\n\nMessage client :\n\"\"\"\n" + text + "\n\"\"\"\n\nExtrais les lignes de commande. Renvoie UNIQUEMENT un objet JSON valide, sans texte ni balise autour :\n{\"lignes\":[{\"code\":\"<CODE exact du catalogue>\",\"qte\":<entier>,\"confiance\":\"haute|moyenne|faible\",\"source\":\"<extrait du message qui justifie cette ligne>\"}],\"ignore\":[\"<fragments non rattachables à un produit>\"]}\nRègles de confiance : \"haute\" = produit identifié sans ambiguïté ET quantité explicite ; \"moyenne\" = quantité déduite (ex. 'une dizaine') OU produit proposé par approximation ; \"faible\" = forte incertitude. Tout passage non rattachable à un produit du catalogue va dans \"ignore\", jamais inventé.";
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1500, system: sys, messages: [{ role: "user", content: user }] }) });
+  const res = await relais(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1500, system: sys, messages: [{ role: "user", content: user }] }) });
   if (!res.ok) throw new Error("API " + res.status);
   const data = await res.json();
   const { lines, ignore } = mapAiCommande(data, products);
@@ -8122,7 +8128,7 @@ async function aiQualifyCommandePdf(base64, products) {
   const cat = (products || []).map((p) => p.code + " | " + p.designation).join("\n");
   const sys = "Tu lis un bon de commande, un devis ou une facture fourni au format PDF et tu en extrais la commande de produits. Tu ne mappes QUE sur les produits du catalogue fourni et tu renvoies leur code EXACT. Tu peux déduire une quantité quand le document est ambigu et proposer le produit le plus proche quand il est nommé approximativement, MAIS tu signales toujours ton incertitude via le champ confiance, et tu n'inventes JAMAIS un code absent du catalogue.";
   const user = "Catalogue (CODE | désignation), seules valeurs autorisées pour \"code\" :\n" + cat + "\n\nLis le PDF joint et extrais les lignes de commande ainsi que les coordonnées du client si elles figurent dans le document. Renvoie UNIQUEMENT un objet JSON valide, sans texte ni balise autour :\n{\"client\":\"<nom de l'établissement/client>\",\"contact\":\"<personne>\",\"email\":\"\",\"tel\":\"\",\"siret\":\"\",\"adresse\":\"<adresse de livraison>\",\"note\":\"<remarque utile>\",\"lignes\":[{\"code\":\"<CODE exact du catalogue>\",\"qte\":<entier>,\"confiance\":\"haute|moyenne|faible\",\"source\":\"<extrait du document qui justifie cette ligne>\"}],\"ignore\":[\"<fragments non rattachables à un produit>\"]}\nLaisse une chaîne vide pour les coordonnées absentes. Règles de confiance : \"haute\" = produit identifié sans ambiguïté ET quantité explicite ; \"moyenne\" = quantité déduite OU produit proposé par approximation ; \"faible\" = forte incertitude. Tout passage non rattachable à un produit du catalogue va dans \"ignore\", jamais inventé.";
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1500, system: sys, messages: [{ role: "user", content: [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } }, { type: "text", text: user }] }] }) });
+  const res = await relais(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1500, system: sys, messages: [{ role: "user", content: [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } }, { type: "text", text: user }] }] }) });
   if (!res.ok) throw new Error("API " + res.status);
   const data = await res.json();
   const { lines, ignore, header } = mapAiCommande(data, products);
@@ -8825,7 +8831,7 @@ function bonCommandeLien() {
 // Le sous-domaine répond-il ? Une requête « no-cors » ne laisse pas lire la réponse, mais elle
 // échoue franchement quand le domaine n'existe pas encore : c'est tout ce qu'il faut savoir.
 async function bonCommandeLienCourtActif() {
-  try { await fetch(BON_COMMANDE_LIEN_COURT, { mode: "no-cors", cache: "no-store" }); return true; } catch (e) { return false; }
+  return false; // connecteurs débranchés : le sous-domaine n'est plus rattaché, on ne le sonde plus
 }
 // Le relais du bon de commande est servi par /api/state, branche « bdc » : Vercel plafonne le dépôt
 // à douze fonctions serverless (un fichier de api/ = une fonction), et un treizième fichier faisait
@@ -8833,7 +8839,7 @@ async function bonCommandeLienCourtActif() {
 const BON_COMMANDE_API = "/api/state?bdc=1";
 async function bonCommandeApi(suffixe, opts) {
   const headers = await claudeHeaders();
-  const res = await fetch(BON_COMMANDE_API + (suffixe || ""), { ...(opts || {}), headers });
+  const res = await relais(BON_COMMANDE_API + (suffixe || ""), { ...(opts || {}), headers });
   if (!res.ok) { let d = ""; try { const j = await res.json(); d = (j && j.error) || ""; } catch (e) {} throw new Error("HTTP " + res.status + (d ? " — " + d : "")); }
   return res.json();
 }
@@ -9462,7 +9468,7 @@ function Carte({ data, persist, go, focus }) {
     if (!LF || !mapInst.current) return;
     setIsoBusy(true); setIsoMsg(null);
     try {
-      const r = await fetch("/api/outils", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "isochrone", lat, lng, minutes: isoMin }) });
+      const r = await relais("/api/outils", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "isochrone", lat, lng, minutes: isoMin }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((j && j.error) || ("erreur " + r.status));
       const feat = (j.features || [])[0];
@@ -10273,7 +10279,7 @@ Renvoie UNIQUEMENT un tableau JSON valide (aucun texte ni balise autour). Chaque
 - contact : objet { prenom, nom, fonction, email, telephone, source } ; le contact est le dirigeant ou le responsable identifié, avec ses coordonnées issues de la meilleure source publique disponible (registre, site, ou fiche Google en dernier recours).
 
 Si la requête est une zone, donne entre 6 et 10 établissements ; si c'est un établissement ou une enseigne précis, ne renvoie que la ou les fiches correspondantes (ne complète pas avec d'autres établissements). Toujours des adresses réelles : mieux vaut moins de fiches mais fiables.`;
-  const res = await fetch(CLAUDE_URL, {
+  const res = await relais(CLAUDE_URL, {
     method: "POST", headers: await claudeHeaders(),
     body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 3000, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 12 }] }),
   });
@@ -10346,7 +10352,7 @@ async function aiAutofill({ kind, enseigne, ville, adresse, typesEtab }) {
   user += (acquis ? `\n\nFAITS DÉJÀ ÉTABLIS par les sources officielles gratuites (fiables — sers-t'en pour identifier la bonne entité, ne les recherche pas) : ${acquis}.` : "")
     + `\n\nNe recherche QUE : ${manque.join(", ")}.`
     + `\n\nRenvoie UNIQUEMENT un objet JSON valide, sans aucun texte ni balise autour, avec EXACTEMENT ces clés :\n${schema}\n"source" = nom de la source officielle utilisée. Tout champ non trouvé reste une chaîne vide.`;
-  const res = await fetch(CLAUDE_URL, {
+  const res = await relais(CLAUDE_URL, {
     method: "POST", headers: await claudeHeaders(),
     body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1200, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }] }),
   });
@@ -10557,7 +10563,7 @@ function telCoherent(tel, cp) {
 // ne peut pas lire un site tiers). Zéro token, zéro recherche web facturée.
 async function scrapeContact(url) {
   const u = String(url || "").trim(); if (!u) return null;
-  const res = await fetch("/api/outils", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "scrape", url: u }) });
+  const res = await relais("/api/outils", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "scrape", url: u }) });
   if (!res.ok) return null;
   const j = await res.json();
   return { email: (j && j.email) || "", telephone: (j && j.telephone) || "", telephones: (j && j.telephones) || [] };
@@ -10904,7 +10910,7 @@ async function pagesMagasinEnseigne(domaine) {
   if (_locatorCache.has(domaine)) return _locatorCache.get(domaine);
   let urls = [];
   try {
-    const r = await fetch("/api/outils", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "locator", domaine }) });
+    const r = await relais("/api/outils", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "locator", domaine }) });
     const j = await r.json().catch(() => ({}));
     if (Array.isArray(j.urls)) urls = j.urls;
   } catch (e) {}
@@ -11186,7 +11192,7 @@ async function completerDepuisPageMagasin(out, texteIA, cpRef) {
 }
 const BATCH_URL = "/api/outils";
 async function batchCall(action, payload) {
-  const res = await fetch(BATCH_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "batch:" + action, ...payload }) });
+  const res = await relais(BATCH_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "batch:" + action, ...payload }) });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((j && j.error) || ("API " + res.status));
   return j;
@@ -11201,7 +11207,7 @@ async function aiEnrichProspect(p, persistUsage, instruction) {
   const { out, body } = await enrichProspectPreparer(p, instruction);
   if (!body) return out; // les sources gratuites ont tout couvert
   try {
-    const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify(body) });
+    const res = await relais(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify(body) });
     if (!res.ok) throw new Error("API " + res.status);
     const data = await res.json();
     if (data.usage && persistUsage) persistUsage(data.usage);
@@ -12439,7 +12445,7 @@ function ProspectMailing({ data, persist, onClose }) {
     if (!/pdf$/i.test(file.type || "") && !/\.pdf$/i.test(file.name || "")) { setPieceErr("Seuls les PDF sont acceptés."); return; }
     setPieceBusy(true);
     try {
-      const dep = await fetch("/api/outils", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "piece", name: file.name }) });
+      const dep = await relais("/api/outils", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "piece", name: file.name }) });
       const dt = await dep.json().catch(() => ({}));
       if (dep.ok && dt.path && dt.token && supabase) {
         // Le serveur a délivré une autorisation d'écriture signée (clé de service configurée).
@@ -12594,7 +12600,7 @@ function ProspectMailing({ data, persist, onClose }) {
     updateCard(c.id, { sending: true, sendMsg: "" });
     try {
       const pj = piece ? [piece.storagePath ? { filename: piece.name, mimeType: "application/pdf", storagePath: piece.storagePath } : piece.storageUrl ? { filename: piece.name, mimeType: "application/pdf", storageUrl: piece.storageUrl } : { filename: piece.name, mimeType: "application/pdf", contentBase64: piece.dataUrl }] : [];
-      const res = await fetch("/api/gmail-draft", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ to, subject: c.objet || ("PEN'UP 3D : " + (c.prospect.nom || "")), body: c.corps, attachments: pj }) });
+      const res = await relais("/api/gmail-draft", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ to, subject: c.objet || ("PEN'UP 3D : " + (c.prospect.nom || "")), body: c.corps, attachments: pj }) });
       const dt = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(dt.error || ("Erreur " + res.status));
       const mentionPj = piece ? " — pièce jointe : " + piece.name : "";
@@ -13320,7 +13326,7 @@ function Connexions({ data, persist, autoBackup }) {
   const saveEmail = () => { persist((p) => ({ ...p, settings: { ...p.settings, myEmail: email.trim() } })); setEmailMsg("Adresse enregistrée."); setTimeout(() => setEmailMsg(""), 1800); };
   // Diagnostic des connexions / variables (statuts uniquement, aucune valeur secrète).
   const [diag, setDiag] = useState(null); const [diagBusy, setDiagBusy] = useState(false);
-  const loadDiag = async () => { setDiagBusy(true); try { const res = await fetch("/api/status", { method: "POST", headers: await claudeHeaders() }); const dt = await res.json().catch(() => ({})); setDiag(res.ok ? dt : { error: dt.error || ("Erreur " + res.status) }); } catch (e) { setDiag({ error: (e && e.message) || String(e) }); } finally { setDiagBusy(false); } };
+  const loadDiag = async () => { setDiagBusy(true); try { const res = await relais("/api/status", { method: "POST", headers: await claudeHeaders() }); const dt = await res.json().catch(() => ({})); setDiag(res.ok ? dt : { error: dt.error || ("Erreur " + res.status) }); } catch (e) { setDiag({ error: (e && e.message) || String(e) }); } finally { setDiagBusy(false); } };
   useEffect(() => { loadDiag(); }, []);
   // Synchronisation des courriels (manuelle) : journalise dans les échanges les e-mails échangés
   // avec les adresses renseignées. La synchro automatique tourne aussi en arrière-plan (~1×/h).
@@ -13342,7 +13348,7 @@ function Connexions({ data, persist, autoBackup }) {
     try {
       const now = new Date().toLocaleString("fr-FR");
       const corps = "Bonjour,\n\nCeci est un e-mail de TEST envoyé depuis MITMIT (PEN'UP 3D) pour vérifier le rendu à la réception : mise en forme, sauts de ligne et signature automatique.\n\nExemple de liste :\n— Premier point\n— Deuxième point\n\nEnvoyé le " + now + ". Vous pouvez ignorer ce message.";
-      const res = await fetch("/api/gmail-send", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ to, subject: "Test d'envoi — MITMIT (PEN'UP 3D)", body: corps }) });
+      const res = await relais("/api/gmail-send", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ to, subject: "Test d'envoi — MITMIT (PEN'UP 3D)", body: corps }) });
       const dt = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(dt.error || ("Erreur " + res.status));
       setGmTest({ busy: false, msg: "✅ E-mail de test envoyé à " + to + ". Vérifiez votre boîte de réception (et au besoin les spams)." });
@@ -15565,7 +15571,7 @@ function assistantContext(data) {
 async function assistantAI(text, history, data) {
   const ctx = assistantContext(data);
   const sys = "Tu es l'assistant interne du cockpit CRM de PEN'UP 3D (PME française, stylos d'impression 3D créatifs pour enfants, distribution B2B en établissements spécialisés). Tu aides à piloter l'activité commerciale : groupes et établissements, contacts, pipeline, devis et commandes, stock, agenda, marges, logistique, produits PEN'UP.\n\nPERIMETRE STRICT : tu ne traites QUE ces sujets metier. Toute demande hors perimetre (cuisine, culture generale, code informatique, bavardage, etc.) renvoie inScope=false, actions vide, et un reply poli rappelant que tu es limite au cockpit PEN'UP 3D.\n\nTu reponds TOUJOURS en JSON strict valide, sans aucun texte autour ni balise Markdown, selon ce schema :\n{\"inScope\":bool,\"reply\":\"texte en francais, concis\",\"actions\":[ ... ]}\n\nActions possibles (n'en propose que si l'utilisateur le demande) :\n- {\"type\":\"navigate\",\"label\":\"Ouvrir la fiche ...\",\"tab\":\"accounts|repertoire|deals|stock|agenda|pipeline|carte|performance|stats|prospection|presto|reassort|sav|calc|conn|dash\",\"id\":\"identifiant de la fiche\"} : ouvre une fiche. tab \"accounts\" + id=accountId ouvre la fiche du compte (qui contient ses contacts) ; tab \"repertoire\" + id=contactId ouvre la fiche contact ; tab \"deals\" + id=dealId ouvre le devis/commande ; tab \"stock\" ouvre le stock (sans id). Mets TOUJOURS un label clair en francais.\n- {\"type\":\"add_event\",\"date\":\"AAAA-MM-JJ\",\"heure\":\"HH:MM optionnel\",\"titre\":\"...\",\"eventType\":\"rdv|relance|salon|preparation|tache|echeance|livraison\",\"accountId\":\"id ou null\",\"notes\":\"optionnel\"}\n- {\"type\":\"update_product\",\"code\":\"code produit\",\"set\":{\"dispo\":int,\"resa\":int,\"encmd\":int,\"pvc\":number,\"seuil\":int,\"cout\":number,\"poidsG\":int,\"vendable\":bool}}\n- {\"type\":\"add_interaction\",\"accountId\":\"id\",\"contactId\":\"id ou null\",\"intType\":\"rdv|email|appel|note\",\"date\":\"AAAA-MM-JJ\",\"sujet\":\"...\",\"resume\":\"optionnel\"}\n- {\"type\":\"create_deal\",\"accountId\":\"id\",\"dealType\":\"Devis|Commande\",\"date\":\"AAAA-MM-JJ\",\"lines\":[{\"code\":\"code\",\"qte\":int,\"pu\":number}],\"note\":\"optionnel\"}\n\nREGLES :\n- Pour repondre a une question, mets la reponse dans reply. Si ta reponse cite un ou des enregistrements precis (un groupe ou établissement, un contact, un devis/commande, un produit), AJOUTE pour chacun une action navigate vers sa fiche, avec un label clair (ex: \"Ouvrir la fiche Cultura\", \"Voir le devis DV-2026-008\", \"Voir le stock du stylo\"). Pour un contact, renvoie vers la fiche client (tab \"accounts\", id=accountId). N'ajoute navigate que pour les enregistrements reellement cites, 3 au maximum.\n- Resous les noms en identifiants a partir des donnees (ex: \"Cultura\" -> accountId, \"pack complet\" -> code produit).\n- N'invente JAMAIS une valeur manquante (prix, quantite non precisee). Si une info indispensable manque, demande-la dans reply au lieu d'agir.\n- Pour create_deal, omets \"pu\" si l'utilisateur ne donne pas de prix : la ligne sera valorisee au prix de cession HT du produit (cessionHT). N'inscris JAMAIS de coefficient ni de marge dans une note de devis ou de commande : ces documents sont destines aux distributeurs et ne doivent contenir que des prix de cession HT.\n- Convertis les dates relatives (\"demain\", \"vendredi\") en AAAA-MM-JJ avec la date du jour fournie.\n- Une seule demande peut produire plusieurs actions.\n\nDONNEES ACTUELLES DU COCKPIT (JSON) :\n" + JSON.stringify(ctx);
-  const res = await fetch(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1500, system: sys, messages: [...history, { role: "user", content: text }] }) });
+  const res = await relais(CLAUDE_URL, { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1500, system: sys, messages: [...history, { role: "user", content: text }] }) });
   if (!res.ok) throw new Error("HTTP " + res.status);
   const j = await res.json();
   const raw = (j.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
@@ -15845,7 +15851,7 @@ function SuiviColis({ numero }) {
   const suivre = async () => {
     setBusy(true); setErr(null); setRes(null);
     try {
-      const r = await fetch("/api/outils", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "suivi", numero: num }) });
+      const r = await relais("/api/outils", { method: "POST", headers: await claudeHeaders(), body: JSON.stringify({ action: "suivi", numero: num }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((j && j.error) || ("erreur " + r.status));
       if (j.introuvable) { setErr(j.error || "Numéro inconnu du service de suivi."); return; }
@@ -16943,7 +16949,6 @@ export default function App() {
           <button className="btn btn-ghost btn-s" onClick={() => window.print()} title="Imprimer / PDF de la vue courante"><Printer size={15} /></button>
           <ThemeMenu color={bgColor} pattern={bgPattern} accent={accent} onColor={setBgColor} onPattern={setBgPattern} onAccent={setAccent} />
           <button className="btn btn-ghost btn-s" onClick={(e) => { burstFilaments(e.clientX, e.clientY); toggleTheme(); }} title={theme === "dark" ? "Mode clair" : "Mode sombre"}>{theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}</button>
-          {CLERK_PK && <span style={{ display: "inline-flex", alignItems: "center", marginLeft: 4, paddingLeft: 8, borderLeft: "1px solid var(--line)" }}><UserButton afterSignOutUrl="/" /></span>}
         </div>
       </div>
       {importMsg && <div className="card" style={{ borderLeft: "4px solid var(--blue)", marginBottom: 14, fontSize: 13 }}>{importMsg}</div>}

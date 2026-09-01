@@ -1,27 +1,11 @@
-import { createClient } from "@supabase/supabase-js";
-
-// Configuration via variables d'environnement (Vercel ou .env.local).
-// Si l'URL ou la cle anon manquent, Supabase est desactive et l'app retombe
-// sur localStorage : elle continue donc de fonctionner, sans synchronisation.
-const url = import.meta.env.VITE_SUPABASE_URL;
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-export const supabaseEnabled = Boolean(url && anonKey);
-
-// Integration native Clerk-Supabase : le client joint le jeton de session Clerk
-// a chaque requete via l'option accessToken. window.__getClerkToken est expose
-// par ClerkTokenBridge dans main.jsx. Pas de template JWT, pas de secret partage.
-export const supabase = supabaseEnabled
-  ? createClient(url, anonKey, {
-      accessToken: async () => {
-        try {
-          if (typeof window !== "undefined" && window.__getClerkToken) {
-            return (await window.__getClerkToken()) || null;
-          }
-        } catch (e) {
-          /* token indisponible : requete anonyme, bloquee par la RLS */
-        }
-        return null;
-      },
-    })
-  : null;
+// Connecteur Supabase DÉBRANCHÉ (mise en réserve du logiciel, septembre 2026).
+//
+// L'application tourne désormais en « local pur » : les données vivent dans ce navigateur
+// (IndexedDB / localStorage), sans base partagée, sans synchronisation, sans temps réel.
+// Aucune variable d'environnement n'est lue, aucune bibliothèque Supabase n'est embarquée.
+//
+// Le reste du code garde ses gardes « supabaseEnabled && supabase » : elles sont toutes fausses,
+// donc les branches serveur ne s'exécutent jamais. La version branchée reste consultable dans
+// l'historique Git (étiquette « avant-debranchement »).
+export const supabaseEnabled = false;
+export const supabase = null;

@@ -1,8 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
-    { "source": "/((?!api/).*)", "has": [{ "type": "host", "value": "commande.penup3d.com" }], "destination": "/api/state?bdc=1" },
-    { "source": "/commande", "destination": "/api/state?bdc=1" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
   "headers": [

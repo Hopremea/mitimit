@@ -1,5 +1,8 @@
 # Sécurité MITMIT — durcissement Supabase (#32) et secrets (#33)
 
+> **Historique** : depuis septembre 2026 le logiciel est mis en réserve, sans Supabase ni Clerk. Ce
+> document ne s'applique qu'à la version `avant-debranchement`.
+
 Ce document décrit deux corrections de sécurité et les étapes à réaliser côté Supabase / Vercel.
 Le code de l'application est déjà prêt ; certaines étapes (variables d'environnement, SQL) ne peuvent
 être faites que par vous, avec vos accès.
