@@ -32,8 +32,10 @@
 > 7. **Shopify** : désinstaller l'app personnalisée de lecture du stock.
 > 8. **Qonto**, **OpenRouteService**, **La Poste** : révoquer les clés.
 >
-> La version branchée reste consultable : `git checkout avant-debranchement`. Les sections qui suivent
-> décrivent **cette version-là** et ne s'appliquent plus à l'état actuel du dépôt.
+> La version branchée reste consultable : `git checkout ef819fc` (dernier commit branché, PR #494).
+> Pour lui donner un nom durable : `git tag -a avant-debranchement ef819fc && git push origin avant-debranchement`.
+>
+> Les sections qui suivent décrivent **cette version-là** et ne s'appliquent plus à l'état actuel du dépôt.
 
 Application React (Vite) du cockpit commercial PEN'UP 3D, prête à déployer sur Vercel,
 accès privé via Clerk, et fonctions IA branchées sur un relais serveur (clé Anthropic protégée).

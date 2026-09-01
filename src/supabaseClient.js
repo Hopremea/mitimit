@@ -6,6 +6,6 @@
 //
 // Le reste du code garde ses gardes « supabaseEnabled && supabase » : elles sont toutes fausses,
 // donc les branches serveur ne s'exécutent jamais. La version branchée reste consultable dans
-// l'historique Git (étiquette « avant-debranchement »).
+// l'historique Git (commit ef819fc, PR #494).
 export const supabaseEnabled = false;
 export const supabase = null;

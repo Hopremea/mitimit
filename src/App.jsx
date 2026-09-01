@@ -29,8 +29,8 @@ import RESTORE_DATA from "./restoreData.json";
 // ===== CONNECTEURS DÉBRANCHÉS (mise en réserve du logiciel, septembre 2026) =====
 // Le cockpit ne parle plus à aucun service tiers : ni relais IA (Anthropic), ni Gmail, ni Shopify,
 // ni Qonto, ni OpenRouteService, ni La Poste, ni Supabase, ni Clerk. Les fonctions serveur (dossier
-// api/) ont été retirées du dépôt ; la version branchée reste dans l'historique Git, étiquette
-// « avant-debranchement ».
+// api/) ont été retirées du dépôt ; la version branchée reste dans l'historique Git, commit ef819fc
+// (PR #494).
 //
 // Plutôt que de retoucher chacun des dizaines de points d'appel, TOUT appel vers un relais /api
 // passe par « relais() » : elle ne fait aucune requête réseau et répond localement par un 503 au
