@@ -1,18 +1,13 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import {
-  ClerkProvider,
-  SignedIn,
-  SignedOut,
-  RedirectToSignIn,
-  useAuth,
-} from "@clerk/clerk-react";
 import App from "./App.jsx";
 
-const CLERK_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
+// Connecteur Clerk DÉBRANCHÉ (mise en réserve du logiciel, septembre 2026) : plus d'écran de
+// connexion, plus de jeton de session. L'accès au site se protège désormais au niveau de
+// l'hébergeur (Vercel → Settings → Deployment Protection), sans service tiers.
 
 // Garde-fou : capture toute erreur de rendu et affiche un écran de secours
-// (au lieu d'une page blanche), avec rechargement. Les données restent en lieu sûr (localStorage/Supabase).
+// (au lieu d'une page blanche), avec rechargement. Les données restent en lieu sûr (localStorage).
 class ErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { error: null }; }
   static getDerivedStateFromError(error) { return { error }; }
@@ -25,7 +20,7 @@ class ErrorBoundary extends React.Component {
           <div style={{ fontSize: 30, marginBottom: 8 }}>⚠️</div>
           <h1 style={{ fontSize: 19, margin: "0 0 8px" }}>Une erreur inattendue est survenue</h1>
           <p style={{ fontSize: 14, color: "#6b7589", lineHeight: 1.55, margin: "0 0 18px" }}>
-            Vos données sont en sécurité (sauvegardées localement et sur le serveur). Rechargez la page pour reprendre : l'application rouvre sur l'accueil.
+            Vos données sont en sécurité (sauvegardées localement). Rechargez la page pour reprendre : l'application rouvre sur l'accueil.
           </p>
           {/* Le rechargement remet l'application sur l'onglet d'accueil : sans cela, l'écran qui vient
               de planter serait rouvert aussitôt et l'erreur réapparaîtrait, donnant l'impression que le
@@ -40,37 +35,7 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-// Pont : expose le jeton de session Clerk a App.jsx, qui le joint aux appels
-// du relais IA (/api/claude). Le relais le verifie cote serveur.
-function ClerkTokenBridge() {
-  const { getToken } = useAuth();
-  React.useEffect(() => {
-    window.__getClerkToken = getToken;
-    return () => {
-      window.__getClerkToken = null;
-    };
-  }, [getToken]);
-  return null;
-}
-
-function Root() {
-  // Sans cle Clerk configuree (dev local rapide), l'app s'affiche sans protection.
-  // En production, definissez VITE_CLERK_PUBLISHABLE_KEY : l'acces devient prive.
-  if (!CLERK_KEY) return <ErrorBoundary><App /></ErrorBoundary>;
-  return (
-    <ClerkProvider publishableKey={CLERK_KEY} afterSignOutUrl="/">
-      <SignedIn>
-        <ClerkTokenBridge />
-        <ErrorBoundary><App /></ErrorBoundary>
-      </SignedIn>
-      <SignedOut>
-        <RedirectToSignIn />
-      </SignedOut>
-    </ClerkProvider>
-  );
-}
-
-ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
+ReactDOM.createRoot(document.getElementById("root")).render(<ErrorBoundary><App /></ErrorBoundary>);
 
 // PWA : enregistrement du service worker (app-shell en cache, lancement rapide, mode hors-ligne de
 // secours, installation sur l'écran d'accueil). Sans effet en développement local sans HTTPS.

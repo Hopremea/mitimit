@@ -1,5 +1,42 @@
 # MITMIT, cockpit PEN'UP 3D
 
+> **Mis en réserve depuis septembre 2026 — tous les connecteurs sont débranchés.**
+>
+> L'outil actif est l'application B2B PEN'UP 3D : <https://penup-3d-b2b.vercel.app/>. Ce dépôt est
+> conservé tel quel, en lecture, pour ne pas perdre le code. Il ne parle plus à aucun service tiers :
+> plus de fonctions serveur (`api/` retiré), plus de Clerk, plus d'Anthropic, plus de Supabase, plus de
+> Gmail, Shopify, Qonto, OpenRouteService ni La Poste. L'application se déploie comme un site statique
+> et fonctionne en « local pur » : les données restent dans le navigateur qui les a saisies.
+>
+> Ce qui reste appelé, gratuitement et sans compte : Google Fonts, et les API publiques françaises
+> (`recherche-entreprises.api.gouv.fr`, `api-adresse.data.gouv.fr`, `geo.api.gouv.fr`), OSRM et
+> Photon pour la carte.
+>
+> **Pour ramener le coût à zéro, il reste des actions hors dépôt** (aucune n'est faisable depuis le
+> code) — dans cet ordre :
+>
+> 1. **Exporter les données d'abord**, si ce n'est pas déjà fait : bouton « Sauvegarde » de la barre
+>    du haut (le cache local du navigateur contient l'état complet), ou directement en base :
+>    `select data from public.cockpit_state where id = 'shared';` — et les instantanés
+>    `snapshot:AAAA-MM-JJ` si l'historique compte. Ne supprimez rien avant d'avoir ce fichier.
+> 2. **Vercel** (projet `mitimit`) : Settings → Environment Variables → supprimer les 21 variables ;
+>    Settings → Domains → détacher `commande.penup3d.com` (et retirer le CNAME chez le registrar) ;
+>    Settings → Deployment Protection → activer **Vercel Authentication** (gratuit) pour que le site,
+>    désormais sans écran de connexion, ne soit pas ouvert à tous ; si le projet est sur un plan
+>    payant, le ramener sur Hobby.
+> 3. **Supabase** : mettre le projet en pause (gratuit) ou le supprimer **après** l'étape 1.
+> 4. **Clerk** : supprimer l'application MITMIT (ou la laisser sur le plan gratuit).
+> 5. **Anthropic** : révoquer la clé API dédiée à MITMIT.
+> 6. **Google Cloud** : révoquer le *refresh token* Gmail et retirer l'URL de rappel
+>    `https://mitimit.vercel.app/api/auth/google/callback` de l'app OAuth.
+> 7. **Shopify** : désinstaller l'app personnalisée de lecture du stock.
+> 8. **Qonto**, **OpenRouteService**, **La Poste** : révoquer les clés.
+>
+> La version branchée reste consultable : `git checkout ef819fc` (dernier commit branché, PR #494).
+> Pour lui donner un nom durable : `git tag -a avant-debranchement ef819fc && git push origin avant-debranchement`.
+>
+> Les sections qui suivent décrivent **cette version-là** et ne s'appliquent plus à l'état actuel du dépôt.
+
 Application React (Vite) du cockpit commercial PEN'UP 3D, prête à déployer sur Vercel,
 accès privé via Clerk, et fonctions IA branchées sur un relais serveur (clé Anthropic protégée).
 
