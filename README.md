@@ -7,10 +7,13 @@ accès privé via Clerk, et fonctions IA branchées sur un relais serveur (clé 
 
 Honnêteté sur l'architecture, pour éviter les mauvaises surprises :
 
-1. Les données (comptes, contacts, devis, calculs) sont stockées dans le `localStorage`
-   du navigateur. Chaque navigateur a donc ses propres données. Ce n'est pas une base
-   partagée : deux personnes sur deux postes ne voient pas les mêmes données. Pour un vrai
-   multi-utilisateur synchronisé, il faudra une base de données et une API (chantier à part).
+1. Les données (comptes, contacts, devis, calculs) vivent dans une **base partagée Supabase**
+   (table `cockpit_state`) ; le navigateur n'en garde qu'un cache local (IndexedDB, repli
+   `localStorage`). Tous les postes connectés voient donc les mêmes données, et une écriture
+   protégée par curseur fusionne les modifications concurrentes : un appareil resté sur un
+   état ancien ne peut pas écraser le travail d'un autre. Sans les variables Supabase, l'app
+   retombe sur un fonctionnement mono-poste, sans synchronisation.
+   Pour passer d'un ordinateur à l'autre, voir **[TRANSFERT.md](TRANSFERT.md)**.
 2. Clerk protège l'accès à l'écran (qui peut ouvrir l'app). Le relais IA `/api/claude`
    est protégé séparément, côté serveur, par vérification du jeton Clerk (voir variables).
 3. Le bundle JavaScript public contient les données de démonstration (Cultura, King Jouet, etc.)
